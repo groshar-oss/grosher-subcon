@@ -277,3 +277,10 @@ table.gt th.grp{text-align:center;color:var(--ink);font-size:12.5px;border-botto
 table.gt th[rowspan]{vertical-align:bottom}
 table.gt .gs{border-inline-start:2px solid var(--line2)}
 @media (max-width:760px){.tw tbody td:first-child:not(:has(input,button,select)){min-width:120px}}
+/* טלפון: עמודות ורשתות לא מתרחבות מעבר למסך בגלל טבלה רחבה בתוכן (הטבלה נגללת בתוך המסגרת שלה) */
+.cols>*,.kpis>*,.grid>*{min-width:0}
+@media (max-width:760px){
+  .ptabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-inline:-4px;padding:2px 4px 6px}
+  .ptabs::-webkit-scrollbar{display:none}
+  .ptabs a{flex:0 0 auto;padding:8px 14px;font-size:14px}
+}

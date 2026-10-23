@@ -218,6 +218,7 @@ export async function render() {
   root.replaceChildren(shell(view, title));
   wireShell();
   view.dispatchEvent(new Event('mounted'));
+  document.querySelector('.ptabs a.on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
 
 function renderLogin() {
