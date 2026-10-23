@@ -1,5 +1,5 @@
 // מסך בית: מה דורש טיפול, לכל הפרויקטים של הלקוח
-import { h, esc, money, pct, $ } from '../util.js';
+import { h, esc, money, pct, $, plainMoney } from '../util.js';
 import { S, can, loadTenantData, modeSwitch, tenant, render, settings } from '../app.js';
 import { portfolio, VO_AT_RISK, VO_STATUS } from '../calc.js';
 import { projData, summarize, level, levelColor, levelBg, STATUS, CONTRACT, modeLine } from './common.js';
@@ -102,14 +102,14 @@ function buildActions(data, sums) {
   for (const g of (data.guarantees || [])) { const s = guaranteeState(g, today); if (s === 'expired' || s === 'soon') out.push({ w: s === 'expired' ? 72 : 56, color: s === 'expired' ? 'var(--ri)' : '#ff9f43', title: `ערבות ${GUAR_KINDS[g.kind]} ${s === 'expired' ? 'פגה' : `פגה בעוד ${daysLeft(g.expiry, today)} ימים`}`, sub: `${data.projects.find(p => p.id === g.project_id)?.name || ''} · ${g.bank || ''} ${g.number || ''} · להאריך או לבקש החזרה`, amt: money(g.amount), href: '#/vendors/guarantees' }); }
   for (const { p, s } of sums) if (p.status === 'closing' || (p.end_date && p.end_date < today)) {
     const fb = finalBill(p, s.billing.retentionTotal);
-    if (!data.bills.some(b => b.project_id === p.id && b.is_final)) out.push({ w: 46, color: '#2f5bea', title: fb.ready ? 'אפשר להגיש חשבון סופי' : 'לקראת חשבון סופי', sub: `${p.name} · ${fb.ready ? `עיכבון לשחרור ${money(fb.toRelease)}` : 'חסר: ' + fb.missing.join(', ')}`, amt: '', href: `#/project/${p.id}/bills` });
+    if (!data.bills.some(b => b.project_id === p.id && b.is_final)) out.push({ w: 46, color: '#2f5bea', title: fb.ready ? 'אפשר להגיש חשבון סופי' : 'לקראת חשבון סופי', sub: `${p.name} · ${fb.ready ? `עיכבון לשחרור ${plainMoney(fb.toRelease)}` : 'חסר: ' + fb.missing.join(', ')}`, amt: '', href: `#/project/${p.id}/bills` });
   }
   // תזרים: יתרה צפויה מתחת למינימום ב-6 החודשים הקרובים
   if (sums.length) {
     const cf = cashflow(sums.map(({ p, s }) => ({ project: p, summary: s, pd: projData(data, p.id) })), { settings: settings(), back: 0, ahead: 6 });
     const b = cf.belowMonths;
     if (b.length) { const low = b.reduce((a, x) => (x.cum < a.cum ? x : a), b[0]);
-      out.push({ w: 99, color: 'var(--ri)', title: `תזרים: היתרה יורדת מתחת למינימום ב${monthLabel(b[0].m)}`, sub: `${b.length} חודשים מתחת ל-${money(cf.settings.cash_min)} · הנמוך ב${monthLabel(low.m)}`, amt: money(low.cum), href: '#/cashflow' }); }
+      out.push({ w: 99, color: 'var(--ri)', title: `תזרים: היתרה יורדת מתחת למינימום ב${monthLabel(b[0].m)}`, sub: `${b.length} חודשים מתחת ל-${plainMoney(cf.settings.cash_min)} · הנמוך ב${monthLabel(low.m)}`, amt: money(low.cum), href: '#/cashflow' }); }
   }
   return out.sort((a, b) => b.w - a.w);
 }
