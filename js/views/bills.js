@@ -301,7 +301,7 @@ export async function viewCollection() {
   const soon = open.filter(x => x.r.due >= today && (new Date(x.r.due) - new Date(today)) / 864e5 <= 30);
   const sum = xs => xs.reduce((a, x) => a + x.r.outstanding, 0);
   const notSubmitted = all.filter(x => x.r.bill.status === 'draft');
-  const el = h(`<div><div class="top"><div><h1>חשבונות וגבייה</h1><div class="sub">כל החשבונות החלקיים שהוגשו לקבלנים הראשיים · סכומים כולל מע"מ</div></div></div>
+  const el = h(`<div><div class="top"><div><h1>חשבונות וגבייה</h1><div class="sub">כל החשבונות החלקיים שהוגשו לקבלנים הראשיים · סכומים כולל מע"מ</div><div class="small mut" style="margin-top:4px">חשבון חדש פותחים בתוך הפרויקט: פרויקטים > הפרויקט > לשונית "חשבונות" > "+ חשבון חלקי"</div></div></div>
     <div class="kpis"><div class="kpi"><div class="l">יתרה לגבייה</div><div class="v">${money(sum(open))}</div><div class="n">${open.length} חשבונות</div></div>
       <div class="kpi"><div class="l">באיחור</div><div class="v ${overdue.length ? 'neg' : 'pos'}">${money(sum(overdue))}</div><div class="n">${overdue.length} חשבונות</div></div>
       <div class="kpi"><div class="l">צפוי ב-30 יום</div><div class="v">${money(sum(soon))}</div><div class="n">${soon.length} חשבונות</div></div>

@@ -15,6 +15,8 @@ import { viewReports } from './views/reports.js';
 import { viewVendors, viewContacts } from './views/vendors.js';
 import { flushOutbox } from './views/worklog.js';
 import { viewInbox } from './views/inbox.js';
+import { viewPayables } from './views/payables.js';
+import { helpBtn, guidePage } from './guide.js';
 
 export const S = { user: null, ctx: null, tenants: [], tenantId: null, role: null, mode: 'approved' };
 
@@ -84,12 +86,14 @@ const NAV = () => [
   ['#/inbox', '⇪', 'תיבת מסמכים', can.expense()],
   ['#/workers', '☺', 'עובדים ונוכחות', can.workers()],
   ['#/collection', '₪', 'חשבונות וגבייה', can.prices()],
+  ['#/payables', '⇄', 'תשלומים לספקים', can.expense()],
   ['#/cashflow', '≋', 'תזרים מזומנים', can.prices()],
   ['#/reports', '▦', 'דוחות', can.prices()],
   ['#/vendors', '▣', 'ספקים, מסמכים וערבויות', can.prices()],
   ['#/contacts', '☏', 'ספר טלפונים', !!S.tenantId],
   ['#/clients', '◎', 'לקוחות (קבלני משנה)', can.admin()],
   ['#/client/' + S.tenantId, '⚙', 'הגדרות לקוח ומשתמשים', S.tenantId && can.edit()],
+  ['#/guide', '?', 'איך עובדים', can.prices()],
   ['#/settings', '☼', 'תצוגה ומצב', true]
 ].filter(x => x[3]);
 
@@ -152,6 +156,8 @@ export async function render() {
     else if (route === 'projects') { view = await viewProjects(); title = 'פרויקטים'; }
     else if (route === 'project') { view = await viewProject(a, b || 'control', c); title = b === 'day' ? 'יומן עבודה' : b === 'bill' ? 'חשבון חלקי' : 'פרויקט'; }
     else if (route === 'inbox') { view = await viewInbox(); title = 'תיבת מסמכים'; }
+    else if (route === 'payables') { view = await viewPayables(a || 'open'); title = 'תשלומים לספקים'; }
+    else if (route === 'guide') { view = h(guidePage()); title = 'איך עובדים'; }
     else if (route === 'collection') { view = await viewCollection(); title = 'חשבונות וגבייה'; }
     else if (route === 'vendors') { view = await viewVendors(a || 'list'); title = 'ספקים ומסמכים'; }
     else if (route === 'contacts') { view = await viewContacts(); title = 'ספר טלפונים'; }
@@ -167,6 +173,10 @@ export async function render() {
     view = h(`<div class="card"><h2>משהו השתבש</h2><p class="neg">${esc(e.message)}</p></div>`);
   }
   if (seq !== renderSeq) return;
+  // כפתור "?" ליד כותרת המסך
+  const hk = !route ? 'home' : route === 'project' ? (b && !['day', 'bill', 'field'].includes(b) ? 'p-' + b : !b ? 'p-control' : '') : route;
+  const h1 = view.querySelector?.('.top h1');
+  if (h1 && hk && !h1.querySelector('.helpb') && can.prices()) h1.insertAdjacentHTML('beforeend', ' ' + helpBtn(hk));
   root.replaceChildren(shell(view, title));
   wireShell();
   view.dispatchEvent(new Event('mounted'));

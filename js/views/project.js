@@ -13,6 +13,7 @@ import { tabPurchase } from './purchase.js';
 import { tabBills, billView } from './bills.js';
 import { tabCashflow } from './cashflow.js';
 import { viewInbox } from './inbox.js';
+import { projectSteps, stepsCard } from '../guide.js';
 
 const TABS = [['control', 'בקרה ורווחיות'], ['boq', 'כתב כמויות'], ['costing', 'תמחיר'], ['quota', 'מכסות'], ['vo', 'הוראות שינוי'], ['worklog', 'יומן עבודה'], ['purchase', 'רכש'], ['expenses', 'הוצאות'], ['bills', 'חשבונות'], ['cashflow', 'תזרים'], ['docs', 'מסמכים'], ['log', 'יומן שינויים'], ['settings', 'הגדרות פרויקט']];
 
@@ -45,7 +46,7 @@ export async function viewProject(id, tab, extra) {
 // ===== בקרה ורווחיות =====
 function tabControl(P) {
   const s = P.summary, t = s.total;
-  const el = h(`<div>
+  const el = h(`<div>${stepsCard(projectSteps(P.pd, { workers: P.data.workers }))}
     <div class="actions" style="margin-bottom:12px" id="mb"><span class="mut small">תצוגת רווחיות:</span></div>
     <div class="kpis">
       <div class="kpi"><div class="l">מכירה</div><div class="v">${money(t.sale)}</div><div class="n">חוזה ${money(s.contract.sale)}${S.mode !== 'contract' ? ` · הוראות שינוי ${money(t.sale - s.contract.sale)}` : ''}</div></div>
