@@ -56,7 +56,7 @@ export function cashflow(projects, opts = {}) {
     const bills = billing.order.map(id => billing.byBill[id]).filter(r => r.bill.status !== 'draft');
     for (const r of bills) {
       for (const p of r.payments || []) put(mkey(p.pay_date), 'in_paid', n(p.amount) / (1 + vat), true, `תקבול חשבון ${r.bill.number}`, P.id);
-      if (r.due) { const dm = mkey(r.due); if (M[dm] && dm < cur) M[dm].schedIn += r.totalWithVat; }
+      if (r.due) { const dm = mkey(r.due); if (M[dm] && dm < cur) M[dm].schedIn += r.expectedWithVat ?? r.totalWithVat; }
       if (r.outstanding > 1) put(addMonths(notPast(mkey(r.due || today)), delay), 'in_billed', r.outstanding / (1 + vat), true, `חשבון ${r.bill.number}${r.due && r.due < today ? ' (באיחור)' : ''}`, P.id);
     }
     // חשבונות עתידיים: יתרת המכירה (חוזה + הוראות שינוי מאושרות) מתחלקת עד סוף הפרויקט; הגשה בחודש שאחרי, תשלום בשוטף+X

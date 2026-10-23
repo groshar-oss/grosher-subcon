@@ -2,7 +2,7 @@
 import { h, esc, $, $$, modal, field, select, toast, money, num, pct, fmtDate, nullIfEmpty, numOrNull, confirmBox } from '../util.js';
 import { db } from '../db.js';
 import { S, can, render, logChange, settings, loadTenantData } from '../app.js';
-import { n, itemSale, VO_APPROVED } from '../calc.js';
+import { n, itemSale, VO_APPROVED, VO_STATUS } from '../calc.js';
 import { BILL_STATUS, BILL_APPROVED, FINE_STATUS, fineStatus, CUT_REASONS, isMeasure, cumAmount, dueDate, collection, progressFromBills, computeBills } from '../bills.js';
 import { projData, summarize } from './common.js';
 import { loadXLSX } from '../import.js';
@@ -21,7 +21,10 @@ const statusChip = (r, today = todayStr()) => {
 };
 
 // פריטים שנכנסים לחשבון: סעיפי חוזה + סעיפי הוראות שינוי מאושרות
-const billableItems = P => { const vo = Object.fromEntries(P.pd.variations.map(v => [v.id, v])); return P.pd.items.filter(i => !i.variation_id || VO_APPROVED.includes(vo[i.variation_id]?.status)); };
+// סעיפים בחשבון: חוזה, הוראות שינוי מאושרות, ואחריהן הוראות שינוי שטרם אושרו (לאישור). הוראות שנדחו לא נכנסות
+const voGrp = (i, vo) => !i.variation_id ? 0 : VO_APPROVED.includes(vo[i.variation_id]?.status) ? 1 : 2;
+const billableItems = P => { const vo = Object.fromEntries(P.pd.variations.map(v => [v.id, v]));
+  return P.pd.items.filter(i => !i.variation_id || (vo[i.variation_id] && vo[i.variation_id].status !== 'rejected')).map((i, k) => [i, k]).sort((a, b) => voGrp(a[0], vo) - voGrp(b[0], vo) || a[1] - b[1]).map(x => x[0]); };
 
 // ===== לשונית חשבונות בפרויקט =====
 export function tabBills(P) {
@@ -89,7 +92,7 @@ async function newBill(P, final = false) {
   const end = new Date(); end.setDate(0);
   const [b] = await db.insert('bills', { tenant_id: S.tenantId, project_id: P.id, number, status: 'draft', bill_date: todayStr(), period_to: final ? (P.project.completion_date || todayStr()) : end.toISOString().slice(0, 10), offsets: 0, is_final: final });
   // שורה לכל סעיף שאפשר לחייב, מתחילה מהמצטבר הקודם (נוכחי 0)
-  await db.insert('bill_lines', billableItems(P).map(it => ({ tenant_id: S.tenantId, project_id: P.id, bill_id: b.id, boq_item_id: it.id, cum_qty_sub: B.cumByItem[it.id] ?? 0, cum_qty_app: null })));
+  await db.insert('bill_lines', billableItems(P).map(it => ({ tenant_id: S.tenantId, project_id: P.id, bill_id: b.id, boq_item_id: it.id, cum_qty_sub: (it.variation_id && !VO_APPROVED.includes(P.pd.variations.find(v => v.id === it.variation_id)?.status) ? B.subByItem?.[it.id] : null) ?? B.cumByItem[it.id] ?? 0, cum_qty_app: null })));
   await logChange({ project_id: P.id, entity: 'bill', entity_id: b.id, label: `${final ? 'חשבון סופי' : 'חשבון חלקי'} ${number}`, field: 'חשבון חדש', new_value: 'טיוטה' });
   location.hash = `#/project/${P.id}/bill/${b.id}`;
 }
@@ -146,15 +149,15 @@ export function billView(P, billId) {
   const draw = () => {
     const r = calcNow();
     const rowBy = Object.fromEntries(r.rows.map(x => [x.item.id, x]));
-    const groups = groupBy(items, i => i.variation_id ? `הוראת שינוי ${vo[i.variation_id]?.number || ''} · ${vo[i.variation_id]?.title || ''}` : (i.chapter || 'ללא פרק'));
+    const groups = groupBy(items, i => i.variation_id ? `${voGrp(i, vo) === 2 ? 'הוראת שינוי לאישור' : 'הוראת שינוי'} ${vo[i.variation_id]?.number || ''} · ${vo[i.variation_id]?.title || ''}${voGrp(i, vo) === 2 ? ` (${VO_STATUS[vo[i.variation_id]?.status] || ''}, טרם אושרה)` : ''}` : (i.chapter || 'ללא פרק'));
     const app = showApp();
     let html = `<table><thead><tr><th>קוד</th><th>תיאור</th><th class="hide-m">יח'</th><th class="n hide-m">כמות חוזה</th><th class="n hide-m">מחיר</th><th class="n">מצטבר קודם</th><th class="n">מצטבר מוגש</th><th class="n">נוכחי</th>${app ? '<th class="n">מצטבר מאושר</th><th class="n">קיצוץ</th>' : ''}<th class="n">סכום נוכחי</th></tr></thead><tbody>`;
     for (const [g, its] of groups) {
-      html += `<tr class="sec"><td colspan="${app ? 11 : 9}">${esc(g)}</td></tr>`;
+      html += `<tr class="sec${voGrp(its[0], vo) === 2 ? ' pend' : ''}"><td colspan="${app ? 11 : 9}">${esc(g)}</td></tr>`;
       for (const it of its) {
         const x = rowBy[it.id] || {}, L = st.lines[it.id];
         const unitLbl = isMeasure(it) ? esc(it.unit || '') : '%';
-        const inp = (k, v) => edit ? `<input class="cell-in" type="number" step="any" inputmode="decimal" dir="ltr" data-i="${it.id}" data-k="${k}" value="${v ?? ''}" ${k === 'cum_qty_app' && v == null ? `placeholder="${L.cum_qty_sub ?? ''}"` : ''}>` : num(v);
+        const inp = (k, v) => edit ? `<input class="cell-in" type="number" step="any" inputmode="decimal" dir="ltr" data-i="${it.id}" data-k="${k}" value="${v ?? ''}" ${k === 'cum_qty_app' && v == null ? `placeholder="${voGrp(it, vo) === 2 ? (x.prev ?? 0) : (L.cum_qty_sub ?? '')}"` : ''}>` : num(v);
         html += `<tr class="${x.over ? 'al-r' : ''}"><td>${esc(it.code || '')}</td><td class="wrap">${esc(it.description)}${isMeasure(it) ? '' : ' <span class="chip">באחוזים</span>'}${x.over ? ' <span class="chip red">מעל כמות החוזה</span>' : ''}</td>
           <td class="hide-m">${unitLbl}</td><td class="n hide-m">${isMeasure(it) ? num(it.qty) : '100%'}</td><td class="n hide-m">${money(isMeasure(it) ? it.unit_price : itemSale(it), { unit: true })}</td>
           <td class="n">${num(x.prev ?? 0)}</td><td class="n">${inp('cum_qty_sub', L.cum_qty_sub)}</td><td class="n">${num(x.curSub ?? 0)}</td>
@@ -170,11 +173,18 @@ export function billView(P, billId) {
   };
   const drawSum = r => {
     const line = (l, v, cls = '') => `<tr class="${cls}"><td>${l}</td><td class="n">${money(v)}</td></tr>`;
-    $('#sum', el).innerHTML = `<table class="sumt">${line(r.approvedStage && r.curApp != null ? 'נוכחי מאושר' : 'נוכחי מוגש', r.base)}
+    const G = r.groups, l3 = (l, a, b, cls = '') => `<tr class="${cls}"><td>${l}</td><td class="n">${money(a)}</td><td class="n">${money(b)}</td></tr>`;
+    $('#sum', el).innerHTML = `<table class="sumt sum3"><tr><th></th><th class="n">מצטבר מוגש</th><th class="n">בחשבון זה</th></tr>
+      ${l3('הגשה לפי חוזה', G.c.cumSub, G.c.curSub)}
+      ${l3('עם הוראות שינוי מאושרות', G.c.cumSub + G.a.cumSub, G.c.curSub + G.a.curSub)}
+      ${l3('עם הוראות שינוי שטרם אושרו', G.c.cumSub + G.a.cumSub + G.p.cumSub, G.c.curSub + G.a.curSub + G.p.curSub, 'tot')}</table>
+      ${G.p.n ? `<p class="small mut">הוראות שינוי שטרם אושרו מוגשות בחשבון, אבל נספרות לגבייה ולתזרים רק אחרי שהקבלן הראשי מאשר אותן${r.approvedStage ? ' (בעמודת "מצטבר מאושר")' : ''}.</p>` : ''}
+      <table class="sumt">${line(r.approvedStage ? 'נוכחי מאושר' : 'נוכחי מוגש', r.base)}
       ${r.indexDiff ? line('הפרשי הצמדה', r.indexDiff) : ''}${line('סה"כ ברוטו', r.gross, 'tot')}
       ${line(`עיכבון ${P.project.retention_pct}%`, -r.retention)}${n(P.project.insurance_pct) ? line(`ביטוח ${P.project.insurance_pct}%`, -r.insurance) : ''}${n(P.project.shared_pct) ? line(`הוצאות משותפות ${P.project.shared_pct}%`, -r.shared) : ''}
       ${r.finesTotal ? line('קנסות', -r.finesTotal) : ''}${r.finesAppeal ? `<tr><td class="small mut">מתוכם בערעור (אם יבוטלו יוחזרו)</td><td class="n small mut">${money(r.finesAppeal)}</td></tr>` : ''}${r.offsets ? line('קיזוזים', -r.offsets) : ''}
       ${line('נטו לפני מע"מ', r.net, 'tot')}${line(`מע"מ ${settings().vat_pct}%`, r.vat)}${line('סה"כ כולל מע"מ', r.totalWithVat, 'tot')}
+      ${!r.approvedStage && r.pendSub ? `<tr><td class="small mut">צפוי להתקבל בלי הוראות שינוי שטרם אושרו (לגבייה ולתזרים)</td><td class="n small mut">${money(r.expectedWithVat)}</td></tr>` : ''}
       ${r.tax ? `<tr><td class="small mut">ניכוי מס במקור ${P.project.tax_pct}% (מוצג בנפרד)</td><td class="n small mut">${money(-r.tax)}</td></tr>` : ''}</table>
       ${r.cut > 0 && r.approvedStage ? `<p class="small neg">הפיקוח קיצץ ${money(r.cut)} מהמוגש בחשבון הזה.</p>` : ''}
       <p class="small mut">מועד תשלום: ${fmtDate(st.head.due_date || dueDate(st.head.submitted_date || st.head.bill_date, P.project.pay_terms_days))} · עיכבון מצטבר עד החשבון: ${money(r.retentionCum)}</p>`;
@@ -194,14 +204,14 @@ export function billView(P, billId) {
     const ps = P.pd.payments.filter(p => p.bill_id === billId);
     const r = calcNow();
     $('#pl', el).innerHTML = `${ps.map(p => `<div class="act"><div><b>${fmtDate(p.pay_date)}</b> · ${esc(p.method || '')}<small>${esc(p.note || '')}</small></div><span class="amt">${money(p.amount)}</span>${edit ? `<button class="btn small ghost" data-rp="${p.id}" aria-label="מחיקה">✕</button>` : ''}</div>`).join('') || '<div class="small mut">לא התקבלו תשלומים</div>'}
-      ${bill.status !== 'draft' ? `<p class="small">שולם ${money(r.paid)} מתוך ${money(r.totalWithVat)} (כולל מע"מ) · יתרה <b>${money(r.outstanding)}</b></p>` : '<p class="small mut">תקבולים נרשמים אחרי שהחשבון מוגש.</p>'}`;
+      ${bill.status !== 'draft' ? `<p class="small">שולם ${money(r.paid)} מתוך ${money(r.expectedWithVat)} (כולל מע"מ${!r.approvedStage && r.pendSub ? ', בלי הוראות שינוי שטרם אושרו' : ''}) · יתרה <b>${money(r.outstanding)}</b></p>` : '<p class="small mut">תקבולים נרשמים אחרי שהחשבון מוגש.</p>'}`;
     $$('[data-rp]', el).forEach(b => b.onclick = async () => { if (!(await confirmBox('מחיקת תקבול', 'למחוק את התקבול?', 'מחיקה', true))) return; await db.remove('bill_payments', b.dataset.rp); toast('נמחק'); render(); });
   };
   draw(); drawFines(); drawFineTotals(); drawPays();
 
   $$('.card input[name], .card select[name]', el).forEach(inp => inp.onchange = () => { st.head[inp.name] = inp.type === 'number' ? (inp.value === '' ? null : n(inp.value)) : (inp.value || null); if (inp.name === 'status') { if (!['draft', 'submitted'].includes(inp.value) && !st.head.approved_date) { st.head.approved_date = todayStr(); $('[name=approved_date]', el).value = st.head.approved_date; } if (inp.value !== 'draft' && !st.head.submitted_date) { st.head.submitted_date = todayStr(); $('[name=submitted_date]', el).value = st.head.submitted_date; } } draw(); });
   $('#addf', el)?.addEventListener('click', () => { st.fines.push({ description: '', amount: '', status: 'imposed' }); drawFines(); });
-  $('#appall', el)?.addEventListener('click', () => { for (const it of items) st.lines[it.id].cum_qty_app = st.lines[it.id].cum_qty_sub; if (st.head.status === 'draft' || st.head.status === 'submitted') { st.head.status = 'approved'; $('[name=status]', el).value = 'approved'; if (!st.head.approved_date) { st.head.approved_date = todayStr(); $('[name=approved_date]', el).value = st.head.approved_date; } } draw(); });
+  $('#appall', el)?.addEventListener('click', () => { for (const it of items) if (voGrp(it, vo) !== 2) st.lines[it.id].cum_qty_app = st.lines[it.id].cum_qty_sub; if (st.head.status === 'draft' || st.head.status === 'submitted') { st.head.status = 'approved'; $('[name=status]', el).value = 'approved'; if (!st.head.approved_date) { st.head.approved_date = todayStr(); $('[name=approved_date]', el).value = st.head.approved_date; } } draw(); });
   $('#fromlog', el)?.addEventListener('click', () => {
     const from = prevBill?.period_to || '0000-00-00', to = st.head.period_to || todayStr();
     let k = 0;
@@ -222,6 +232,8 @@ export function billView(P, billId) {
     await db.update('bills', billId, head);
     for (const it of items) {
       const L = st.lines[it.id], ex = lineOf[it.id];
+      // חשבון שאושר: הוראת שינוי שעוד לא אושרה נרשמת כמאושר 0 בחשבון הזה, כדי שאישור מאוחר לא ישנה חשבונות קודמים
+      if (BILL_APPROVED.includes(head.status) && voGrp(it, vo) === 2 && L.cum_qty_app == null) { L.cum_qty_app = prevOf[it.id] ?? 0; L.cut_reason ||= 'הוראת שינוי טרם אושרה'; }
       const row = { cum_qty_sub: numOrNull(L.cum_qty_sub), cum_qty_app: numOrNull(L.cum_qty_app), cut_reason: L.cut_reason || null };
       if (ex) { if (String(ex.cum_qty_sub ?? '') !== String(row.cum_qty_sub ?? '') || String(ex.cum_qty_app ?? '') !== String(row.cum_qty_app ?? '') || String(ex.cut_reason || '') !== String(row.cut_reason || '')) await db.update('bill_lines', ex.id, row); }
       else await db.insert('bill_lines', { tenant_id: S.tenantId, project_id: P.id, bill_id: billId, boq_item_id: it.id, ...row });
@@ -274,10 +286,16 @@ async function exportBill(P, r, items) {
   const app = r.approvedStage;
   const aoa = [[`חשבון חלקי מס' ${r.bill.number}`], [`פרויקט: ${P.project.name}`], [`לכבוד: ${mc}`], [`עד תאריך: ${r.bill.period_to || ''}`], [],
     ['קוד', 'תיאור', "יח'", 'כמות חוזה', 'מחיר', 'מצטבר קודם', 'מצטבר מוגש', 'נוכחי מוגש', ...(app ? ['מצטבר מאושר', 'קיצוץ', 'סיבת קיצוץ'] : []), 'סכום מצטבר', 'סכום קודם', 'סכום נוכחי']];
-  for (const x of r.rows) { const it = x.item;
-    aoa.push([it.code || '', it.description, isMeasure(it) ? it.unit || '' : '%', isMeasure(it) ? n(it.qty) : 100, isMeasure(it) ? n(it.unit_price) : itemSale(it), x.prev, x.cumSub, x.curSub, ...(app ? [x.cumApp ?? x.cumSub, x.cut, x.cut > 0 ? (x.line?.cut_reason || '') : ''] : []),
+  const order = { c: 0, a: 1, p: 2 };
+  for (const x of [...r.rows].sort((a, b) => order[a.grp] - order[b.grp])) { const it = x.item;
+    aoa.push([it.code || '', (x.grp === 'p' ? '(הוראת שינוי לאישור) ' : '') + it.description, isMeasure(it) ? it.unit || '' : '%', isMeasure(it) ? n(it.qty) : 100, isMeasure(it) ? n(it.unit_price) : itemSale(it), x.prev, x.cumSub, x.curSub, ...(app ? [x.cumApp ?? x.cumSub, x.cut, x.cut > 0 ? (x.line?.cut_reason || '') : ''] : []),
       Math.round(cumAmount(it, x.cumEff)), Math.round(x.prevAmt), Math.round(app && x.curAppAmt != null ? x.curAppAmt : x.curSubAmt)]); }
-  aoa.push([], ['נוכחי', '', '', '', '', '', '', '', ...(app ? ['', '', ''] : []), '', '', Math.round(r.base)]);
+  const G = r.groups;
+  aoa.push([]);
+  aoa.push(['סיכום הגשה', '', '', '', '', '', '', '', ...(app ? ['', '', ''] : []), 'מצטבר מוגש', '', 'בחשבון זה']);
+  for (const [l, a, b] of [['הגשה לפי חוזה', G.c.cumSub, G.c.curSub], ['עם הוראות שינוי מאושרות', G.c.cumSub + G.a.cumSub, G.c.curSub + G.a.curSub], ['עם הוראות שינוי שטרם אושרו', G.c.cumSub + G.a.cumSub + G.p.cumSub, G.c.curSub + G.a.curSub + G.p.curSub]])
+    aoa.push([l, '', '', '', '', '', '', '', ...(app ? ['', '', ''] : []), Math.round(a), '', Math.round(b)]);
+  aoa.push([], [app ? 'נוכחי מאושר' : 'נוכחי מוגש', '', '', '', '', '', '', '', ...(app ? ['', '', ''] : []), '', '', Math.round(r.base)]);
   const sum = [['הפרשי הצמדה', r.indexDiff], ['עיכבון', -r.retention], ['ביטוח', -r.insurance], ['הוצאות משותפות', -r.shared], ['קנסות', -r.finesTotal], ['קיזוזים', -r.offsets], ['נטו לפני מע"מ', r.net], ['מע"מ', r.vat], ['סה"כ לתשלום', r.totalWithVat]];
   for (const [l, v] of sum) if (v || l.startsWith('נטו') || l.startsWith('סה"כ')) aoa.push([l, '', '', '', '', '', '', '', ...(app ? ['', '', ''] : []), '', '', Math.round(v)]);
   const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 10 }, { wch: 40 }, { wch: 7 }, { wch: 10 }, { wch: 10 }, { wch: 11 }, { wch: 11 }, { wch: 11 }, { wch: 12 }, { wch: 10 }, { wch: 13 }, { wch: 13 }, { wch: 13 }];
@@ -308,7 +326,7 @@ export async function viewCollection() {
       <div class="kpi"><div class="l">טיוטות שלא הוגשו</div><div class="v">${notSubmitted.length}</div></div></div>
     <div class="tw"><table><thead><tr><th>פרויקט</th><th>חשבון</th><th class="hide-m">הוגש</th><th>מועד תשלום</th><th class="n">נטו + מע"מ</th><th class="n">שולם</th><th class="n">יתרה</th><th>מצב</th></tr></thead><tbody>
     ${open.map(({ p, r }) => `<tr class="click ${r.due < today ? 'al-r' : ''}" data-h="#/project/${p.id}/bill/${r.bill.id}"><td>${esc(p.name)}</td><td><b>${r.bill.number}</b> · ${BILL_STATUS[r.bill.status]}</td><td class="hide-m">${fmtDate(r.bill.submitted_date)}</td><td>${fmtDate(r.due)}</td>
-      <td class="n">${money(r.totalWithVat)}</td><td class="n">${money(r.paid)}</td><td class="n"><b>${money(r.outstanding)}</b></td><td>${statusChip(r, today)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">אין חשבונות פתוחים לגבייה</td></tr>'}
+      <td class="n">${money(r.expectedWithVat)}</td><td class="n">${money(r.paid)}</td><td class="n"><b>${money(r.outstanding)}</b></td><td>${statusChip(r, today)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">אין חשבונות פתוחים לגבייה</td></tr>'}
     </tbody></table></div><p class="small mut">מועד תשלום מחושב משוטף+X של הפרויקט (סוף חודש ההגשה + X ימים), אלא אם הוזן מועד אחר בחשבון.</p></div>`);
   $$('[data-h]', el).forEach(tr => tr.onclick = () => location.hash = tr.dataset.h);
   return el;

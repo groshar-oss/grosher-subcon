@@ -33,7 +33,10 @@ export function computeBills({ project, items, variations = [], bills, lines, fi
   const sorted = [...bills].sort((a, b) => n(a.number) - n(b.number));
   const itemById = Object.fromEntries(items.map(i => [i.id, i]));
   const voById = Object.fromEntries(variations.map(v => [v.id, v]));
-  const prevCum = {}; // itemId -> מצטבר קודם
+  const prevCum = {}; // itemId -> מצטבר קודם (מאושר)
+  const subCum = {}; // itemId -> מצטבר שהוגש בחשבון האחרון
+  // קבוצת סעיף: c = חוזה, a = הוראת שינוי מאושרת, p = הוראת שינוי שטרם אושרה (מוגשת, לא נספרת לתשלום עד האישור)
+  const grpOf = it => !it.variation_id ? 'c' : VO_APPROVED.includes(voById[it.variation_id]?.status) ? 'a' : 'p';
   let retentionSoFar = 0, prevGrossApproved = 0;
   const out = {};
   for (const b of sorted) {
@@ -43,13 +46,15 @@ export function computeBills({ project, items, variations = [], bills, lines, fi
     const seen = new Set();
     for (const l of bl) {
       const it = itemById[l.boq_item_id]; if (!it) continue;
+      if (it.variation_id && voById[it.variation_id]?.status === 'rejected') continue;
+      const grp = grpOf(it);
       seen.add(it.id);
       const prev = prevCum[it.id] || 0;
       const cumSub = l.cum_qty_sub == null || l.cum_qty_sub === '' ? prev : n(l.cum_qty_sub);
       const cumApp = l.cum_qty_app == null || l.cum_qty_app === '' ? null : n(l.cum_qty_app);
-      const cumEff = approvedStage ? (cumApp ?? cumSub) : cumSub;
+      const cumEff = grp === 'p' ? (approvedStage && cumApp != null ? cumApp : prev) : approvedStage ? (cumApp ?? cumSub) : cumSub;
       const contractQty = isMeasure(it) ? n(it.qty) : 100;
-      rows.push({ item: it, line: l, vo: it.variation_id ? voById[it.variation_id] : null, prev, cumSub, cumApp, cumEff,
+      rows.push({ item: it, line: l, grp, vo: it.variation_id ? voById[it.variation_id] : null, prev, cumSub, cumApp, cumEff,
         curSub: cumSub - prev, curApp: cumApp == null ? null : cumApp - prev, cut: cumApp == null ? 0 : cumSub - cumApp,
         prevAmt: cumAmount(it, prev), cumSubAmt: cumAmount(it, cumSub), cumAppAmt: cumApp == null ? null : cumAmount(it, cumApp),
         curSubAmt: cumAmount(it, cumSub) - cumAmount(it, prev), curAppAmt: cumApp == null ? null : cumAmount(it, cumApp) - cumAmount(it, prev),
@@ -59,45 +64,58 @@ export function computeBills({ project, items, variations = [], bills, lines, fi
     // סעיפים שלא הופיעו בחשבון ממשיכים עם המצטבר הקודם (נוכחי 0)
     for (const [id, prev] of Object.entries(prevCum)) if (!seen.has(id) && itemById[id]) {
       const it = itemById[id];
-      rows.push({ item: it, line: null, vo: it.variation_id ? voById[it.variation_id] : null, prev, cumSub: prev, cumApp: prev, cumEff: prev, curSub: 0, curApp: 0, cut: 0,
+      if (it.variation_id && voById[it.variation_id]?.status === 'rejected') continue;
+      rows.push({ item: it, line: null, grp: grpOf(it), vo: it.variation_id ? voById[it.variation_id] : null, prev, cumSub: prev, cumApp: prev, cumEff: prev, curSub: 0, curApp: 0, cut: 0,
         prevAmt: cumAmount(it, prev), cumSubAmt: cumAmount(it, prev), cumAppAmt: cumAmount(it, prev), curSubAmt: 0, curAppAmt: 0, cutAmt: 0, over: false, pctDone: 0, carried: true });
     }
     const sumK = k => rows.reduce((a, r) => a + n(r[k]), 0);
     const curSub = sumK('curSubAmt');
     const hasApp = rows.some(r => r.curAppAmt != null);
-    const curApp = hasApp ? rows.reduce((a, r) => a + (r.curAppAmt ?? r.curSubAmt), 0) : null;
-    const base = approvedStage && curApp != null ? curApp : curSub;
-    // הצמדה: הפרש על הנוכחי לפי מדד החשבון מול מדד הבסיס
-    const indexDiff = P.indexation && n(P.base_index) > 0 && n(b.index_value) > 0 ? base * (n(b.index_value) / n(P.base_index) - 1) : 0;
-    const gross = base + indexDiff;
-    let retention = gross * n(P.retention_pct) / 100;
-    if (P.retention_cap != null && P.retention_cap !== '' && n(P.retention_cap) > 0) retention = Math.max(0, Math.min(retention, n(P.retention_cap) - retentionSoFar));
-    const insurance = gross * n(P.insurance_pct) / 100;
-    const shared = gross * n(P.shared_pct) / 100;
+    const curApp = hasApp ? rows.reduce((a, r) => a + (r.curAppAmt ?? (r.grp === 'p' ? 0 : r.curSubAmt)), 0) : null;
+    const appSum = rows.reduce((a, r) => a + (r.curAppAmt ?? (r.grp === 'p' ? 0 : r.curSubAmt)), 0);
+    const pendSub = rows.filter(r => r.grp === 'p').reduce((a, r) => a + n(r.curSubAmt), 0);
+    // הסכום שבחשבון: מה שהוגש (כולל הוראות שינוי לאישור), ואחרי אישור: מה שאושר
+    const base = approvedStage ? appSum : curSub;
+    // הסכום שצפוי להתקבל: בלי הוראות שינוי שטרם אושרו (לגבייה ולתזרים)
+    const firmBase = approvedStage ? appSum : curSub - pendSub;
+    const chain = amt => {
+      const indexDiff = P.indexation && n(P.base_index) > 0 && n(b.index_value) > 0 ? amt * (n(b.index_value) / n(P.base_index) - 1) : 0;
+      const gross = amt + indexDiff;
+      let retention = gross * n(P.retention_pct) / 100;
+      if (P.retention_cap != null && P.retention_cap !== '' && n(P.retention_cap) > 0) retention = Math.max(0, Math.min(retention, n(P.retention_cap) - retentionSoFar));
+      const insurance = gross * n(P.insurance_pct) / 100;
+      const shared = gross * n(P.shared_pct) / 100;
+      const net = gross - retention - insurance - shared - finesTotal - offsets;
+      const tax = Math.max(0, net) * n(P.tax_pct) / 100;
+      const vat = net * n(vatPct) / 100;
+      return { indexDiff, gross, retention, insurance, shared, net, tax, payable: net - tax, vat, totalWithVat: net + vat };
+    };
     const bf = fines.filter(f => f.bill_id === b.id);
     const finesTotal = bf.filter(f => fineStatus(f) !== 'cancelled').reduce((a, f) => a + n(f.amount), 0);
     const finesAppeal = bf.filter(f => fineStatus(f) === 'appeal').reduce((a, f) => a + n(f.amount), 0);
     const offsets = n(b.offsets);
-    const net = gross - retention - insurance - shared - finesTotal - offsets;
-    const tax = Math.max(0, net) * n(P.tax_pct) / 100;
-    const vat = net * n(vatPct) / 100;
+    const doc = chain(base), firm = chain(firmBase);
+    const { indexDiff, gross, retention, insurance, shared, net, tax, vat } = doc;
+    // סיכום לפי סוג: חוזה / הוראות שינוי מאושרות / שטרם אושרו (מצטבר מוגש ונוכחי מוגש)
+    const groups = {}; for (const g of ['c', 'a', 'p']) { const rs = rows.filter(r => r.grp === g); groups[g] = { cumSub: rs.reduce((a, r) => a + n(r.cumSubAmt), 0), curSub: rs.reduce((a, r) => a + n(r.curSubAmt), 0), n: rs.length }; }
     const res = {
       bill: b, rows, approvedStage, curSub, curApp, base, cut: rows.reduce((a, r) => a + n(r.cutAmt), 0),
       cumSubTotal: sumK('cumSubAmt'), cumEffTotal: rows.reduce((a, r) => a + cumAmount(r.item, r.cumEff), 0), prevTotal: sumK('prevAmt'),
       indexDiff, gross, retention, insurance, shared, fines: bf, finesTotal, finesAppeal, offsets, net, tax, payable: net - tax, vat, totalWithVat: net + vat,
-      retentionCum: retentionSoFar + retention, overItems: rows.filter(r => r.over)
+      firm, firmBase, pendSub, expectedWithVat: firm.totalWithVat, groups,
+      retentionCum: retentionSoFar + firm.retention, overItems: rows.filter(r => r.over)
     };
     res.due = b.due_date || dueDate(b.submitted_date || b.bill_date, P.pay_terms_days);
     res.payments = payments.filter(x => x.bill_id === b.id);
     res.paid = res.payments.reduce((a, x) => a + n(x.amount), 0);
-    res.outstanding = b.status === 'draft' ? 0 : Math.max(0, r2(net + vat - res.paid));
+    res.outstanding = b.status === 'draft' ? 0 : Math.max(0, r2(firm.totalWithVat - res.paid));
     out[b.id] = res;
-    retentionSoFar += retention;
+    retentionSoFar += firm.retention;
     // המצטבר הבא מתחיל מהמצטבר האפקטיבי של החשבון הזה
-    for (const r of rows) prevCum[r.item.id] = r.cumEff;
-    if (b.status !== 'draft') prevGrossApproved += base;
+    for (const r of rows) { prevCum[r.item.id] = r.cumEff; subCum[r.item.id] = r.cumSub; }
+    if (b.status !== 'draft') prevGrossApproved += firmBase;
   }
-  return { byBill: out, order: sorted.map(b => b.id), retentionTotal: retentionSoFar, cumByItem: prevCum, billedTotal: prevGrossApproved };
+  return { byBill: out, order: sorted.map(b => b.id), retentionTotal: retentionSoFar, cumByItem: prevCum, subByItem: subCum, billedTotal: prevGrossApproved };
 }
 
 // גבייה: חשבונות שהוגשו ולא שולמו במלואם, ומה באיחור

@@ -284,3 +284,8 @@ table.gt .gs{border-inline-start:2px solid var(--line2)}
   .ptabs::-webkit-scrollbar{display:none}
   .ptabs a{flex:0 0 auto;padding:8px 14px;font-size:14px}
 }
+/* חשבון: פרק הוראות שינוי לאישור, וסיכום שלוש שורות */
+tr.sec.pend td{background:#fff4e0;color:#8a5a00}
+:root[data-theme=dark] tr.sec.pend td{background:#3a2c12;color:#ffcf7a}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) tr.sec.pend td{background:#3a2c12;color:#ffcf7a}}
+.sumt.sum3{margin-bottom:10px}.sumt.sum3 th{background:none;position:static;padding:4px;font-weight:600}
