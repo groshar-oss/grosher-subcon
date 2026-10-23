@@ -4,7 +4,7 @@ import { store } from './util.js';
 import { demoData } from './demo.js';
 
 const LOCAL_KEY = 'grosher-subcon-demo-v5';
-const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+export const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
   const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
 
 const TABLES = ['tenants', 'memberships', 'main_contractors', 'projects', 'variations', 'boq_items', 'cost_lines', 'expenses', 'change_log', 'members_demo',
@@ -205,7 +205,7 @@ class CloudDB {
     const arr = Array.isArray(rows) ? rows : [rows];
     const out = [];
     for (let i = 0; i < arr.length; i += 500) {
-      const { data, error } = await this.sb.from(table).insert(arr.slice(i, i + 500)).select();
+      const { data, error } = await this.sb.from(table).insert(arr.slice(i, i + 500), { defaultToNull: false }).select();
       if (error) throw dbErr(error);
       out.push(...data);
     }
