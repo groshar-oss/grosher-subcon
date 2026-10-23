@@ -254,3 +254,17 @@ tr.dim>td{opacity:.55}
 /* תשלומים לספקים */
 .paybar{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--navy);color:#fff;border-radius:10px;padding:8px 12px;margin-bottom:10px}
 .paybar .btn.ghost{background:transparent;color:#fff;border-color:rgba(255,255,255,.5)}
+/* תפריט צד: כללי / פרויקט פתוח / ניהול */
+.nsec{font-size:11px;color:#7f90c4;margin:12px 12px 6px;letter-spacing:.3px}
+.pbox{display:flex;gap:6px;align-items:center;background:var(--navy2);border-radius:10px;padding:6px 8px;margin-bottom:6px;border:1px solid rgba(255,255,255,.08)}
+.pbox select{flex:1;min-width:0;background:transparent;border:0;color:#fff;font-weight:700;font-size:14px;padding:2px 0}
+.pbox select option{color:#000}
+.pbox button{background:none;border:0;color:#9fb0e0;cursor:pointer;font-size:14px;padding:2px 6px;border-radius:6px}
+.pbox button:hover{background:rgba(255,255,255,.1);color:#fff}
+.pnav a{padding:7px 12px;font-size:13.5px}
+.pnav .badge{margin-inline-start:auto}
+.nadm{margin-top:12px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px}
+.nadm summary{cursor:pointer;font-size:11px;color:#7f90c4;padding:8px 12px;list-style:none}
+.nadm summary::-webkit-details-marker{display:none}
+.nadm summary::before{content:'▸ '}.nadm[open] summary::before{content:'▾ '}
+@media (min-width:761px){.ptabs{display:none}}

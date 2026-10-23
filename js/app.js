@@ -48,6 +48,7 @@ export function modeSwitch(onChange) {
 export async function loadTenantData(tenantId = S.tenantId) {
   const q = { eq: { tenant_id: tenantId } };
   const [projects, mcs] = await Promise.all([db.select('projects', { ...q, order: 'created_at' }), can.prices() ? db.select('main_contractors', { ...q, order: 'name' }) : []]);
+  if (tenantId === S.tenantId) S.projList = { t: tenantId, list: projects };
   // יומן עבודה: כל מי שרואה פרויקט (ההרשאות בשרת מגבילות מנהל עבודה לפרויקטים שלו)
   const [entries, days, wqty] = await Promise.all([
     db.select('work_entries', { ...q, order: ['log_date', 'created_at'] }), db.select('work_days', { ...q, order: 'log_date' }), db.select('work_qty', { ...q, order: 'log_date' })]);
@@ -80,6 +81,7 @@ export async function logChange(e) {
 }
 
 // ===== ניווט =====
+// כללי (לכל הפרויקטים) למעלה, הפרויקט הפתוח מתחת, וניהול מקופל בתחתית
 const NAV = () => [
   ['#/', '◧', 'מה דורש טיפול', true],
   ['#/projects', '▤', 'פרויקטים', true],
@@ -90,12 +92,40 @@ const NAV = () => [
   ['#/cashflow', '≋', 'תזרים מזומנים', can.prices()],
   ['#/reports', '▦', 'דוחות', can.prices()],
   ['#/vendors', '▣', 'ספקים, מסמכים וערבויות', can.prices()],
-  ['#/contacts', '☏', 'ספר טלפונים', !!S.tenantId],
+  ['#/contacts', '☏', 'ספר טלפונים', !!S.tenantId]
+].filter(x => x[3]);
+const NAV_ADMIN = () => [
   ['#/clients', '◎', 'לקוחות (קבלני משנה)', can.admin()],
   ['#/client/' + S.tenantId, '⚙', 'הגדרות לקוח ומשתמשים', S.tenantId && can.edit()],
   ['#/guide', '?', 'איך עובדים', can.prices()],
   ['#/settings', '☼', 'תצוגה ומצב', true]
 ].filter(x => x[3]);
+
+// לשוניות הפרויקט (בתפריט הצד במחשב, ובפס למעלה בטלפון)
+const PROJECT_TABS = [['control', 'בקרה ורווחיות', '◔'], ['boq', 'כתב כמויות', '☰'], ['costing', 'תמחיר', '∑'], ['quota', 'מכסות', '◫'], ['vo', 'הוראות שינוי', '±'], ['worklog', 'יומן עבודה', '✎'], ['purchase', 'רכש', '⛟'], ['expenses', 'הוצאות', '−'], ['bills', 'חשבונות', '₪'], ['cashflow', 'תזרים', '≋'], ['docs', 'מסמכים', '⇪'], ['log', 'יומן שינויים', '↺'], ['settings', 'הגדרות פרויקט', '⚙']];
+export const projectTabs = () => !can.prices() ? [['control', 'יומן עבודה', '✎']] : PROJECT_TABS.filter(([k]) => (!['costing', 'quota'].includes(k) || can.costing()) && (k !== 'log' || can.edit()) && (k !== 'docs' || can.expense()) && (k !== 'settings' || can.edit()));
+// הפרויקט הפתוח נשמר לכל לקוח, גם אחרי רענון
+const PKEY = () => 'subcon-proj-' + (S.tenantId || '');
+export const openProjectId = () => store(PKEY());
+export function setOpenProject(id) { store(PKEY(), id || null); }
+async function projList() {
+  if (!S.projList || S.projList.t !== S.tenantId) S.projList = { t: S.tenantId, list: S.tenantId ? await db.select('projects', { eq: { tenant_id: S.tenantId }, order: 'created_at' }) : [] };
+  return S.projList.list;
+}
+
+const isOn = (href, hash) => hash === href || (href !== '#/' && hash.startsWith(href + '/')) || (href !== '#/' && hash === href);
+const navLinks = (items, hash) => items.map(([href, ico, label]) => `<a href="${href}" class="${isOn(href, hash) ? 'on' : ''}"><span class="ico">${ico}</span>${label}</a>`).join('');
+function projectSection(hash, content) {
+  const pid = openProjectId(), list = S.projList?.t === S.tenantId ? S.projList.list : [];
+  const pr = list.find(p => p.id === pid); if (!pr) return '';
+  const [, route, a, b] = hash.split('/');
+  const here = route === 'project' && a === pid;
+  const cur = !here ? '' : !b ? 'control' : b === 'day' ? 'worklog' : b === 'bill' ? 'bills' : b;
+  const qo = +(content?.dataset?.qover || 0), qw = +(content?.dataset?.qwarn || 0);
+  return `<div class="nsec">פרויקט</div>
+    <div class="pbox"><select id="psel" aria-label="החלפת פרויקט">${list.map(p => `<option value="${p.id}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select><button type="button" id="pclose" title="סגירת הפרויקט" aria-label="סגירת הפרויקט">✕</button></div>
+    <nav class="nav pnav">${projectTabs().map(([k, l, ico]) => `<a href="#/project/${pid}/${k}" class="${here && cur === k ? 'on' : ''}"><span class="ico">${ico}</span>${l}${k === 'quota' && here && qo + qw ? ` <span class="badge ${qo ? 'red' : 'amber'}">${qo + qw}</span>` : ''}</a>`).join('')}</nav>`;
+}
 
 function shell(content, title) {
   const t = tenant();
@@ -108,7 +138,10 @@ function shell(content, title) {
     <aside class="side" id="side">
       <div class="brand"><img src="icons/logo-neg.png" alt=""><div><b>גרושר פרויקטים</b><span>בקרת עלויות לקבלני משנה</span></div></div>
       ${tenantBox}
-      <nav class="nav">${NAV().map(([href, ico, label]) => `<a href="${href}" class="${hash === href || (href !== '#/' && hash.startsWith(href)) ? 'on' : ''}"><span class="ico">${ico}</span>${label}</a>`).join('')}</nav>
+      <div class="nsec">כללי</div>
+      <nav class="nav">${navLinks(NAV(), hash)}</nav>
+      ${projectSection(hash, content)}
+      <details class="nadm" ${NAV_ADMIN().some(([href]) => isOn(href, hash)) ? 'open' : ''}><summary>ניהול</summary><nav class="nav">${navLinks(NAV_ADMIN(), hash)}</nav></details>
       <div class="side-foot">${esc(S.user?.email || '')}<br>${esc(roleName(S.role))}${isCloud() ? ' · <button id="logout">יציאה</button>' : ''}</div>
     </aside>
     <main class="main" id="main"></main></div>`);
@@ -126,6 +159,9 @@ function wireShell() {
   $('#mnav')?.addEventListener('click', () => $('#side').classList.toggle('open'));
   $$('#side a').forEach(a => a.addEventListener('click', () => $('#side').classList.remove('open')));
   $('#tsel')?.addEventListener('change', e => { S.tenantId = e.target.value; store('subcon-tenant', S.tenantId); refreshRole(); location.hash = '#/'; render(); });
+  $('#psel')?.addEventListener('change', e => { const [, route, a, b] = (location.hash || '#/').split('/'); const tab = route === 'project' && b && !['day', 'bill'].includes(b) ? b : 'control';
+    setOpenProject(e.target.value); location.hash = `#/project/${e.target.value}/${tab}`; });
+  $('#pclose')?.addEventListener('click', () => { const here = (location.hash || '').startsWith('#/project/'); setOpenProject(null); if (here) location.hash = '#/projects'; else render(); });
   $('#logout')?.addEventListener('click', async () => { await db.signOut(); location.reload(); });
   $('#demoRole')?.addEventListener('change', async e => { db.setRole(e.target.value); await boot(); });
   $('#demoReset')?.addEventListener('click', async () => {
@@ -150,6 +186,7 @@ export async function render() {
     return;
   }
   const [, route, a, b, c] = (location.hash || '#/').split('/');
+  if (route === 'project' && a) setOpenProject(a);
   let view, title;
   try {
     if (!route) { view = await viewHome(); title = 'מה דורש טיפול'; }
@@ -172,6 +209,7 @@ export async function render() {
     console.error(e);
     view = h(`<div class="card"><h2>משהו השתבש</h2><p class="neg">${esc(e.message)}</p></div>`);
   }
+  try { if (openProjectId()) { const l = await projList(); if (!l.some(p => p.id === openProjectId())) setOpenProject(null); } } catch { /* */ }
   if (seq !== renderSeq) return;
   // כפתור "?" ליד כותרת המסך
   const hk = !route ? 'home' : route === 'project' ? (b && !['day', 'bill', 'field'].includes(b) ? 'p-' + b : !b ? 'p-control' : '') : route;

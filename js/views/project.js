@@ -1,7 +1,7 @@
 // מסך פרויקט: לשוניות בקרה, כתב כמויות, תמחיר, הוראות שינוי, הוצאות, יומן שינויים והגדרות
 import { h, esc, $, $$, modal, field, toast, money, pct, num, area, fmtDate, confirmBox } from '../util.js';
 import { db } from '../db.js';
-import { S, can, loadTenantData, modeSwitch, render, logChange, settings } from '../app.js';
+import { S, can, loadTenantData, modeSwitch, render, logChange, settings, projectTabs } from '../app.js';
 import { n, COST_KINDS, VO_STATUS, PROFIT_MODES, itemPlanned, lineCost, EXPENSE_KINDS } from '../calc.js';
 import { STATUS, CONTRACT, projData, summarize, rowAttr, legend, modeLine } from './common.js';
 import { projectForm, projectRow } from './projects.js';
@@ -15,7 +15,6 @@ import { tabCashflow } from './cashflow.js';
 import { viewInbox } from './inbox.js';
 import { projectSteps, stepsCard } from '../guide.js';
 
-const TABS = [['control', 'בקרה ורווחיות'], ['boq', 'כתב כמויות'], ['costing', 'תמחיר'], ['quota', 'מכסות'], ['vo', 'הוראות שינוי'], ['worklog', 'יומן עבודה'], ['purchase', 'רכש'], ['expenses', 'הוצאות'], ['bills', 'חשבונות'], ['cashflow', 'תזרים'], ['docs', 'מסמכים'], ['log', 'יומן שינויים'], ['settings', 'הגדרות פרויקט']];
 
 export async function viewProject(id, tab, extra) {
   const data = await loadTenantData();
@@ -32,11 +31,12 @@ export async function viewProject(id, tab, extra) {
   if (tab === 'bill') return billView(P, extra);
   const mc = data.mcs.find(m => m.id === project.main_contractor_id);
   const qc = quotaCounts(P.summary.quotas || []);
-  const tabs = TABS.filter(([k]) => (!['costing', 'quota'].includes(k) || can.costing()) && (k !== 'log' || can.edit()) && (k !== 'docs' || can.expense()) && (k !== 'settings' || can.edit()));
+  const tabs = projectTabs();
   const el = h(`<div><div class="top"><div><h1>${esc(project.name)}</h1>
     <div class="sub">${esc(mc?.name || 'ללא קבלן ראשי')} · ${CONTRACT[project.contract_type]} · שוטף+${project.pay_terms_days} · ${STATUS[project.status]}${project.address ? ' · ' + esc(project.address) : ''}</div></div>
     <div class="actions"><a class="btn ghost small" href="#/projects">כל הפרויקטים</a></div></div>
-    <nav class="tabs">${tabs.map(([k, l]) => `<a href="#/project/${id}/${k}" class="${k === tab ? 'on' : ''}">${l}${k === 'quota' && qc.over + qc.warn ? ` <span class="badge ${qc.over ? 'red' : 'amber'}">${qc.over + qc.warn}</span>` : ''}</a>`).join('')}</nav><div id="tab"></div></div>`);
+    <nav class="tabs ptabs">${tabs.map(([k, l]) => `<a href="#/project/${id}/${k}" class="${k === tab ? 'on' : ''}">${l}${k === 'quota' && qc.over + qc.warn ? ` <span class="badge ${qc.over ? 'red' : 'amber'}">${qc.over + qc.warn}</span>` : ''}</a>`).join('')}</nav><div id="tab"></div></div>`);
+  el.dataset.qover = qc.over; el.dataset.qwarn = qc.warn;
   const body = $('#tab', el);
   const fn = { control: tabControl, boq: tabBoq, costing: tabCosting, quota: tabQuota, vo: tabVo, worklog: tabWorkLog, purchase: tabPurchase, expenses: tabExpenses, bills: tabBills, cashflow: tabCashflow, docs: P => viewInbox(P.id, P), log: tabLog, settings: tabSettings }[tab] || tabControl;
   body.appendChild(await fn(P));
