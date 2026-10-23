@@ -24,9 +24,17 @@ export const REPORTS = [
 ];
 
 // טבלה גנרית. cols: [[כותרת, מספרי?]], rows: מערכי תאים (מחרוזות HTML). foot: שורת סיכום.
-const T = (cols, rows, foot, empty = 'אין נתונים') => `<div class="tw"><table><thead><tr>${cols.map(([c, isN]) => `<th class="${isN ? 'n' : ''}">${c}</th>`).join('')}</tr></thead><tbody>
-  ${rows.map(r => `<tr${r.cls ? ` class="${r.cls}"` : ''}>${(r.cells || r).map((c, i) => `<td class="${cols[i]?.[1] ? 'n' : ''}">${c ?? ''}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length}" class="empty">${empty}</td></tr>`}
-  ${foot ? `<tr class="tot">${foot.map((c, i) => `<td class="${cols[i]?.[1] ? 'n' : ''}">${c ?? ''}</td>`).join('')}</tr>` : ''}</tbody></table></div>`;
+// groups: כותרת עליונה לקבוצות עמודות [[שם, כמה עמודות]], העמודה הראשונה תופסת את שתי שורות הכותרת
+const T = (cols, rows, foot, empty = 'אין נתונים', groups = null) => {
+  const gs = new Set(); if (groups) { let k = 1; for (const [, span] of groups) { gs.add(k); k += span; } }
+  const c = (i, isN) => [isN ? 'n' : '', gs.has(i) ? 'gs' : ''].filter(Boolean).join(' ');
+  const head = groups
+    ? `<tr><th rowspan="2">${cols[0][0]}</th>${groups.map(([g, span]) => `<th colspan="${span}" class="grp gs">${g}</th>`).join('')}</tr><tr>${cols.slice(1).map(([h, isN], i) => `<th class="${c(i + 1, isN)}">${h}</th>`).join('')}</tr>`
+    : `<tr>${cols.map(([h, isN]) => `<th class="${isN ? 'n' : ''}">${h}</th>`).join('')}</tr>`;
+  return `<div class="tw"><table class="${groups ? 'gt' : ''}"><thead>${head}</thead><tbody>
+  ${rows.map(r => `<tr${r.cls ? ` class="${r.cls}"` : ''}>${(r.cells || r).map((x, i) => `<td class="${c(i, cols[i]?.[1])}">${x ?? ''}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length}" class="empty">${empty}</td></tr>`}
+  ${foot ? `<tr class="tot">${foot.map((x, i) => `<td class="${c(i, cols[i]?.[1])}">${x ?? ''}</td>`).join('')}</tr>` : ''}</tbody></table></div>`;
+};
 const sum = (xs, f) => xs.reduce((a, x) => a + n(f(x)), 0);
 const inPeriod = (d, o) => d && d.slice(0, 7) >= o.from && d.slice(0, 7) <= o.to;
 const periodText = o => `${monthLabel(o.from)} עד ${monthLabel(o.to)}`;
@@ -90,8 +98,8 @@ function repProfit({ sums }) {
   const S2 = k => sum(rows, k);
   const tc = { sale: S2(r => r.c.sale), forecast: S2(r => r.c.forecast) }, ta = { sale: S2(r => r.a.sale), forecast: S2(r => r.a.forecast) }, tr = { sale: S2(r => r.r.sale), forecast: S2(r => r.r.forecast) };
   const tt = { sale: S2(r => r.tot.sale), forecast: S2(r => r.tot.forecast), planned: S2(r => r.tot.planned) };
-  return h(`<div data-sheet="רווחיות">${T([['פרויקט'], ['חוזה: מכירה', 1], ['חוזה: צפי עלות', 1], ['חוזה: רווח', 1], ['%', 1], ['תוספות מאושרות: מכירה', 1], ['צפי עלות', 1], ['רווח', 1], ['לא מאושרות: מבוקש', 1], ['רווח בסיכון', 1], ['סה"כ בתצוגה: מכירה', 1], ['רווח', 1], ['%', 1], ['חריגת עלות', 1]], rows,
-    ['סה"כ', m0(tc.sale), m0(tc.forecast), cls(tc.sale - tc.forecast), pct(tc.sale ? (tc.sale - tc.forecast) / tc.sale * 100 : 0), m0(ta.sale), m0(ta.forecast), cls(ta.sale - ta.forecast), m0(tr.sale), cls(tr.sale - tr.forecast), m0(tt.sale), cls(tt.sale - tt.forecast), pct(tt.sale ? (tt.sale - tt.forecast) / tt.sale * 100 : 0), pct(overrunPct(tt.forecast, tt.planned), { sign: true })])}
+  return h(`<div data-sheet="רווחיות">${T([['פרויקט'], ['מכירה', 1], ['צפי עלות', 1], ['רווח', 1], ['%', 1], ['מכירה', 1], ['צפי עלות', 1], ['רווח', 1], ['מבוקש', 1], ['רווח בסיכון', 1], ['מכירה', 1], ['רווח', 1], ['%', 1], ['חריגת עלות', 1]], rows,
+    ['סה"כ', m0(tc.sale), m0(tc.forecast), cls(tc.sale - tc.forecast), pct(tc.sale ? (tc.sale - tc.forecast) / tc.sale * 100 : 0), m0(ta.sale), m0(ta.forecast), cls(ta.sale - ta.forecast), m0(tr.sale), cls(tr.sale - tr.forecast), m0(tt.sale), cls(tt.sale - tt.forecast), pct(tt.sale ? (tt.sale - tt.forecast) / tt.sale * 100 : 0), pct(overrunPct(tt.forecast, tt.planned), { sign: true })], 'אין נתונים', [['חוזה', 4], ['תוספות מאושרות', 3], ['לא מאושרות', 2], ['סה"כ בתצוגה', 4]])}
     <p class="small mut">רווח = מכירה פחות צפי עלות לסיום. "סה"כ בתצוגה" לפי המתג למעלה: ${esc(PROFIT_MODES[S.mode])}. תוספות לא מאושרות הן הוראות שינוי שהוגשו או בוצעו ועדיין לא אושרו.</p></div>`);
 }
 const cls = v => `<span class="${v < 0 ? 'neg' : ''}">${m0(v)}</span>`;

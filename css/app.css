@@ -268,3 +268,12 @@ tr.dim>td{opacity:.55}
 .nadm summary::-webkit-details-marker{display:none}
 .nadm summary::before{content:'▸ '}.nadm[open] summary::before{content:'▾ '}
 @media (min-width:761px){.ptabs{display:none}}
+/* יישור טבלאות: מספרים בעמודה אחידה, כותרות מספרים נשברות לשתי שורות במקום למתוח את הטבלה, ושם בעמודה הראשונה לא נשבר לשורות רבות */
+th{vertical-align:bottom}
+td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
+th.n{white-space:normal;min-width:64px;line-height:1.35}
+.tw tbody td:first-child:not(:has(input,button,select)){min-width:150px}
+table.gt th.grp{text-align:center;color:var(--ink);font-size:12.5px;border-bottom:1px solid var(--line)}
+table.gt th[rowspan]{vertical-align:bottom}
+table.gt .gs{border-inline-start:2px solid var(--line2)}
+@media (max-width:760px){.tw tbody td:first-child:not(:has(input,button,select)){min-width:120px}}
