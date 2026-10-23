@@ -1,8 +1,10 @@
 // שלב 3: עלות עבודה מיומן העבודה, התקשרויות רכש והתראות מכסה (בכמות ובכסף). פונקציות טהורות.
 import { n, lineCost } from './calc.js';
 
-export const PAY_TYPES = { salary: 'שכיר חודשי', daily: 'עובד יומי', piece: 'קבלנות' };
-export const LABOR_TYPES = { '': 'כל סוג', salary: 'שכירים', daily: 'יומיים' };
+export const PAY_TYPES = { salary: 'שכיר חודשי', daily: 'עובד יומי', hourly: 'עובד שעתי', piece: 'קבלנות' };
+export const LABOR_TYPES = { '': 'כל סוג', salary: 'שכירים', daily: 'יומיים', hourly: 'שעתיים' };
+// שעות רגילות ברישום: לעובד שעתי לפי מה שנרשם, אחרת ימים × שעות ביום
+export const entryHours = (e, s) => e.hours != null && e.hours !== '' ? n(e.hours) : n(e.days) * (n(qset(s).day_hours) || 9);
 export const PO_STATUS = { open: 'פתוחה', partial: 'סופקה חלקית', delivered: 'סופקה', closed: 'סגורה', cancelled: 'בוטלה' };
 export const PO_LIVE = ['open', 'partial', 'delivered'];
 
@@ -26,6 +28,7 @@ export function matchLine(entry, worker, itemLines) {
  * שכיר: (ברוטו × מקדם) ÷ max(ימי עבודה שנרשמו לו בחודש בכל הפרויקטים, ימי עבודה בחודש) × ימים.
  *   כך 12 יום בפרויקט א' ו-10 בב' מתחלקים 12/22 ו-10/22, וחודש חלקי לא מנפח את העלות.
  * יומי: ימים × תעריף × מקדם. שעות נוספות לפי תעריף שעה נוספת (או 125% משעה רגילה).
+ * שעתי: שעות × תעריף שעה × מקדם. יום עבודה = שעות ביום עבודה של הלקוח (ברירת מחדל 9).
  * קבלנות: כמות × מחיר קבלנות (של הרישום, של העובד או של שורת התמחיר).
  * allEntries: כל הרישומים של הלקוח (לחישוב החודש של שכירים).
  */
@@ -55,6 +58,11 @@ export function entryCosts({ entries, allEntries = entries, workers, lines = [],
       dayCost = n(w.daily_rate) * f;
       const ot = n(w.ot_rate) || dayCost / (n(s.day_hours) || 9) * 1.25;
       cost = dayCost * n(e.days) + ot * n(e.ot_hours);
+    } else if (w.pay_type === 'hourly') {
+      const hr = n(w.hourly_rate) * f;
+      dayCost = hr * (n(s.day_hours) || 9);
+      const ot = n(w.ot_rate) || hr * 1.25;
+      cost = hr * entryHours(e, s) + ot * n(e.ot_hours);
     } else {
       const rate = e.piece_rate != null && e.piece_rate !== '' ? n(e.piece_rate) : (n(w.piece_rate) || n(line?.unit_cost));
       cost = n(e.piece_qty) * rate;

@@ -9,6 +9,7 @@ import { loadXLSX } from '../import.js';
 import { finalBill, GUAR_KINDS, guaranteeState } from '../docs.js';
 import { guarDialog } from './vendors.js';
 import { groupBy } from './project.js';
+import { attachBtn, wireAttach } from '../files.js';
 
 const fineChip = f => { const s = fineStatus(f); return `<span class="chip ${s === 'appeal' ? 'amber' : s === 'cancelled' ? '' : 'red'}">${FINE_STATUS[s]}${s === 'cancelled' ? ' · לא מנוכה' : ''}</span>`; };
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
@@ -19,7 +20,7 @@ const statusChip = (r, today = todayStr()) => {
   return `<span class="chip ${b.status === 'draft' ? '' : b.status === 'submitted' ? 'blue' : 'violet'}">${BILL_STATUS[b.status]}</span>`;
 };
 
-// פריטים שנכנסים לחשבון: סעיפי חוזה + סעיפי חריגים מאושרים
+// פריטים שנכנסים לחשבון: סעיפי חוזה + סעיפי הוראות שינוי מאושרות
 const billableItems = P => { const vo = Object.fromEntries(P.pd.variations.map(v => [v.id, v])); return P.pd.items.filter(i => !i.variation_id || VO_APPROVED.includes(vo[i.variation_id]?.status)); };
 
 // ===== לשונית חשבונות בפרויקט =====
@@ -38,7 +39,7 @@ export function tabBills(P) {
   const cum = last ? last.cumEffTotal : 0;
   const el = h(`<div>
     <div class="kpis">
-      <div class="kpi"><div class="l">מצטבר בחשבונות</div><div class="v">${money(cum)}</div><div class="n">${pct(saleInView ? cum / saleInView * 100 : 0, { d: 0 })} מחוזה + חריגים מאושרים (${money(saleInView)})</div></div>
+      <div class="kpi"><div class="l">מצטבר בחשבונות</div><div class="v">${money(cum)}</div><div class="n">${pct(saleInView ? cum / saleInView * 100 : 0, { d: 0 })} מחוזה + הוראות שינוי מאושרות (${money(saleInView)})</div></div>
       <div class="kpi"><div class="l">קיצוצי פיקוח (מצטבר)</div><div class="v ${res.some(r => r.cut > 0) ? 'neg' : ''}">${money(res.reduce((a, r) => a + (r.approvedStage ? r.cut : 0), 0))}</div><div class="n">הוגש ולא אושר</div></div>
       <div class="kpi"><div class="l">עיכבון שנצבר</div><div class="v">${money(B.retentionTotal)}</div><div class="n">${P.project.retention_pct}%${n(P.project.retention_cap) ? ` · תקרה ${money(P.project.retention_cap)}` : ''}</div></div>
       <div class="kpi"><div class="l">לגבייה (כולל מע"מ)</div><div class="v">${money(c.outstanding)}</div><div class="n ${c.overdue.length ? 'neg' : ''}">${c.overdue.length ? `${c.overdue.length} באיחור` : 'אין חשבונות באיחור'}</div></div>
@@ -48,9 +49,10 @@ export function tabBills(P) {
     ${res.map(r => `<tr class="click" data-b="${r.bill.id}"><td><b>${r.bill.number}</b></td><td class="hide-m">${fmtDate(r.bill.period_to)}</td><td>${fmtDate(r.bill.submitted_date)}</td>
       <td class="n">${money(r.curSub)}</td><td class="n">${r.curApp != null ? money(r.curApp) : '<span class="mut">—</span>'}</td><td class="n hide-m ${r.cut > 0 ? 'neg' : ''}">${r.cut ? money(r.cut) : ''}</td>
       <td class="n hide-m">${money(r.retention + r.insurance + r.shared + r.finesTotal + r.offsets)}</td><td class="n"><b>${money(r.net)}</b></td><td class="hide-m">${r.bill.status === 'draft' ? '' : fmtDate(r.due)}</td>
-      <td class="n">${r.bill.status === 'draft' ? '' : money(r.outstanding)}</td><td>${statusChip(r)}</td></tr>`).join('')
+      <td class="n">${r.bill.status === 'draft' ? '' : money(r.outstanding)}</td><td style="white-space:nowrap">${statusChip(r)}${edit ? ' ' + attachBtn(P.data.files, 'bills', r.bill.id, { projectId: P.id, docType: 'approved_bill', label: `חשבון ${r.bill.number}` }) : ''}</td></tr>`).join('')
       || `<tr><td colspan="11" class="empty">אין חשבונות עדיין. חשבון חלקי מצטבר: כל חשבון ממשיך מהמצטבר המאושר של הקודם.</td></tr>`}</tbody></table></div></div>`);
-  $$('[data-b]', el).forEach(tr => tr.onclick = () => location.hash = `#/project/${P.id}/bill/${tr.dataset.b}`);
+  wireAttach(el, P.data.files || [], render);
+  $$('[data-b]', el).forEach(tr => tr.onclick = e => { if (!e.target.closest('[data-att]')) location.hash = `#/project/${P.id}/bill/${tr.dataset.b}`; });
   // סגירת פרויקט וחשבון סופי
   const pr = P.project;
   const close = h(`<div class="cols even" style="margin-top:14px"><div class="card"><h2>סגירה וחשבון סופי</h2>
@@ -144,7 +146,7 @@ export function billView(P, billId) {
   const draw = () => {
     const r = calcNow();
     const rowBy = Object.fromEntries(r.rows.map(x => [x.item.id, x]));
-    const groups = groupBy(items, i => i.variation_id ? `חריג ${vo[i.variation_id]?.number || ''} · ${vo[i.variation_id]?.title || ''}` : (i.chapter || 'ללא פרק'));
+    const groups = groupBy(items, i => i.variation_id ? `הוראת שינוי ${vo[i.variation_id]?.number || ''} · ${vo[i.variation_id]?.title || ''}` : (i.chapter || 'ללא פרק'));
     const app = showApp();
     let html = `<table><thead><tr><th>קוד</th><th>תיאור</th><th class="hide-m">יח'</th><th class="n hide-m">כמות חוזה</th><th class="n hide-m">מחיר</th><th class="n">מצטבר קודם</th><th class="n">מצטבר מוגש</th><th class="n">נוכחי</th>${app ? '<th class="n">מצטבר מאושר</th><th class="n">קיצוץ</th>' : ''}<th class="n">סכום נוכחי</th></tr></thead><tbody>`;
     for (const [g, its] of groups) {
@@ -214,7 +216,7 @@ export function billView(P, billId) {
   $('#save', el)?.addEventListener('click', async () => {
     const r = calcNow();
     if (bill.is_final && st.head.status !== 'draft' && !finalBill(P.project, P.summary.billing.retentionTotal).ready) return toast('חשבון סופי: צריך קודם As-Made, סגירת ליקויים ותאריך מסירה', 'bad');
-    if (r.overItems.length && !(await confirmBox('כמות מעל החוזה', `ב-${r.overItems.length} סעיפים המצטבר גבוה מכמות החוזה. לשמור בכל זאת? (אולי צריך חריג)`, 'שמירה'))) return;
+    if (r.overItems.length && !(await confirmBox('כמות מעל החוזה', `ב-${r.overItems.length} סעיפים המצטבר גבוה מכמות החוזה. לשמור בכל זאת? (אולי צריך הוראת שינוי)`, 'שמירה'))) return;
     const head = { period_to: nullIfEmpty(st.head.period_to), bill_date: nullIfEmpty(st.head.bill_date), status: st.head.status, submitted_date: nullIfEmpty(st.head.submitted_date), approved_date: nullIfEmpty(st.head.approved_date),
       due_date: nullIfEmpty(st.head.due_date), index_value: numOrNull(st.head.index_value), offsets: n(st.head.offsets), offsets_note: st.head.offsets_note || null };
     await db.update('bills', billId, head);

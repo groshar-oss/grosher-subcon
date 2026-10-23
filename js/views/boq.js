@@ -29,7 +29,7 @@ export function tabBoq(P, variationId = null) {
         ${can.edit() ? `<td><button class="btn small ghost" data-ed="${i.id}">עריכה</button> <button class="btn small ghost" data-del="${i.id}" aria-label="מחיקה">✕</button></td>` : ''}</tr>`);
     }
   }
-  if (items.length) tb.insertAdjacentHTML('beforeend', `<tr class="tot"><td></td><td>סה"כ ${variationId ? 'חריג' : 'כתב כמויות'} (${items.length} סעיפים)</td><td></td><td></td><td></td><td class="n">${money(total)}</td><td class="hide-m"></td>${can.edit() ? '<td></td>' : ''}</tr>`);
+  if (items.length) tb.insertAdjacentHTML('beforeend', `<tr class="tot"><td></td><td>סה"כ ${variationId ? 'הוראת שינוי' : 'כתב כמויות'} (${items.length} סעיפים)</td><td></td><td></td><td></td><td class="n">${money(total)}</td><td class="hide-m"></td>${can.edit() ? '<td></td>' : ''}</tr>`);
 
   $('#add', el)?.addEventListener('click', () => itemDialog(P, null, variationId));
   $$('[data-ed]', el).forEach(b => b.onclick = () => itemDialog(P, items.find(i => i.id === b.dataset.ed), variationId));
@@ -51,7 +51,7 @@ export function tabBoq(P, variationId = null) {
 export async function itemDialog(P, it, variationId = null) {
   const chapters = [...new Set(P.pd.items.map(i => i.chapter).filter(Boolean))];
   const body = `<datalist id="chl">${chapters.map(c => `<option value="${esc(c)}">`).join('')}</datalist><datalist id="unl">${UNITS.map(u => `<option value="${esc(u)}">`).join('')}</datalist>
-    <div class="grid g2">${field('פרק', 'chapter', it?.chapter ?? (variationId ? 'חריגים' : chapters.at(-1) || ''), { attrs: 'list="chl"' })}${field('קוד סעיף', 'code', it?.code, { attrs: 'dir="auto"' })}</div>
+    <div class="grid g2">${field('פרק', 'chapter', it?.chapter ?? (variationId ? 'הוראות שינוי' : chapters.at(-1) || ''), { attrs: 'list="chl"' })}${field('קוד סעיף', 'code', it?.code, { attrs: 'dir="auto"' })}</div>
     ${field('תיאור', 'description', it?.description, { req: true })}
     <div class="grid g3">${field('יחידה', 'unit', it?.unit, { attrs: 'list="unl"' })}${field('כמות', 'qty', it?.qty, { type: 'number' })}${field('מחיר יחידה ₪', 'unit_price', it?.unit_price, { type: 'number' })}</div>
     ${select('שיטת חיוב', 'billing_method', BILLING, it?.billing_method || 'measure')}
@@ -157,7 +157,7 @@ export function tabCosting(P) {
   const oh = n(P.project.overhead_pct);
   const linesBy = {}; for (const l of P.pd.lines) (linesBy[l.boq_item_id] ||= []).push(l);
   const vos = Object.fromEntries(P.pd.variations.map(v => [v.id, v]));
-  const groups = groupBy(P.pd.items, i => i.variation_id ? `חריג ${vos[i.variation_id]?.number || ''} · ${vos[i.variation_id]?.title || ''}` : (i.chapter || 'ללא פרק'));
+  const groups = groupBy(P.pd.items, i => i.variation_id ? `הוראת שינוי ${vos[i.variation_id]?.number || ''} · ${vos[i.variation_id]?.title || ''}` : (i.chapter || 'ללא פרק'));
   let T = { sale: 0, plan: 0 };
   const el = h(`<div>
     <div class="actions" style="margin-bottom:12px">${can.edit() ? '<button class="btn ghost" id="copy">העתקת תמחיר מפרויקט אחר</button>' : ''}<span class="mut small">תקורה בפרויקט: ${oh}% מהעלות הישירה (משנים בהגדרות הפרויקט)</span></div>
@@ -176,7 +176,7 @@ export function tabCosting(P) {
         <td><button class="btn small ${ls.length ? 'ghost' : ''}">${can.edit() ? (ls.length ? 'עריכה' : 'תמחור') : 'פירוט'}</button></td></tr>`);
     }
   }
-  if (P.pd.items.length) tb.insertAdjacentHTML('beforeend', `<tr class="tot"><td></td><td>סה"כ (חוזה וכל החריגים)</td><td></td><td class="n">${money(T.sale)}</td><td></td><td class="n">${money(T.plan)}</td><td></td><td></td><td class="n">${money(T.sale - T.plan)}</td><td class="n">${pct(T.sale ? (T.sale - T.plan) / T.sale * 100 : 0)}</td><td></td></tr>`);
+  if (P.pd.items.length) tb.insertAdjacentHTML('beforeend', `<tr class="tot"><td></td><td>סה"כ (חוזה וכל הוראות השינוי)</td><td></td><td class="n">${money(T.sale)}</td><td></td><td class="n">${money(T.plan)}</td><td></td><td></td><td class="n">${money(T.sale - T.plan)}</td><td class="n">${pct(T.sale ? (T.sale - T.plan) / T.sale * 100 : 0)}</td><td></td></tr>`);
   $$('[data-cost]', el).forEach(r => r.onclick = () => costingEditor(P, P.pd.items.find(i => i.id === r.dataset.cost)));
   $('#copy', el)?.addEventListener('click', () => copyCosting(P));
   return el;

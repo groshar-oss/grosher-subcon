@@ -50,7 +50,7 @@ function cashflowBlock(data, ids, title) {
     const el = h(`<div>
       <div class="actions" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <span class="mut small">טווח:</span><div class="seg" id="ah">${[3, 6, 12].map(k => `<button type="button" data-k="${k}" class="${o.ahead === k ? 'on' : ''}">${k} חודשים</button>`).join('')}</div>
-        <span class="mut small">תרחיש עיכוב בתשלומי הראשי:</span><div class="seg" id="dl">${[0, 30, 60].map(k => `<button type="button" data-k="${k}" class="${o.delay === k ? 'on' : ''}">${k ? `+${k} יום` : 'בזמן'}</button>`).join('')}</div>
+        <span class="mut small">תרחיש עיכוב בתשלומי הקבלן הראשי:</span><div class="seg" id="dl">${[0, 30, 60].map(k => `<button type="button" data-k="${k}" class="${o.delay === k ? 'on' : ''}">${k ? `+${k} יום` : 'בזמן'}</button>`).join('')}</div>
         <button class="btn ghost small" id="xl">ייצוא לאקסל</button></div>
       <div class="kpis">
         <div class="kpi"><div class="l">יתרה בתחילת ${monthLabel(r.cur)}</div><div class="v ${cur.open < 0 ? 'neg' : ''}">${money(cur.open)}</div><div class="n">לפי יתרה בבנק ${money(st.cash_opening || 0)} נכון ל-${monthLabel(r.asof)}${can.edit() ? ` · <a href="#/client/${S.tenantId}">עדכון</a>` : ''}</div></div>

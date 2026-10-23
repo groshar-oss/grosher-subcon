@@ -5,6 +5,7 @@ import { S, can, render, logChange } from '../app.js';
 import { n } from '../calc.js';
 import { PO_STATUS, PO_LIVE } from '../quota.js';
 import { expenseDialog } from './vo_exp.js';
+import { attachBtn, wireAttach } from '../files.js';
 
 export function poStats(po, lines, expenses) {
   const ls = lines.filter(l => l.po_id === po.id);
@@ -36,10 +37,11 @@ export function tabPurchase(P) {
     ${st.map(({ po, s }) => `<tr class="click ${po.status === 'cancelled' ? 'dim' : ''}" data-po="${po.id}"><td>${esc(po.number || '')}</td><td><b>${esc(po.supplier_name)}</b><div class="small mut">${s.ls.length} שורות</div></td><td class="hide-m">${fmtDate(po.order_date)}</td>
       <td>${PO_STATUS[po.status]}</td><td class="n">${money(s.ordered)}</td><td class="n hide-m">${pct(s.deliveredPct, { d: 0 })}</td><td class="n">${money(s.invoiced)}</td><td class="n">${money(s.open)}</td>
       <td class="wrap small">${s.flags.length ? s.flags.map(f => `<span class="chip red">${esc(f)}</span>`).join(' ') : '<span class="chip green">תקין</span>'}</td>
-      ${edit ? `<td><button class="btn small ghost" data-inv="${po.id}">+ חשבונית</button></td>` : ''}</tr>`).join('') || `<tr><td colspan="10" class="empty">אין הזמנות רכש. הזמנה פתוחה נספרת כהתקשרות ונכנסת לצפי העלות.</td></tr>`}
+      ${edit ? `<td style="white-space:nowrap">${attachBtn(P.data.files, 'purchase_orders', po.id, { projectId: P.id, docType: 'po', label: `הזמנה ${po.number || ''} ${po.supplier_name}` })} <button class="btn small ghost" data-inv="${po.id}">+ חשבונית</button></td>` : ''}</tr>`).join('') || `<tr><td colspan="10" class="empty">אין הזמנות רכש. הזמנה פתוחה נספרת כהתקשרות ונכנסת לצפי העלות.</td></tr>`}
     </tbody></table></div></div>`);
+  wireAttach(el, P.data.files || [], render);
   $('#add', el)?.addEventListener('click', () => poDialog(P));
-  $$('[data-po]', el).forEach(tr => tr.onclick = e => { if (e.target.closest('[data-inv]')) return; poDialog(P, pos.find(p => p.id === tr.dataset.po)); });
+  $$('[data-po]', el).forEach(tr => tr.onclick = e => { if (e.target.closest('[data-inv],[data-att]')) return; poDialog(P, pos.find(p => p.id === tr.dataset.po)); });
   $$('[data-inv]', el).forEach(b => b.onclick = () => { const po = pos.find(p => p.id === b.dataset.inv); const s = poStats(po, P.pd.poLines, P.pd.expenses);
     const first = s.ls[0];
     expenseDialog(P, null, { po_id: po.id, supplier_name: po.supplier_name, kind: 'material', amount: Math.max(0, Math.round(s.delivered - s.invoiced)) || '', boq_item_id: s.ls.every(l => l.boq_item_id === first?.boq_item_id) ? first?.boq_item_id : null }); });

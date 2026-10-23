@@ -25,7 +25,7 @@ export function demoData(uuid) {
     exps.forEach(([kind, supplier_name, amount, status, doc_date], k) => T.expenses.push({ id: uuid(), tenant_id: t, project_id, boq_item_id: id, variation_id, kind, supplier_name, doc_no: String(1000 + T.expenses.length), doc_date, description: description, amount, vat_pct: 18, status, pay_date: null, notes: '' }));
   };
 
-  // פרויקט 1: באמצע, חריגה בתקרות מינרליות וחריג שבוצע בלי אישור
+  // פרויקט 1: באמצע, חריגה בתקרות מינרליות והוראת שינוי שבוצעה בלי אישור
   const p1 = proj({ main_contractor_id: mc1, name: 'משרדי הייטק · הרצליה פיתוח', address: 'הרצליה פיתוח', owner_name: 'יזם דמו', start_date: '2026-04-01', end_date: '2027-01-31', contract_type: 'measure', pay_terms_days: 60, retention_pct: 5, insurance_pct: 0.5, shared_pct: 1.5, overhead_pct: 0, status: 'active' });
   const M = 'גבס-מרכז (ספק דמו)', K = 'צוות התקנה ס. (קבלנות)', C = 'אורבן תקרות (ספק דמו)';
   [
@@ -41,11 +41,11 @@ export function demoData(uuid) {
   ].forEach(r => item(p1, null, r));
   T.expenses.push({ id: uuid(), tenant_id: t, project_id: p1, boq_item_id: null, variation_id: null, kind: 'general', supplier_name: 'פינוי פסולת דמו', doc_no: '2001', doc_date: '2026-09-15', description: 'פינוי פסולת ומכולות', amount: 9000, vat_pct: 18, status: 'paid', pay_date: null, notes: '' });
   const v3 = vo(p1, { number: 'VO-03', title: 'סגירת פיר מערכות בגבס עמיד אש', source: 'change_order', vo_date: '2026-07-20', status: 'approved' });
-  item(p1, v3, ['חריגים', 'VO-03.1', 'סגירת פיר מערכות בגבס עמיד אש', "קומפ'", 1, 26000, 100, [['material', 'גבס עמיד אש', 1, "קומפ'", 9500], ['piece', 'התקנה', 1, "קומפ'", 8000]], [['material', M, 9900, 'paid', '2026-08-05'], ['piece', K, 8000, 'paid', '2026-08-31']]]);
+  item(p1, v3, ['הוראות שינוי', 'VO-03.1', 'סגירת פיר מערכות בגבס עמיד אש', "קומפ'", 1, 26000, 100, [['material', 'גבס עמיד אש', 1, "קומפ'", 9500], ['piece', 'התקנה', 1, "קומפ'", 8000]], [['material', M, 9900, 'paid', '2026-08-05'], ['piece', K, 8000, 'paid', '2026-08-31']]]);
   const v5 = vo(p1, { number: 'VO-05', title: 'תוספת פתחי ביקורת למערכות', source: 'supervisor', vo_date: '2026-08-25', status: 'approved' });
-  item(p1, v5, ['חריגים', 'VO-05.1', 'תוספת פתחי ביקורת למערכות', "קומפ'", 1, 38000, 50, [['material', 'פתחים ופרופילים', 1, "קומפ'", 14000], ['piece', 'התקנה', 1, "קומפ'", 12500], ['other', 'שונות', 1, "קומפ'", 7000]], [['material', M, 9000, 'approved', '2026-09-20'], ['piece', K, 6000, 'invoice', '2026-09-30']]]);
-  const v7 = vo(p1, { number: 'VO-07', title: 'פתחים לגרילים', source: 'supervisor', has_written_order: false, vo_date: '2026-10-08', status: 'executed_unapproved', notes: 'בוצע לפי הנחיה בעל פה של מפקח הראשי. אין הוראת שינוי חתומה.' });
-  item(p1, v7, ['חריגים', 'VO-07.1', 'פתחים לגרילים בתקרות', "יח'", 46, 400, 100, [['material', 'מסגרות ופרופילים', 46, "יח'", 113], ['labor', 'ימי עבודה', 6, 'יום', 750]], [['material', M, 4300, 'invoice', '2026-10-10']]]);
+  item(p1, v5, ['הוראות שינוי', 'VO-05.1', 'תוספת פתחי ביקורת למערכות', "קומפ'", 1, 38000, 50, [['material', 'פתחים ופרופילים', 1, "קומפ'", 14000], ['piece', 'התקנה', 1, "קומפ'", 12500], ['other', 'שונות', 1, "קומפ'", 7000]], [['material', M, 9000, 'approved', '2026-09-20'], ['piece', K, 6000, 'invoice', '2026-09-30']]]);
+  const v7 = vo(p1, { number: 'VO-07', title: 'פתחים לגרילים', source: 'supervisor', has_written_order: false, vo_date: '2026-10-08', status: 'executed_unapproved', notes: 'בוצע לפי הנחיה בעל פה של מפקח הקבלן הראשי. אין הוראת שינוי חתומה.' });
+  item(p1, v7, ['הוראות שינוי', 'VO-07.1', 'פתחים לגרילים בתקרות', "יח'", 46, 400, 100, [['material', 'מסגרות ופרופילים', 46, "יח'", 113], ['labor', 'ימי עבודה', 6, 'יום', 750]], [['material', M, 4300, 'invoice', '2026-10-10']]]);
 
   // פרויקט 2: בתחילת הדרך
   const p2 = proj({ main_contractor_id: mc2, name: 'מגדל מגורים · בת ים', address: 'בת ים', owner_name: 'יזם דמו 2', start_date: '2026-07-01', end_date: '2027-06-30', contract_type: 'milestones', pay_terms_days: 45, retention_pct: 5, insurance_pct: 0.4, shared_pct: 1, overhead_pct: 4, status: 'active' });
@@ -57,7 +57,7 @@ export function demoData(uuid) {
     ['01 גבס', '1.04', 'פתחי שירות בתקרות', "יח'", 60, 180, 0, [], []]
   ].forEach(r => item(p2, null, r));
   const v21 = vo(p2, { number: 'VO-01', title: 'הגבהת תקרה בלובי', source: 'main_request', vo_date: '2026-10-01', status: 'submitted' });
-  item(p2, v21, ['חריגים', 'VO-01.1', 'הגבהת תקרה בלובי כולל קרניז', "קומפ'", 1, 24000, 0, [['material', 'לוחות ופרופילים', 1, "קומפ'", 7000], ['piece', 'התקנה', 1, "קומפ'", 8000]], []]);
+  item(p2, v21, ['הוראות שינוי', 'VO-01.1', 'הגבהת תקרה בלובי כולל קרניז', "קומפ'", 1, 24000, 0, [['material', 'לוחות ופרופילים', 1, "קומפ'", 7000], ['piece', 'התקנה', 1, "קומפ'", 8000]], []]);
 
   // פרויקט 3: לקראת חשבון סופי
   const p3 = proj({ main_contractor_id: mc3, name: 'קניון · ראשון לציון', address: 'ראשון לציון', owner_name: 'יזם דמו 3', start_date: '2025-11-01', end_date: '2026-11-15', contract_type: 'measure', pay_terms_days: 60, retention_pct: 5, insurance_pct: 0.5, shared_pct: 1.5, overhead_pct: 3, status: 'closing' });
@@ -68,7 +68,7 @@ export function demoData(uuid) {
     ['03 חיפויים', '03.01', 'חיפוי גבס לעמודים', "יח'", 60, 2500, 90, [['material', 'לוחות ופרופילים', 60, "יח'", 900], ['piece', 'התקנה בקבלנות', 60, "יח'", 850]], [['material', 'גבס-מרכז (ספק דמו)', 48000, 'paid', '2026-07-01'], ['piece', 'צוות התקנה ס. (קבלנות)', 44000, 'approved', '2026-09-30']]]
   ].forEach(r => item(p3, null, r));
   const v32 = vo(p3, { number: 'VO-02', title: 'תוספת תקרה במתחם המזון', source: 'change_order', vo_date: '2026-06-10', status: 'partial', approved_amount: 38000, notes: 'התבקש 45,000, אושר 38,000' });
-  item(p3, v32, ['חריגים', 'VO-02.1', 'תוספת תקרה במתחם המזון', "קומפ'", 1, 45000, 100, [['material', 'אריחים ופרופילים', 1, "קומפ'", 16000], ['piece', 'התקנה', 1, "קומפ'", 13000]], [['material', 'אורבן תקרות (ספק דמו)', 16500, 'paid', '2026-07-01'], ['piece', 'צוות התקנה ס. (קבלנות)', 12000, 'paid', '2026-07-31']]]);
+  item(p3, v32, ['הוראות שינוי', 'VO-02.1', 'תוספת תקרה במתחם המזון', "קומפ'", 1, 45000, 100, [['material', 'אריחים ופרופילים', 1, "קומפ'", 16000], ['piece', 'התקנה', 1, "קומפ'", 13000]], [['material', 'אורבן תקרות (ספק דמו)', 16500, 'paid', '2026-07-01'], ['piece', 'צוות התקנה ס. (קבלנות)', 12000, 'paid', '2026-07-31']]]);
   // ===== שלב 3: עובדים, יומן עבודה ורכש =====
   const wk = (name, pay_type, x) => { const r = { id: uuid(), tenant_id: t, name, pay_type, id_no: null, phone: null, trade: null, monthly_salary: null, daily_rate: null, piece_rate: null, ot_rate: null, cost_factor: null, is_foreign: false, agency: null, active: true, notes: null, ...x }; T.workers.push(r); return r.id; };
   const moshe = wk('משה כ. (דמו)', 'salary', { trade: 'גבסן', monthly_salary: 9000 });
@@ -77,6 +77,7 @@ export function demoData(uuid) {
   const ahmad = wk('אחמד ע. (דמו)', 'daily', { trade: 'גבסן', daily_rate: 550 });
   const vasil = wk('ואסיל פ. (דמו)', 'daily', { trade: 'עוזר', daily_rate: 450, is_foreign: true, agency: 'כוח אדם דמו' });
   const rami = wk('רמי הצבעי (דמו)', 'piece', { trade: 'צבעי' });
+  const yossi = wk('יוסי ש. (דמו)', 'hourly', { trade: 'עוזר', hourly_rate: 55 });
   const code = (pid, c) => T.boq_items.find(i => i.project_id === pid && i.code === c);
   const workdays = (from, to) => { const out = []; for (let d = new Date(from + 'T12:00:00Z'); d <= new Date(to + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1)) if (d.getUTCDay() <= 4) out.push(d.toISOString().slice(0, 10)); return out; };
   const ent = (pid, date, worker_id, item, x = {}) => T.work_entries.push({ id: uuid(), tenant_id: t, project_id: pid, log_date: date, worker_id, boq_item_id: item?.id || null, variation_id: item?.variation_id || null, cost_line_id: null, days: 1, ot_hours: 0, piece_qty: null, piece_rate: null, note: null, ...x });
@@ -85,11 +86,13 @@ export function demoData(uuid) {
   // 02.020: תומחרו 2 שכירים ביום. ב-13.10 הגיעו 3
   oct.slice(0, 8).forEach(d => { ent(p1, d, moshe, i020); ent(p1, d, samir, i020, d === oct[3] ? { ot_hours: 2 } : {}); });
   ent(p1, oct[8], moshe, i020); ent(p1, oct[8], samir, i020); ent(p1, oct[8], dani, i020, { note: 'הצטרף לעזרה בקרניזים' });
-  // חריג VO-07 (בוצע בלי אישור): שני שכירים יומיים
+  // הוראת שינוי VO-07 (בוצע בלי אישור): שני שכירים יומיים
   oct.slice(9, 11).forEach(d => { ent(p1, d, moshe, vo7); ent(p1, d, samir, vo7); });
   oct.slice(11).forEach(d => { ent(p1, d, moshe, i020, { days: 0.5 }); ent(p1, d, moshe, code(p1, '02.001'), { days: 0.5 }); });
   // 02.040: תומחרו 10 יומיות, כבר נוצלו 8 כשהסעיף בביצוע 50%
   oct.slice(2, 6).forEach(d => { ent(p1, d, ahmad, i040); ent(p1, d, vasil, i040); });
+  // עובד שעתי: חצי יום בפתחי ביקורת (6 שעות מתוך 9)
+  oct.slice(6, 8).forEach(d => ent(p1, d, yossi, i040, { days: 0.667, hours: 6 }));
   // 03.001: צבעי בקבלנות לפי מ"ר (לא לפי שעות)
   oct.slice(4, 12).forEach((d, k) => ent(p1, d, rami, i301, { piece_qty: [100, 120, 110, 95, 130, 115, 105, 125][k] }));
   // דני עובד בעיקר בראשון לציון: העלות החודשית שלו מתחלקת בין הפרויקטים לפי ימים

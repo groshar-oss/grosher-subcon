@@ -4,5 +4,7 @@
 export const CONFIG = {
   supabaseUrl: 'https://leheyfyjnbmqjmjeunwi.supabase.co',
   supabaseAnonKey: 'sb_publishable_GErjk-Y1BEdVoZQkaluApw_8lbrjPJ_',
+  // מזהה OAuth של Google (לא חובה כאן, אפשר להזין גם במסך "תצוגה ומצב"). משמש לשמירת קבצים בדרייב ולשליחת התראות מה-Gmail.
+  googleClientId: '',
   appName: 'גרושר · בקרת עלויות לקבלני משנה'
 };

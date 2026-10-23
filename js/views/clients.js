@@ -46,13 +46,17 @@ export async function viewClient(id) {
       ${field('שיעור מע"מ (%)', 'vat_pct', st.vat_pct, { type: 'number' })}
       ${field('תקורה ברירת מחדל לפרויקט חדש (%)', 'overhead_pct', st.overhead_pct, { type: 'number' })}
       ${field('ימי עבודה בחודש (לשכירים)', 'work_days_month', st.work_days_month, { type: 'number', hint: 'עלות חודשית של שכיר מתחלקת לפי ימי העבודה ביומן. ברירת מחדל 22' })}
-      ${field('שעות ביום עבודה', 'day_hours', st.day_hours, { type: 'number', hint: 'לחישוב שעה נוספת כשאין תעריף לעובד (125%)' })}
+      ${field('שעות ביום עבודה (ברירת מחדל)', 'day_hours', st.day_hours, { type: 'number', hint: 'ברירת המחדל ביומן לעובד שעתי, וגם לחישוב שעה נוספת כשאין תעריף (125%)' })}
       ${field('התראת מכסה מוקדמת (% ניצול)', 'quota_warn_pct', st.quota_warn_pct, { type: 'number', hint: 'למשל 80: התראה כשנוצלו 8 מתוך 10 ימים' })}
       ${field('ניצול שמקדים את הביצוע (נקודות %)', 'quota_gap_pct', st.quota_gap_pct, { type: 'number', hint: 'התראה כשאחוז הניצול גבוה מאחוז הביצוע בפער הזה' })}
       ${field('יתרה בבנק ₪', 'cash_opening', st.cash_opening, { type: 'number', hint: 'היתרה בתחילת החודש שבשדה הבא. כדאי לעדכן פעם בחודש' })}
       ${field('נכון לתחילת חודש', 'cash_asof', st.cash_asof || new Date().toISOString().slice(0, 7), { type: 'month' })}
       ${field('יתרת מינימום רצויה ₪', 'cash_min', st.cash_min, { type: 'number', hint: 'התראה כשהתזרים צפוי לרדת מתחת לסכום הזה' })}
       ${field('תנאי תשלום לספקים (שוטף + ימים)', 'supplier_terms_days', st.supplier_terms_days, { type: 'number', hint: 'לחשבוניות בלי תאריך תשלום' })}</div>
+      <div class="fld" style="margin-top:6px"><span>התראות במייל</span>
+        <label class="chk"><input type="checkbox" name="alert_email_on" ${st.alert_email_on ? 'checked' : ''}> לשלוח במייל כל התראה אדומה חדשה (חריגה, איחור תשלום, מסמך שפג)</label>
+        <input name="alert_emails" dir="ltr" value="${esc(st.alert_emails || '')}" placeholder="name@example.com, other@example.com">
+        <small>נמענים, מופרדים בפסיק. המייל נשלח מה-Gmail של מי שמחובר ל-Google במערכת, כשהוא פותח את המסך הראשי. כל התראה נשלחת פעם אחת.</small></div>
       <p class="small mut">צבעי חריגה: עד 3% צהוב, 3%-5% כתום, 5%-10% אדום, מעל 10% אדום שמתכהה. מעל הסף הקריטי השורה מסומנת "קריטי".</p>
       <button class="btn">שמירת הגדרות</button></form></div>
   </div>
@@ -78,7 +82,7 @@ export async function viewClient(id) {
     e.preventDefault(); const v = Object.fromEntries(new FormData(e.target));
     const ns = { ...st, employer_factor: n(v.employer_factor) || 1.3, crit_pct: n(v.crit_pct) || 15, vat_pct: n(v.vat_pct), overhead_pct: n(v.overhead_pct),
       work_days_month: n(v.work_days_month) || 22, day_hours: n(v.day_hours) || 9, quota_warn_pct: n(v.quota_warn_pct) || 80, quota_gap_pct: n(v.quota_gap_pct) || 10,
-      cash_opening: n(v.cash_opening), cash_asof: v.cash_asof || '', cash_min: n(v.cash_min), supplier_terms_days: v.supplier_terms_days === '' ? 60 : Math.round(n(v.supplier_terms_days)) };
+      cash_opening: n(v.cash_opening), cash_asof: v.cash_asof || '', cash_min: n(v.cash_min), alert_email_on: !!v.alert_email_on, alert_emails: String(v.alert_emails || '').trim(), supplier_terms_days: v.supplier_terms_days === '' ? 60 : Math.round(n(v.supplier_terms_days)) };
     await db.update('tenants', id, { settings: ns });
     for (const k of Object.keys(ns)) if (String(ns[k]) !== String(st[k])) await logChange({ entity: 'tenant', entity_id: id, label: 'הגדרות לקוח', field: k, old_value: st[k], new_value: ns[k] });
     await reloadTenants(); toast('ההגדרות נשמרו'); render();

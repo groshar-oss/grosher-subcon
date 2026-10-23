@@ -1,31 +1,32 @@
-// חריגים (תוספות ושינויים) והוצאות בפועל
+// הוראות שינוי (תוספות ושינויים) והוצאות בפועל
 import { h, esc, $, $$, modal, field, select, area, toast, money, pct, fmtDate, confirmBox, numOrNull, nullIfEmpty } from '../util.js';
 import { db } from '../db.js';
 import { S, can, render, logChange, settings, modeSwitch } from '../app.js';
 import { n, VO_STATUS, VO_APPROVED, VO_AT_RISK, EXPENSE_KINDS, EXPENSE_STATUS, itemSale } from '../calc.js';
 import { tabBoq } from './boq.js';
 import { findVendor, vendorStatus, DOC_TYPES } from '../docs.js';
+import { attachBtn, wireAttach } from '../files.js';
 
 const SOURCES = { change_order: 'הוראת שינוי', supervisor: 'הוראת מפקח', main_request: 'בקשת הקבלן הראשי', daywork: 'עבודת רג\'י' };
 const statusChip = s => `<span class="chip ${VO_APPROVED.includes(s) ? 'green' : VO_AT_RISK.includes(s) ? 'red' : s === 'rejected' ? '' : 'blue'}">${VO_STATUS[s]}</span>`;
 
-// ===== חריגים =====
+// ===== הוראות שינוי =====
 export function tabVo(P) {
   const groups = P.summary.voGroups;
   const sum = (arr, f) => arr.reduce((a, g) => a + f(g), 0);
   const appr = groups.filter(g => VO_APPROVED.includes(g.vo.status)), risk = groups.filter(g => VO_AT_RISK.includes(g.vo.status));
   const el = h(`<div>
-    <div class="note">חריגים מנוהלים בנפרד מהחוזה: לכל חריג סעיפים, תמחיר והוצאות משלו, והרווחיות שלהם מוצגת בנפרד. הוצאה שמשויכת לחריג לא נספרת בעלות סעיפי החוזה.</div>
+    <div class="note">הוראות שינוי מנוהלות בנפרד מהחוזה: לכל הוראה סעיפים, תמחיר והוצאות משלה, והרווחיות שלהן מוצגת בנפרד. הוצאה שמשויכת להוראת שינוי לא נספרת בעלות סעיפי החוזה.</div>
     <div class="kpis" style="grid-template-columns:repeat(4,1fr)">
-      <div class="kpi"><div class="l">חריגים מאושרים</div><div class="v pos">${money(sum(appr, g => g.approvedSale))}</div><div class="n">${appr.length} חריגים · רווח צפוי ${money(sum(appr, g => g.approvedSale - g.forecast))}</div></div>
-      <div class="kpi"><div class="l">ממתינים לאישור / בוצעו בלי אישור</div><div class="v ${risk.length ? 'neg' : ''}">${money(sum(risk, g => g.requested))}</div><div class="n">${risk.length} חריגים · כבר הוצא ${money(sum(risk, g => g.actual))}</div></div>
-      <div class="kpi"><div class="l">עלות בפועל על חריגים</div><div class="v">${money(sum(groups, g => g.actual))}</div></div>
+      <div class="kpi"><div class="l">הוראות שינוי מאושרות</div><div class="v pos">${money(sum(appr, g => g.approvedSale))}</div><div class="n">${appr.length} הוראות · רווח צפוי ${money(sum(appr, g => g.approvedSale - g.forecast))}</div></div>
+      <div class="kpi"><div class="l">ממתינים לאישור / בוצעו בלי אישור</div><div class="v ${risk.length ? 'neg' : ''}">${money(sum(risk, g => g.requested))}</div><div class="n">${risk.length} הוראות · כבר הוצא ${money(sum(risk, g => g.actual))}</div></div>
+      <div class="kpi"><div class="l">עלות בפועל על הוראות שינוי</div><div class="v">${money(sum(groups, g => g.actual))}</div></div>
       <div class="kpi"><div class="l">נדחו</div><div class="v">${money(sum(groups.filter(g => g.vo.status === 'rejected'), g => g.requested))}</div><div class="n">עלות שהוצאה: ${money(sum(groups.filter(g => g.vo.status === 'rejected'), g => g.actual))}</div></div>
     </div>
-    ${can.edit() ? '<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ חריג חדש</button></div>' : ''}
+    ${can.edit() ? '<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ הוראת שינוי חדשה</button></div>' : ''}
     <div id="list"></div></div>`);
   const list = $('#list', el);
-  if (!groups.length) list.innerHTML = '<div class="card empty">אין חריגים בפרויקט</div>';
+  if (!groups.length) list.innerHTML = '<div class="card empty">אין הוראות שינוי בפרויקט</div>';
   for (const g of groups) {
     const v = g.vo, sale = VO_APPROVED.includes(v.status) ? g.approvedSale : g.requested;
     const d = h(`<details class="card" ${v.status === 'executed_unapproved' ? 'open' : ''}><summary style="cursor:pointer;list-style:none">
@@ -33,20 +34,21 @@ export function tabVo(P) {
         <div class="small mut">${SOURCES[v.source]} · ${v.has_written_order ? 'יש הוראה בכתב' : '<span class="neg">אין הוראה בכתב</span>'}${v.vo_date ? ' · ' + fmtDate(v.vo_date) : ''}</div></div>
         <div class="pr" style="grid-template-columns:repeat(5,auto);gap:16px"><div>מבוקש<b>${money(g.requested)}</b></div><div>מאושר<b>${VO_APPROVED.includes(v.status) ? money(g.approvedSale) : '—'}</b></div><div>תמחיר<b>${money(g.planned)}</b></div><div>בפועל<b>${money(g.actual)}</b></div><div>רווח צפוי<b class="${sale - g.forecast < 0 ? 'neg' : ''}">${money(sale - g.forecast)}</b></div></div></div></summary>
       ${v.notes ? `<p class="small">${esc(v.notes)}</p>` : ''}
-      ${v.status === 'executed_unapproved' ? `<div class="note neg">החריג בוצע ועדיין לא אושר. ${money(g.requested)} בסיכון. כדאי לצרף תמונות לפני ואחרי ויומני עבודה ולהגיש הוראת שינוי.</div>` : ''}
-      ${can.edit() ? `<div class="actions" style="margin:8px 0"><button class="btn small ghost" data-ed="${v.id}">עריכת חריג וסטטוס</button><a class="btn small ghost" href="#/project/${P.id}/costing">תמחיר החריג</a><button class="btn small ghost" data-del="${v.id}">מחיקה</button></div>` : ''}
+      ${v.status === 'executed_unapproved' ? `<div class="note neg">הוראת השינוי בוצעה ועדיין לא אושרה. ${money(g.requested)} בסיכון. כדאי לצרף תמונות לפני ואחרי ויומני עבודה ולהגיש הוראת שינוי.</div>` : ''}
+      ${can.edit() ? `<div class="actions" style="margin:8px 0"><button class="btn small ghost" data-ed="${v.id}">עריכת הוראה וסטטוס</button><a class="btn small ghost" href="#/project/${P.id}/costing">תמחיר ההוראה</a><button class="btn small ghost" data-del="${v.id}">מחיקה</button>${can.expense() ? attachBtn(P.data.files, 'variations', v.id, { projectId: P.id, docType: 'vo', label: `${v.number} ${v.title}` }) : ''}</div>` : ''}
       <div data-items></div></details>`);
     $('[data-items]', d).appendChild(tabBoq(P, v.id));
     list.appendChild(d);
   }
+  wireAttach(el, P.data.files || [], render);
   $('#add', el)?.addEventListener('click', () => voDialog(P));
   $$('[data-ed]', el).forEach(b => b.onclick = () => voDialog(P, P.pd.variations.find(v => v.id === b.dataset.ed)));
   $$('[data-del]', el).forEach(b => b.onclick = async () => {
     const v = P.pd.variations.find(x => x.id === b.dataset.del);
-    if (!(await confirmBox('מחיקת חריג', `למחוק את ${v.number}? הסעיפים והתמחיר שלו יימחקו. הוצאות שמשויכות אליו יעברו ל"כללי לפרויקט".`, 'מחיקה', true))) return;
+    if (!(await confirmBox('מחיקת הוראת שינוי', `למחוק את ${v.number}? הסעיפים והתמחיר שלה יימחקו. הוצאות שמשויכות אליה יעברו ל"כללי לפרויקט".`, 'מחיקה', true))) return;
     await db.remove('variations', v.id);
-    await logChange({ project_id: P.id, entity: 'variation', entity_id: v.id, label: `${v.number} ${v.title}`, field: 'מחיקת חריג' });
-    toast('החריג נמחק'); render();
+    await logChange({ project_id: P.id, entity: 'variation', entity_id: v.id, label: `${v.number} ${v.title}`, field: 'מחיקת הוראת שינוי' });
+    toast('הוראת השינוי נמחקה'); render();
   });
   return el;
 }
@@ -54,14 +56,14 @@ export function tabVo(P) {
 async function voDialog(P, v) {
   const next = 'VO-' + String(P.pd.variations.length + 1).padStart(2, '0');
   const body = `<div class="grid g2">${field('מספר', 'number', v?.number || next, { req: true })}${field('תאריך', 'vo_date', v?.vo_date || new Date().toISOString().slice(0, 10), { type: 'date' })}</div>
-    ${field('תיאור החריג', 'title', v?.title, { req: true })}
+    ${field('תיאור הוראת השינוי', 'title', v?.title, { req: true })}
     <div class="grid g2">${select('מקור', 'source', SOURCES, v?.source || 'change_order')}${select('סטטוס', 'status', VO_STATUS, v?.status || 'draft')}</div>
     <label class="chk"><input type="checkbox" name="has_written_order" ${v?.has_written_order ? 'checked' : ''}> יש הוראת שינוי / הוראה בכתב</label>
     ${field('סכום מאושר ₪ (לאישור חלקי)', 'approved_amount', v?.approved_amount, { type: 'number', hint: 'ריק = כל הסכום המבוקש' })}
     ${area('הערות', 'notes', v?.notes)}
     ${v ? field('סיבת השינוי (לשינוי סטטוס או סכום)', 'reason', '') : ''}
-    ${v ? '' : '<p class="small mut">אחרי השמירה מוסיפים לחריג סעיפים (כמות × מחיר), ואז תמחיר.</p>'}`;
-  const d = await modal({ title: v ? `עריכת ${v.number}` : 'חריג חדש', body, validate: x => {
+    ${v ? '' : '<p class="small mut">אחרי השמירה מוסיפים להוראה סעיפים (כמות × מחיר), ואז תמחיר.</p>'}`;
+  const d = await modal({ title: v ? `עריכת ${v.number}` : 'הוראת שינוי חדשה', body, validate: x => {
     if (!x.number.trim() || !x.title.trim()) return 'חסר מספר או תיאור';
     if (x.status === 'partial' && !n(x.approved_amount)) return 'באישור חלקי צריך סכום מאושר';
     return null;
@@ -74,7 +76,7 @@ async function voDialog(P, v) {
       await logChange({ project_id: P.id, entity: 'variation', entity_id: v.id, label: `${row.number} ${row.title}`, field: k === 'status' ? 'סטטוס' : 'סכום מאושר', old_value: k === 'status' ? VO_STATUS[v[k]] : v[k], new_value: k === 'status' ? VO_STATUS[row[k]] : row[k], reason: d.reason });
   } else {
     const [nv] = await db.insert('variations', { tenant_id: S.tenantId, project_id: P.id, ...row });
-    await logChange({ project_id: P.id, entity: 'variation', entity_id: nv.id, label: `${row.number} ${row.title}`, field: 'חריג חדש', new_value: VO_STATUS[row.status] });
+    await logChange({ project_id: P.id, entity: 'variation', entity_id: nv.id, label: `${row.number} ${row.title}`, field: 'הוראת שינוי חדשה', new_value: VO_STATUS[row.status] });
   }
   toast('נשמר'); render();
 }
@@ -85,7 +87,7 @@ export function tabExpenses(P) {
   const items = Object.fromEntries(P.pd.items.map(i => [i.id, i]));
   const vat = settings().vat_pct;
   const linkText = e => e.boq_item_id && items[e.boq_item_id] ? `${items[e.boq_item_id].variation_id ? (vos[items[e.boq_item_id].variation_id]?.number || '') + ' · ' : ''}${items[e.boq_item_id].code || ''} ${items[e.boq_item_id].description}`
-    : e.variation_id && vos[e.variation_id] ? `${vos[e.variation_id].number} (כל החריג)` : 'כללי לפרויקט';
+    : e.variation_id && vos[e.variation_id] ? `${vos[e.variation_id].number} (כל ההוראה)` : 'כללי לפרויקט';
   const F = { q: '', kind: '', status: '' };
   const el = h(`<div>
     <div class="actions" style="margin-bottom:12px">${can.expense() ? '<button class="btn" id="add">+ הוצאה</button>' : ''}
@@ -100,8 +102,9 @@ export function tabExpenses(P) {
     const tot = rows.reduce((a, e) => a + n(e.amount), 0), totV = rows.reduce((a, e) => a + n(e.amount) * (1 + n(e.vat_pct ?? vat) / 100), 0);
     $('#tb', el).innerHTML = rows.map(e => `<tr><td>${fmtDate(e.doc_date)}</td><td>${esc(e.supplier_name || '')}<div class="small mut">${esc(e.description || '')}</div></td><td class="hide-m">${esc(e.doc_no || '')}</td>
       <td class="wrap small">${esc(linkText(e))}</td><td>${EXPENSE_KINDS[e.kind]}</td><td class="n">${money(e.amount)}</td><td class="n hide-m">${money(n(e.amount) * (1 + n(e.vat_pct ?? vat) / 100))}</td><td>${EXPENSE_STATUS[e.status]}</td>
-      ${can.expense() ? `<td><button class="btn small ghost" data-ed="${e.id}">עריכה</button> <button class="btn small ghost" data-del="${e.id}" aria-label="מחיקה">✕</button></td>` : ''}</tr>`).join('')
+      ${can.expense() ? `<td style="white-space:nowrap">${attachBtn(P.data.files, 'expenses', e.id, { projectId: P.id, docType: 'invoice', label: `${e.supplier_name || ''} ${e.doc_no || ''}`.trim() })} <button class="btn small ghost" data-ed="${e.id}">עריכה</button> <button class="btn small ghost" data-del="${e.id}" aria-label="מחיקה">✕</button></td>` : ''}</tr>`).join('')
       + (rows.length ? `<tr class="tot"><td></td><td>סה"כ (${rows.length})</td><td class="hide-m"></td><td></td><td></td><td class="n">${money(tot)}</td><td class="n hide-m">${money(totV)}</td><td></td>${can.expense() ? '<td></td>' : ''}</tr>` : `<tr><td colspan="9" class="empty">אין הוצאות</td></tr>`);
+    wireAttach(el, P.data.files || [], render);
     $$('[data-ed]', el).forEach(b => b.onclick = () => expenseDialog(P, P.pd.expenses.find(x => x.id === b.dataset.ed)));
     $$('[data-del]', el).forEach(b => b.onclick = async () => {
       const x = P.pd.expenses.find(y => y.id === b.dataset.del);
@@ -128,7 +131,7 @@ export async function expenseDialog(P, e, preset = {}) {
   const contract = P.pd.items.filter(i => !i.variation_id);
   const opts = `<option value="g">כללי לפרויקט (מתחלק לפי משקל התמחיר)</option>
     <optgroup label="סעיפי חוזה">${contract.map(i => `<option value="i:${i.id}" ${cur === 'i:' + i.id ? 'selected' : ''}>${esc(`${i.code || ''} ${i.description}`.slice(0, 70))}</option>`).join('')}</optgroup>
-    ${P.pd.variations.map(v => `<optgroup label="${esc(v.number + ' ' + v.title)}"><option value="v:${v.id}" ${cur === 'v:' + v.id ? 'selected' : ''}>${esc(v.number)}: כל החריג</option>${P.pd.items.filter(i => i.variation_id === v.id).map(i => `<option value="i:${i.id}" ${cur === 'i:' + i.id ? 'selected' : ''}>${esc(`${i.code || ''} ${i.description}`.slice(0, 70))}</option>`).join('')}</optgroup>`).join('')}`;
+    ${P.pd.variations.map(v => `<optgroup label="${esc(v.number + ' ' + v.title)}"><option value="v:${v.id}" ${cur === 'v:' + v.id ? 'selected' : ''}>${esc(v.number)}: כל ההוראה</option>${P.pd.items.filter(i => i.variation_id === v.id).map(i => `<option value="i:${i.id}" ${cur === 'i:' + i.id ? 'selected' : ''}>${esc(`${i.code || ''} ${i.description}`.slice(0, 70))}</option>`).join('')}</optgroup>`).join('')}`;
   const pos = (P.pd.pos || []).filter(p => p.status !== 'cancelled' || p.id === v0.po_id);
   const body = `<datalist id="sup">${suppliers.map(s => `<option value="${esc(s)}">`).join('')}</datalist>
     <div class="grid g2">${field('תאריך מסמך', 'doc_date', v0.doc_date || new Date().toISOString().slice(0, 10), { type: 'date', req: true })}${field('ספק / נותן שירות', 'supplier_name', v0.supplier_name, { attrs: 'list="sup"' })}

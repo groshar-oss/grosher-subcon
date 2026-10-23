@@ -1,10 +1,12 @@
-// שלב 7: ספקים וקבלנים, מסמכים עם תוקף, מסמכי הלקוח מול הראשי, ערבויות וספר טלפונים
+// שלב 7: ספקים וקבלנים, מסמכים עם תוקף, מסמכי הלקוח מול הקבלן הראשי, ערבויות וספר טלפונים
 import { h, esc, $, $$, modal, field, select, area, toast, money, fmtDate, nullIfEmpty, confirmBox } from '../util.js';
 import { db } from '../db.js';
 import { S, can, render, loadTenantData, logChange } from '../app.js';
 import { n } from '../calc.js';
 import { VENDOR_KINDS, DOC_TYPES, REQUIRED, OWN_REQUIRED, GUAR_KINDS, expiryState, daysLeft, docStatus, vendorStatus, guaranteeState, parseContacts, isDup } from '../docs.js';
 import { readWorkbook, loadXLSX } from '../import.js';
+import { attachBtn, wireAttach, openFile } from '../files.js';
+let FILES = [];
 
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const stChip = (s, d) => s === 'expired' ? `<span class="chip red">פג תוקף${d != null ? ` (${-d} ימים)` : ''}</span>` : s === 'soon' ? `<span class="chip amber">פג בעוד ${d} ימים</span>` : s === 'open' ? '<span class="chip">בלי תפוגה</span>' : s === 'returned' ? '<span class="chip">הוחזרה</span>' : '<span class="chip green">בתוקף</span>';
@@ -13,8 +15,9 @@ const statusLine = st => [st.missing.length ? `<span class="chip red">חסר: ${
 export async function viewVendors(tab = 'list') {
   if (!can.prices()) return h('<div class="card empty">אין הרשאה</div>');
   const data = await loadTenantData();
+  FILES = data.files || [];
   const el = h(`<div><div class="top"><div><h1>ספקים, מסמכים וערבויות</h1><div class="sub">מסמכים עם תאריך תוקף · התראה ${30} יום לפני פקיעה · מסמך שפג נחשב חסר</div></div></div>
-    <nav class="tabs"><a href="#/vendors" class="${tab === 'list' ? 'on' : ''}">ספקים וקבלנים</a><a href="#/vendors/own" class="${tab === 'own' ? 'on' : ''}">המסמכים שלנו מול הראשי</a><a href="#/vendors/guarantees" class="${tab === 'guarantees' ? 'on' : ''}">ערבויות</a></nav><div id="vt"></div></div>`);
+    <nav class="tabs"><a href="#/vendors" class="${tab === 'list' ? 'on' : ''}">ספקים וקבלנים</a><a href="#/vendors/own" class="${tab === 'own' ? 'on' : ''}">המסמכים שלנו מול הקבלן הראשי</a><a href="#/vendors/guarantees" class="${tab === 'guarantees' ? 'on' : ''}">ערבויות</a></nav><div id="vt"></div></div>`);
   $('#vt', el).appendChild({ list: tabList, own: tabOwn, guarantees: tabGuar }[tab]?.(data) || tabList(data));
   return el;
 }
@@ -64,6 +67,7 @@ async function vendorDialog(data, v) {
     ${v && edit ? '<p><button type="button" class="btn small ghost danger-t" id="delv">מחיקת הכרטיס</button></p>' : ''}`;
   const d = await modal({ title: v ? v.name : 'ספק / קבלן חדש', body, wide: true, ok: edit ? 'שמירה' : null, cancel: edit ? 'ביטול' : 'סגירה', onMount: (el, close) => {
     $('#adddoc', el)?.addEventListener('click', () => { close(null); docDialog(data, { vendor_id: v.id }, fresh => vendorDialog(fresh, fresh.vendors.find(x => x.id === v.id))); });
+    wireAttach(el, FILES, null);
     $$('[data-doc]', el).forEach(b => b.onclick = () => { close(null); docDialog(data, data.documents.find(x => x.id === b.dataset.doc), fresh => vendorDialog(fresh, fresh.vendors.find(x => x.id === v.id))); });
     $('#delv', el)?.addEventListener('click', async () => { if (!(await confirmBox('מחיקת כרטיס', `למחוק את ${v.name} ואת המסמכים שלו? ההוצאות נשארות.`, 'מחיקה', true))) return; await db.remove('vendors', v.id); close(null); toast('נמחק'); render(); });
   }, validate: x => (!x.name.trim() ? 'חסר שם' : (!v || x.name.trim() !== v.name) && data.vendors.some(o => o.name.trim() === x.name.trim()) ? 'כבר יש כרטיס בשם הזה' : null) });
@@ -75,8 +79,12 @@ async function vendorDialog(data, v) {
 }
 
 const docTable = (docs, today, edit, extraCol) => `<div class="tw" style="box-shadow:none;border:1px solid var(--line)"><table><thead><tr><th>סוג</th>${extraCol ? `<th>${extraCol[0]}</th>` : ''}<th>פרטים</th><th>בתוקף עד</th><th>מצב</th><th></th></tr></thead><tbody>
-  ${docs.map(d => { const s = expiryState(d.expiry, today); return `<tr class="${s === 'expired' ? 'al-r' : s === 'soon' ? 'al-y' : ''}"><td>${DOC_TYPES[d.doc_type]}</td>${extraCol ? `<td>${esc(extraCol[1](d))}</td>` : ''}<td class="wrap">${esc(d.title || '')}${d.number ? ` · ${esc(d.number)}` : ''}${d.link ? ` · <a href="${esc(d.link)}" target="_blank" rel="noopener">קובץ</a>` : ''}</td>
-    <td>${fmtDate(d.expiry)}</td><td>${stChip(s, daysLeft(d.expiry, today))}</td><td>${edit ? `<button type="button" class="btn small ghost" data-doc="${d.id}">עריכה</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">אין מסמכים</td></tr>'}</tbody></table></div>`;
+  ${docs.map(d => { const s = expiryState(d.expiry, today); return `<tr class="${s === 'expired' ? 'al-r' : s === 'soon' ? 'al-y' : ''}"><td>${DOC_TYPES[d.doc_type]}</td>${extraCol ? `<td>${esc(extraCol[1](d))}</td>` : ''}<td class="wrap">${esc(d.title || '')}${d.number ? ` · ${esc(d.number)}` : ''}${d.link && !String(d.link).startsWith('file:') ? ` · <a href="${esc(d.link)}" target="_blank" rel="noopener">קישור</a>` : ''}</td>
+    <td>${fmtDate(d.expiry)}</td><td>${stChip(s, daysLeft(d.expiry, today))}</td><td style="white-space:nowrap">${edit ? `${attachBtn(docFiles(d), 'documents', d.id, { projectId: d.project_id, docType: 'vendor_doc', label: `${DOC_TYPES[d.doc_type]} ${d.number || ''}`.trim() })} <button type="button" class="btn small ghost" data-doc="${d.id}">עריכה</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">אין מסמכים</td></tr>'}</tbody></table></div>`;
+
+// מסמך שנקלט מתיבת המסמכים מקושר לקובץ (link = file:<id>), גם אם הקובץ עצמו לא סומן
+const docFiles = d => { const fid = String(d.link || '').startsWith('file:') ? d.link.slice(5) : null; const f = fid && FILES.find(x => x.id === fid);
+  if (f && !(f.links || []).some(l => l.id === d.id)) f.links = [...(f.links || []), { table: 'documents', id: d.id, label: DOC_TYPES[d.doc_type] }]; return FILES; };
 
 async function docDialog(data, d0, after) {
   const isNew = !d0.id;
@@ -99,7 +107,7 @@ async function docDialog(data, d0, after) {
 // אחרי שמירת מסמך מכרטיס ספק: טוענים מחדש ופותחים שוב את הכרטיס
 async function reloadAfter(after) { await render(); if (after) after(await loadTenantData()); }
 
-// ===== המסמכים שלנו מול הראשי =====
+// ===== המסמכים שלנו מול הקבלן הראשי =====
 function tabOwn(data) {
   const today = todayStr(), edit = can.expense();
   const own = data.documents.filter(d => !d.vendor_id);
@@ -109,6 +117,7 @@ function tabOwn(data) {
     ${blocks.map(b => { const ds = own.filter(d => (d.main_contractor_id || null) === b.id); if (b.id && !ds.length) return '';
       const st = docStatus(own.filter(d => !d.main_contractor_id || d.main_contractor_id === b.id), OWN_REQUIRED, today);
       return `<div class="card"><h2>${esc(b.name)} <span style="font-weight:400">${statusLine(st)}</span></h2>${docTable(ds, today, edit)}</div>`; }).join('')}</div>`);
+  wireAttach(el, FILES, render);
   $('#add', el)?.addEventListener('click', () => docDialog(data, {}, null));
   $$('[data-doc]', el).forEach(b => b.onclick = () => docDialog(data, data.documents.find(x => x.id === b.dataset.doc), null));
   return el;
@@ -128,7 +137,8 @@ function tabGuar(data) {
       <div class="kpi"><div class="l">פג תוקף או יפוג ב-30 יום</div><div class="v ${act.some(g => ['soon', 'expired'].includes(guaranteeState(g, today))) ? 'neg' : ''}">${act.filter(g => ['soon', 'expired'].includes(guaranteeState(g, today))).length}</div></div>`;
     $('#tb', el).innerHTML = gs.map(g => { const s = guaranteeState(g, today); return `<tr class="${s === 'expired' ? 'al-r' : s === 'soon' ? 'al-y' : s === 'returned' ? 'dim' : ''}"><td>${esc(data.projects.find(p => p.id === g.project_id)?.name || '')}</td><td>${GUAR_KINDS[g.kind]}</td>
       <td class="hide-m">${esc(data.mcs.find(m => m.id === g.main_contractor_id)?.name || '')}</td><td class="hide-m">${esc(g.bank || '')}${g.number ? ' · ' + esc(g.number) : ''}</td><td class="n">${money(g.amount)}</td><td>${fmtDate(g.expiry)}</td><td>${stChip(s, daysLeft(g.expiry, today))}</td>
-      <td>${edit ? `<button class="btn small ghost" data-g="${g.id}">עריכה</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">אין ערבויות</td></tr>';
+      <td style="white-space:nowrap">${edit ? `${attachBtn(FILES, 'guarantees', g.id, { projectId: g.project_id, docType: 'guarantee', label: `ערבות ${GUAR_KINDS[g.kind]} ${g.number || ''}`.trim() })} <button class="btn small ghost" data-g="${g.id}">עריכה</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="8" class="empty">אין ערבויות</td></tr>';
+    wireAttach(el, FILES, render);
     $$('[data-g]', el).forEach(b => b.onclick = () => guarDialog(data, data.guarantees.find(g => g.id === b.dataset.g)));
   };
   $('#all', el).onchange = e => { F.all = e.target.checked; draw(); };

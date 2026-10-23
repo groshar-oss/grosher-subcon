@@ -1,10 +1,12 @@
 // מסך בית: מה דורש טיפול, לכל הפרויקטים של הלקוח
-import { h, esc, money, pct, $, plainMoney } from '../util.js';
+import { h, esc, money, pct, $, plainMoney, toast } from '../util.js';
 import { S, can, loadTenantData, modeSwitch, tenant, render, settings } from '../app.js';
 import { portfolio, VO_AT_RISK, VO_STATUS } from '../calc.js';
 import { projData, summarize, level, levelColor, levelBg, STATUS, CONTRACT, modeLine } from './common.js';
 import { collection } from '../bills.js';
 import { cashflow, monthLabel } from '../cashflow.js';
+import { maybeSendAlerts, sendAlerts, recipients } from '../alerts.js';
+import { gEnabled, gReady, gConnect } from '../google.js';
 import { vendorStatus, docStatus, OWN_REQUIRED, DOC_TYPES, GUAR_KINDS, guaranteeState, daysLeft, finalBill } from '../docs.js';
 
 export async function viewHome() {
@@ -24,15 +26,15 @@ export async function viewHome() {
     <div class="top"><div><h1>מה דורש טיפול</h1><div class="sub">${esc(tenant()?.name || '')} · ${live.length} פרויקטים פעילים · סכומים לפני מע"מ</div></div>
       <div class="actions" id="modeBox"></div></div>
     <div class="kpis">
-      <div class="kpi"><div class="l">היקף מכירה</div><div class="v">${money(T.sale)}</div><div class="n">חוזים ${money(T.contractSale)} · חריגים ${money(T.voSale)}</div></div>
+      <div class="kpi"><div class="l">היקף מכירה</div><div class="v">${money(T.sale)}</div><div class="n">חוזים ${money(T.contractSale)} · הוראות שינוי ${money(T.voSale)}</div></div>
       <div class="kpi"><div class="l">צפי עלות לסיום</div><div class="v">${money(T.forecast)}</div><div class="n">תמחיר ${money(T.planned)} · חריגה ${pct(T.overrun, { sign: true })}</div></div>
       <div class="kpi"><div class="l">רווח צפוי</div><div class="v ${T.profit >= 0 ? 'pos' : 'neg'}">${money(T.profit)}</div><div class="n">${pct(T.profitPct)} מהמכירה · תוכנן ${pct(T.plannedProfitPct)}</div></div>
       <div class="kpi"><div class="l">עלות בפועל עד היום</div><div class="v">${money(T.actual)}</div><div class="n">${pct(T.planned ? T.actual / T.planned * 100 : 0)} מהתמחיר</div></div>
       <div class="kpi"><div class="l">לגבייה מהקבלנים הראשיים</div><div class="v">${money(sums.reduce((a, x) => a + collection(x.s.billing.byBill).outstanding, 0))}</div><div class="n">${(() => { const o = sums.flatMap(x => collection(x.s.billing.byBill).overdue); return o.length ? `<span class="neg">${o.length} באיחור · ${money(o.reduce((a, r) => a + r.outstanding, 0))}</span>` : 'אין חשבונות באיחור'; })()}</div></div>
-      <div class="kpi"><div class="l">חריגים שטרם אושרו</div><div class="v ${riskTotal ? 'neg' : ''}">${money(riskTotal)}</div><div class="n">${S.mode === 'all' ? 'כלולים בתצוגה' : 'לא כלולים בתצוגה'}</div></div>
+      <div class="kpi"><div class="l">הוראות שינוי שטרם אושרו</div><div class="v ${riskTotal ? 'neg' : ''}">${money(riskTotal)}</div><div class="n">${S.mode === 'all' ? 'כלולים בתצוגה' : 'לא כלולים בתצוגה'}</div></div>
     </div>
     <div class="cols"><div class="card"><h2>פרויקטים ${modeLine()}</h2><div id="plist"></div></div>
-    <div class="card"><h2>פעולות פתוחות <span class="chip ${actions.length ? 'red' : 'green'}">${actions.length}</span></h2><div id="alist"></div></div></div></div>`);
+    <div class="card"><h2>פעולות פתוחות <span class="chip ${actions.length ? 'red' : 'green'}">${actions.length}</span>${can.expense() ? '<button class="btn small ghost" id="mailnow" title="שליחת ההתראות האדומות החדשות במייל">שליחת התראות במייל</button>' : ''}</h2><div id="alist"></div></div></div></div>`);
   $('#modeBox', el).appendChild(modeSwitch());
   const pl = $('#plist', el);
   if (!sums.length) pl.innerHTML = `<div class="empty">אין פרויקטים פעילים. <a href="#/projects">הוספת פרויקט</a></div>`;
@@ -44,7 +46,7 @@ export async function viewHome() {
       <div class="pr"><div>מכירה<b>${money(t.sale)}</b></div><div>צפי עלות<b>${money(t.forecast)}</b></div><div>רווח צפוי<b class="${t.profit >= 0 ? '' : 'neg'}">${money(t.profit)} <small class="mut">${pct(t.profitPct)}</small></b></div>
       <div>בפועל עד היום<b>${money(t.actual)}</b></div><div>ביצוע / הוצאה<b>${pct(t.progress, { d: 0 })} / ${pct(t.spentPct, { d: 0 })}</b></div></div>
       <div class="bar" title="כחול: אחוז ביצוע. רקע: אחוז הוצאה מהתמחיר"><i style="width:${Math.min(100, t.spentPct)}%;background:${levelColor(l.cls)};opacity:.35"></i><i style="width:${Math.min(100, t.progress)}%;background:#2f5bea"></i></div>
-      ${s.excludedActual ? `<div class="small neg" style="margin-top:6px">עלות שכבר הוצאה על חריגים שלא נכללים בתצוגה: ${money(s.excludedActual)}</div>` : ''}</a>`);
+      ${s.excludedActual ? `<div class="small neg" style="margin-top:6px">עלות שכבר הוצאה על הוראות שינוי שלא נכללות בתצוגה: ${money(s.excludedActual)}</div>` : ''}</a>`);
   }
   const al = $('#alist', el);
   const drawActs = k => { al.innerHTML = actions.length ? actions.slice(0, k).map(a => `<a class="act" href="${a.href}"><span class="dot" style="background:${a.color}"></span><div><b>${esc(a.title)}</b><small>${esc(a.sub)}</small></div><span class="amt">${a.amt || ''}</span></a>`).join('')
@@ -52,10 +54,20 @@ export async function viewHome() {
     : '<div class="empty">אין פעולות פתוחות</div>';
     $('#moreacts', al)?.addEventListener('click', () => drawActs(actions.length)); };
   drawActs(12);
+  // התראות במייל: נשלחות אוטומטית כשנכנסים למסך, אם Google מחובר וההתראות פעילות
+  if (can.expense()) setTimeout(() => maybeSendAlerts(actions).then(r => { if (r?.sent) toast(`נשלחו במייל ${r.sent} התראות חדשות`); }), 300);
+  $('#mailnow', el)?.addEventListener('click', async () => {
+    if (!recipients().length) return toast('אין נמענים להתראות. מוסיפים אותם בהגדרות הלקוח', 'warn');
+    try {
+      if (!gEnabled() || !gReady()) await gConnect();
+      const r = await sendAlerts(actions, { force: true });
+      toast(r.sent ? `נשלחו ${r.sent} התראות ל-${r.to.join(', ')}` : r.skipped === 'google' ? 'צריך להתחבר ל-Google' : 'אין התראות אדומות חדשות. כל מה שאדום כבר נשלח');
+    } catch (e) { toast(e.message, 'bad'); }
+  });
   return el;
 }
 
-function buildActions(data, sums) {
+export function buildActions(data, sums) {
   const out = [];
   for (const { p, s } of sums) {
     for (const g of s.voGroups) {
@@ -64,7 +76,7 @@ function buildActions(data, sums) {
     }
     for (const r of s.rows) {
       const c = r.c, code = r.item.code || '', d = r.item.description;
-      if (c.overrun > 0 && !c.noCosting) { const l = level(c.overrun); out.push({ w: 50 + Math.min(c.overrun, 40), color: levelColor(l.cls), title: `סעיף ${code} ${d}`, sub: `${p.name} · ${Math.round(c.progress)}% ביצוע מול ${Math.round(c.spentPct)}% הוצאה · חריגה צפויה ${c.overrun.toFixed(1)}%`, amt: money(c.forecast - c.planned, { sign: true }), href: `#/project/${p.id}/control` }); }
+      if (c.overrun > 0 && !c.noCosting) { const l = level(c.overrun); out.push({ w: 50 + Math.min(c.overrun, 40), color: levelColor(l.cls), sev: ['al-r', 'al-dr'].includes(l.cls) ? 'red' : 'amber', key: `item|${r.item.id}|${l.cls}${l.crit ? '|crit' : ''}`, title: `חריגה בסעיף ${code} ${d}`, sub: `${p.name} · ${Math.round(c.progress)}% ביצוע מול ${Math.round(c.spentPct)}% הוצאה · חריגה צפויה ${c.overrun.toFixed(1)}%`, amt: money(c.forecast - c.planned, { sign: true }), href: `#/project/${p.id}/control` }); }
       else if (c.spendAhead && c.spentPct - c.progress >= 10) out.push({ w: 45, color: '#ff9f43', title: `הוצאה מקדימה את הביצוע: ${code}`, sub: `${p.name} · ${Math.round(c.progress)}% ביצוע מול ${Math.round(c.spentPct)}% הוצאה`, amt: '', href: `#/project/${p.id}/control` });
       if (c.lossPlanned) out.push({ w: 60, color: 'var(--ri)', title: `תמחיר גבוה ממחיר המכירה: ${code}`, sub: `${p.name} · ${d}`, amt: money(c.sale - c.planned), href: `#/project/${p.id}/costing` });
     }
@@ -98,7 +110,7 @@ function buildActions(data, sums) {
     else if (st.soon.length) out.push({ w: 44, color: '#ff9f43', title: `${v.name}: מסמך יפוג בקרוב`, sub: st.soon.map(d => `${DOC_TYPES[d.doc_type]} בעוד ${daysLeft(d.expiry, today)} ימים`).join(' · '), amt: '', href: '#/vendors' });
   }
   const own = docStatus((data.documents || []).filter(d => !d.vendor_id), OWN_REQUIRED, today);
-  if (own.expired.length || own.soon.length) out.push({ w: own.expired.length ? 75 : 50, color: own.expired.length ? 'var(--ri)' : '#ff9f43', title: own.expired.length ? 'מסמך שלנו מול הראשי פג תוקף' : 'מסמך שלנו מול הראשי יפוג בקרוב', sub: [...own.expired, ...own.soon].map(d => `${DOC_TYPES[d.doc_type]} עד ${d.expiry.split('-').reverse().join('.')}`).join(' · '), amt: '', href: '#/vendors/own' });
+  if (own.expired.length || own.soon.length) out.push({ w: own.expired.length ? 75 : 50, color: own.expired.length ? 'var(--ri)' : '#ff9f43', title: own.expired.length ? 'מסמך שלנו מול הקבלן הראשי פג תוקף' : 'מסמך שלנו מול הקבלן הראשי יפוג בקרוב', sub: [...own.expired, ...own.soon].map(d => `${DOC_TYPES[d.doc_type]} עד ${d.expiry.split('-').reverse().join('.')}`).join(' · '), amt: '', href: '#/vendors/own' });
   for (const g of (data.guarantees || [])) { const s = guaranteeState(g, today); if (s === 'expired' || s === 'soon') out.push({ w: s === 'expired' ? 72 : 56, color: s === 'expired' ? 'var(--ri)' : '#ff9f43', title: `ערבות ${GUAR_KINDS[g.kind]} ${s === 'expired' ? 'פגה' : `פגה בעוד ${daysLeft(g.expiry, today)} ימים`}`, sub: `${data.projects.find(p => p.id === g.project_id)?.name || ''} · ${g.bank || ''} ${g.number || ''} · להאריך או לבקש החזרה`, amt: money(g.amount), href: '#/vendors/guarantees' }); }
   for (const { p, s } of sums) if (p.status === 'closing' || (p.end_date && p.end_date < today)) {
     const fb = finalBill(p, s.billing.retentionTotal);

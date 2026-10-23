@@ -1,4 +1,4 @@
-// מסך פרויקט: לשוניות בקרה, כתב כמויות, תמחיר, חריגים, הוצאות, יומן שינויים והגדרות
+// מסך פרויקט: לשוניות בקרה, כתב כמויות, תמחיר, הוראות שינוי, הוצאות, יומן שינויים והגדרות
 import { h, esc, $, $$, modal, field, toast, money, pct, num, area, fmtDate, confirmBox } from '../util.js';
 import { db } from '../db.js';
 import { S, can, loadTenantData, modeSwitch, render, logChange, settings } from '../app.js';
@@ -12,8 +12,9 @@ import { tabQuota, quotaCounts } from './quotas.js';
 import { tabPurchase } from './purchase.js';
 import { tabBills, billView } from './bills.js';
 import { tabCashflow } from './cashflow.js';
+import { viewInbox } from './inbox.js';
 
-const TABS = [['control', 'בקרה ורווחיות'], ['boq', 'כתב כמויות'], ['costing', 'תמחיר'], ['quota', 'מכסות'], ['vo', 'חריגים'], ['worklog', 'יומן עבודה'], ['purchase', 'רכש'], ['expenses', 'הוצאות'], ['bills', 'חשבונות'], ['cashflow', 'תזרים'], ['log', 'יומן שינויים'], ['settings', 'הגדרות פרויקט']];
+const TABS = [['control', 'בקרה ורווחיות'], ['boq', 'כתב כמויות'], ['costing', 'תמחיר'], ['quota', 'מכסות'], ['vo', 'הוראות שינוי'], ['worklog', 'יומן עבודה'], ['purchase', 'רכש'], ['expenses', 'הוצאות'], ['bills', 'חשבונות'], ['cashflow', 'תזרים'], ['docs', 'מסמכים'], ['log', 'יומן שינויים'], ['settings', 'הגדרות פרויקט']];
 
 export async function viewProject(id, tab, extra) {
   const data = await loadTenantData();
@@ -30,13 +31,13 @@ export async function viewProject(id, tab, extra) {
   if (tab === 'bill') return billView(P, extra);
   const mc = data.mcs.find(m => m.id === project.main_contractor_id);
   const qc = quotaCounts(P.summary.quotas || []);
-  const tabs = TABS.filter(([k]) => (!['costing', 'quota'].includes(k) || can.costing()) && (k !== 'log' || can.edit()) && (k !== 'settings' || can.edit()));
+  const tabs = TABS.filter(([k]) => (!['costing', 'quota'].includes(k) || can.costing()) && (k !== 'log' || can.edit()) && (k !== 'docs' || can.expense()) && (k !== 'settings' || can.edit()));
   const el = h(`<div><div class="top"><div><h1>${esc(project.name)}</h1>
     <div class="sub">${esc(mc?.name || 'ללא קבלן ראשי')} · ${CONTRACT[project.contract_type]} · שוטף+${project.pay_terms_days} · ${STATUS[project.status]}${project.address ? ' · ' + esc(project.address) : ''}</div></div>
     <div class="actions"><a class="btn ghost small" href="#/projects">כל הפרויקטים</a></div></div>
     <nav class="tabs">${tabs.map(([k, l]) => `<a href="#/project/${id}/${k}" class="${k === tab ? 'on' : ''}">${l}${k === 'quota' && qc.over + qc.warn ? ` <span class="badge ${qc.over ? 'red' : 'amber'}">${qc.over + qc.warn}</span>` : ''}</a>`).join('')}</nav><div id="tab"></div></div>`);
   const body = $('#tab', el);
-  const fn = { control: tabControl, boq: tabBoq, costing: tabCosting, quota: tabQuota, vo: tabVo, worklog: tabWorkLog, purchase: tabPurchase, expenses: tabExpenses, bills: tabBills, cashflow: tabCashflow, log: tabLog, settings: tabSettings }[tab] || tabControl;
+  const fn = { control: tabControl, boq: tabBoq, costing: tabCosting, quota: tabQuota, vo: tabVo, worklog: tabWorkLog, purchase: tabPurchase, expenses: tabExpenses, bills: tabBills, cashflow: tabCashflow, docs: P => viewInbox(P.id, P), log: tabLog, settings: tabSettings }[tab] || tabControl;
   body.appendChild(await fn(P));
   return el;
 }
@@ -47,20 +48,20 @@ function tabControl(P) {
   const el = h(`<div>
     <div class="actions" style="margin-bottom:12px" id="mb"><span class="mut small">תצוגת רווחיות:</span></div>
     <div class="kpis">
-      <div class="kpi"><div class="l">מכירה</div><div class="v">${money(t.sale)}</div><div class="n">חוזה ${money(s.contract.sale)}${S.mode !== 'contract' ? ` · חריגים ${money(t.sale - s.contract.sale)}` : ''}</div></div>
+      <div class="kpi"><div class="l">מכירה</div><div class="v">${money(t.sale)}</div><div class="n">חוזה ${money(s.contract.sale)}${S.mode !== 'contract' ? ` · הוראות שינוי ${money(t.sale - s.contract.sale)}` : ''}</div></div>
       <div class="kpi"><div class="l">תמחיר</div><div class="v">${money(t.planned)}</div><div class="n">רווח מתוכנן ${pct(t.plannedProfitPct)}</div></div>
       <div class="kpi"><div class="l">עלות בפועל</div><div class="v">${money(t.actual)}</div><div class="n">${pct(t.spentPct, { d: 0 })} מהתמחיר · ביצוע ${pct(t.progress, { d: 0 })}</div></div>
       <div class="kpi"><div class="l">צפי עלות לסיום</div><div class="v">${money(t.forecast)}</div><div class="n">חריגה ${pct(t.overrun, { sign: true })}</div></div>
       <div class="kpi"><div class="l">רווח צפוי</div><div class="v ${t.profit >= 0 ? 'pos' : 'neg'}">${money(t.profit)}</div><div class="n">${pct(t.profitPct)} מהמכירה</div></div>
     </div>
-    ${s.excludedActual ? `<div class="note">עלות שכבר הוצאה על חריגים שלא נכללים בתצוגה הזו: <b>${money(s.excludedActual)}</b>. כדי לראות אותם, עברי ל"כולל לא מאושרים".</div>` : ''}
+    ${s.excludedActual ? `<div class="note">עלות שכבר הוצאה על הוראות שינוי שלא נכללות בתצוגה הזו: <b>${money(s.excludedActual)}</b>. כדי לראות אותם, עברי ל"כולל לא מאושרים".</div>` : ''}
     ${(() => { const q = quotaCounts(s.quotas || []); return q.over + q.warn ? `<a class="note" style="display:block" href="#/project/${P.id}/quota"><b>מכסות:</b> ${q.over ? `${q.over} שורות תמחיר חרגו בכמות או בכסף` : ''}${q.over && q.warn ? ' · ' : ''}${q.warn ? `${q.warn} מתקרבות למכסה` : ''}. לפירוט ←</a>` : ''; })()}
     ${s.commitOpen ? `<div class="small mut" style="margin-bottom:8px">התקשרויות רכש פתוחות (הוזמן ועוד לא חויב): <b>${money(s.commitOpen)}</b>. נכללות בצפי לסיום.</div>` : ''}
     ${s.unallocated ? `<div class="note">יש הוצאות בסך ${money(s.unallocated)} שלא שויכו לאף סעיף (אין סעיפים מתאימים בפרויקט).</div>` : ''}
     <div class="tw" id="ctl"></div>${legend()}
     <div class="cols even"><div class="card"><h2>רווחיות לפי מקור ${modeLine()}</h2><div class="tw" style="box-shadow:none"><table id="split"></table></div></div>
     <div class="card"><h2>איך מחושב</h2><p class="small">צפי עלות לסיום = עלות בפועל + יתרת התמחיר לפי אחוז הביצוע (אלא אם הוזן צפי ידני). רווח צפוי = מכירה פחות צפי עלות. חריגה = צפי עלות מול התמחיר.</p>
-    <p class="small mut">בפועל = הוצאות + עלות עבודה מיומן העבודה. הצפי לא יורד מתחת לבפועל + הזמנות רכש פתוחות. הוצאה כללית לפרויקט מתחלקת בין הסעיפים לפי משקל התמחיר. הוצאה של חריג נספרת רק בחריג.</p>${can.edit() ? '<p class="small mut">אחוז ביצוע מעדכנים בטבלה. עד שיהיו חשבונות חלקיים (שלב 4), זה הנתון שקובע את הצפי.</p>' : ''}</div></div></div>`);
+    <p class="small mut">בפועל = הוצאות + עלות עבודה מיומן העבודה. הצפי לא יורד מתחת לבפועל + הזמנות רכש פתוחות. הוצאה כללית לפרויקט מתחלקת בין הסעיפים לפי משקל התמחיר. הוצאה של הוראת שינוי נספרת רק בהוראה.</p>${can.edit() ? '<p class="small mut">אחוז ביצוע מעדכנים בטבלה. עד שיהיו חשבונות חלקיים (שלב 4), זה הנתון שקובע את הצפי.</p>' : ''}</div></div></div>`);
   $('#mb', el).appendChild(modeSwitch());
 
   const contractByChapter = groupBy(s.contractRows, r => r.item.chapter || 'ללא פרק');
@@ -83,18 +84,18 @@ function tabControl(P) {
   for (const [ch, rs] of contractByChapter) { html += `<tr class="sec"><td colspan="10">${esc(ch)}</td></tr>` + rs.map(row).join('') + (contractByChapter.length > 1 ? subtotal('סה"כ ' + ch, rs) : ''); }
   if (s.contractRows.length) html += subtotal('סה"כ חוזה', s.contractRows);
   if (voGroups.length) {
-    html += `<tr class="sec"><td colspan="10">חריגים (נפרד מהחוזה)</td></tr>`;
+    html += `<tr class="sec"><td colspan="10">הוראות שינוי (בנפרד מהחוזה)</td></tr>`;
     for (const g of voGroups) {
       const risk = !['approved', 'partial'].includes(g.vo.status);
       html += `<tr class="${risk ? 'dim' : ''}"><td><b>${esc(g.vo.number)}</b></td><td colspan="9">${esc(g.vo.title)} · <span class="chip ${risk ? 'red' : 'green'}">${VO_STATUS[g.vo.status]}</span>${g.vo.status === 'partial' ? ` אושר ${money(g.approvedSale)} מתוך ${money(g.requested)}` : ''}</td></tr>` + g.rows.map(row).join('');
     }
-    html += subtotal('סה"כ חריגים בתצוגה', voGroups.flatMap(g => g.rows));
+    html += subtotal('סה"כ הוראות שינוי בתצוגה', voGroups.flatMap(g => g.rows));
   }
   html += `<tr class="tot"><td></td><td>סה"כ פרויקט (${esc(PROFIT_MODES[S.mode])})</td><td class="n">${money(t.sale)}</td><td class="n">${money(t.planned)}</td><td class="n">${money(t.actual)}</td><td class="n">${money(t.forecast)}</td><td class="n">${money(t.profit)}</td><td class="n">${pct(t.progress, { d: 0 })}</td><td class="n">${pct(t.spentPct, { d: 0 })}</td><td class="n">${pct(t.overrun, { sign: true })}</td></tr></tbody></table>`;
-  if (S.mode !== 'contract' && voGroups.some(g => g.vo.status === 'partial')) html += '<div class="small mut" style="padding:8px">בחריג שאושר חלקית, המכירה בסיכום היא הסכום המאושר.</div>';
+  if (S.mode !== 'contract' && voGroups.some(g => g.vo.status === 'partial')) html += '<div class="small mut" style="padding:8px">בהוראת שינוי שאושרה חלקית, המכירה בסיכום היא הסכום המאושר.</div>';
   $('#ctl', el).innerHTML = html;
 
-  const split = [['חוזה', s.contract], ['חריגים מאושרים', s.approved], ['חריגים שטרם אושרו', s.atRisk]];
+  const split = [['חוזה', s.contract], ['הוראות שינוי מאושרות', s.approved], ['הוראות שינוי שטרם אושרו', s.atRisk]];
   $('#split', el).innerHTML = `<thead><tr><th></th><th class="n">מכירה</th><th class="n">צפי עלות</th><th class="n">רווח</th><th class="n">%</th><th>בתצוגה</th></tr></thead><tbody>
     ${split.map(([l, a], i) => { const inc = i === 0 || (i === 1 && S.mode !== 'contract') || (i === 2 && S.mode === 'all'); return `<tr class="${inc ? '' : 'dim'}"><td>${l}</td><td class="n">${money(a.sale)}</td><td class="n">${money(a.forecast)}</td><td class="n">${money(a.sale - a.forecast)}</td><td class="n">${pct(a.sale ? (a.sale - a.forecast) / a.sale * 100 : 0)}</td><td>${inc ? '✓' : '—'}</td></tr>`; }).join('')}
     <tr class="tot"><td>סה"כ בתצוגה</td><td class="n">${money(t.sale)}</td><td class="n">${money(t.forecast)}</td><td class="n">${money(t.profit)}</td><td class="n">${pct(t.profitPct)}</td><td></td></tr></tbody>`;
@@ -130,7 +131,7 @@ async function itemDetail(P, itemId) {
   const body = `<p class="small mut">${esc(it.chapter || '')} · ${num(it.qty)} ${esc(it.unit || '')} × ${money(it.unit_price, { unit: true })}</p>
     <div class="tw"><table><thead><tr><th>רכיב</th><th class="n">תמחיר</th><th class="n">בפועל</th></tr></thead><tbody>
     ${Object.entries(byKind).map(([k, v]) => `<tr><td>${COST_KINDS[k] || EXPENSE_KINDS[k] || k}</td><td class="n">${money(v.plan)}</td><td class="n">${money(v.act)}</td></tr>`).join('')}
-    ${c.actual - direct > 0.5 ? `<tr><td>חלק מהוצאות כלליות / חריג</td><td class="n"></td><td class="n">${money(c.actual - direct)}</td></tr>` : ''}
+    ${c.actual - direct > 0.5 ? `<tr><td>חלק מהוצאות כלליות / הוראת שינוי</td><td class="n"></td><td class="n">${money(c.actual - direct)}</td></tr>` : ''}
     <tr class="tot"><td>סה"כ</td><td class="n">${money(c.planned)}</td><td class="n">${money(c.actual)}</td></tr></tbody></table></div>
     ${ents.length ? `<p class="small">מיומן העבודה: ${ents.filter(e => W[e.worker_id]?.pay_type !== 'piece').reduce((a, e) => a + n(e.days), 0)} ימי עבודה${ents.some(e => W[e.worker_id]?.pay_type === 'piece') ? ` · ${num(ents.reduce((a, e) => a + n(e.piece_qty), 0))} ${esc(it.unit || '')} בקבלנות` : ''}</p>` : ''}
     ${c.commit ? `<p class="small">הזמנות רכש פתוחות לסעיף: <b>${money(c.commit)}</b></p>` : ''}
@@ -159,7 +160,7 @@ async function tabLog(P) {
 // ===== הגדרות פרויקט =====
 function tabSettings(P) {
   const el = h(`<div><div class="card"><form id="pf">${projectForm(P.project, P.mcs)}<button class="btn">שמירה</button></form></div>
-    <div class="card"><h2>מחיקת פרויקט</h2><p class="small mut">מוחקת את הפרויקט עם כתב הכמויות, התמחיר, החריגים וההוצאות. אי אפשר לשחזר.</p><button class="btn danger" id="del">מחיקת הפרויקט</button></div></div>`);
+    <div class="card"><h2>מחיקת פרויקט</h2><p class="small mut">מוחקת את הפרויקט עם כתב הכמויות, התמחיר, הוראות השינוי וההוצאות. אי אפשר לשחזר.</p><button class="btn danger" id="del">מחיקת הפרויקט</button></div></div>`);
   $('#pf', el).onsubmit = async e => {
     e.preventDefault();
     const f = e.target; const v = {}; for (const x of f.elements) if (x.name) v[x.name] = x.type === 'checkbox' ? x.checked : x.value;

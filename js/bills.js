@@ -6,7 +6,7 @@ export const BILL_APPROVED = ['partial', 'approved', 'paid'];
 // קנס: הוטל ומנוכה / בערעור (מנוכה עד שיוחלט) / בוטל (לא מנוכה)
 export const FINE_STATUS = { imposed: 'הוטל', appeal: 'בערעור', cancelled: 'בוטל' };
 export const fineStatus = f => f.status || (f.disputed ? 'appeal' : 'imposed');
-export const CUT_REASONS = ['כמות לא נמדדה / לא אושרה במדידה', 'עבודה לא הושלמה', 'ליקויים שלא תוקנו', 'מחיר או סעיף לא מאושר', 'מחוץ לחוזה (נדרש חריג)'];
+export const CUT_REASONS = ['כמות לא נמדדה / לא אושרה במדידה', 'עבודה לא הושלמה', 'ליקויים שלא תוקנו', 'מחיר או סעיף לא מאושר', 'מחוץ לחוזה (נדרשת הוראת שינוי)'];
 const r2 = x => Math.round(x * 100) / 100;
 
 // ערך מצטבר של סעיף: מדידה = כמות × מחיר; פאושלי / אחוז = אחוז מצטבר × ערך הסעיף
@@ -121,5 +121,5 @@ export function progressFromBills(items, cumByItem) {
   return out;
 }
 
-// חריג נכנס לחשבון רק אם אושר (או אושר חלקית)
+// הוראת שינוי נכנסת לחשבון רק אם אושרה (או אושר חלקית)
 export const voBillable = vo => !vo || VO_APPROVED.includes(vo.status);

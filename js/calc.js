@@ -20,9 +20,9 @@ export const VO_AT_RISK = ['submitted', 'executed_unapproved'];
 
 // מצבי תצוגת רווחיות
 export const PROFIT_MODES = {
-  contract: 'חוזה בלבד, בלי חריגים',
-  approved: 'כולל חריגים מאושרים',
-  all: 'כולל חריגים שטרם אושרו'
+  contract: 'חוזה בלבד, בלי הוראות שינוי',
+  approved: 'כולל הוראות שינוי מאושרות',
+  all: 'כולל הוראות שינוי שטרם אושרו'
 };
 
 export const itemSale = it => n(it.qty) * n(it.unit_price);
@@ -132,7 +132,7 @@ export function projectSummary(data, mode = 'approved') {
   tot.spentPct = tot.planned ? tot.actual / tot.planned * 100 : 0;
   tot.progress = tot.planned ? rows.filter(r => inMode(r, mode)).reduce((s, r) => s + r.c.planned * r.c.progress / 100, 0) / tot.planned * 100 : 0;
 
-  // עלות שכבר הוצאה על חריגים שלא נכללים בתצוגה (כדי שלא תוסתר)
+  // עלות שכבר הוצאה על הוראות שינוי שלא נכללות בתצוגה (כדי שלא תוסתר)
   const excluded = voGroups.filter(g => !inModeVO(g.vo, mode));
   const excludedActual = excluded.reduce((s, g) => s + g.actual, 0);
 
@@ -167,7 +167,7 @@ export const EXPENSE_KINDS = {
 };
 export const EXPENSE_STATUS = { expected: 'צפוי', invoice: 'התקבלה חשבונית', approved: 'אושר', paid: 'שולם' };
 
-// חלוקת הוצאות לסעיפים: הוצאה עם סעיף נרשמת לסעיף; הוצאה של חריג בלי סעיף מתחלקת בין סעיפי החריג;
+// חלוקת הוצאות לסעיפים: הוצאה עם סעיף נרשמת לסעיף; הוצאה של הוראת שינוי בלי סעיף מתחלקת בין סעיפי ההוראה;
 // הוצאה כללית לפרויקט מתחלקת בין סעיפי החוזה לפי משקל העלות המתוכננת.
 export function actualsByItem(items, lines, expenses, overheadPct = 0) {
   const out = {};

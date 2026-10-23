@@ -3,13 +3,13 @@ import { CONFIG } from './config.js';
 import { store } from './util.js';
 import { demoData } from './demo.js';
 
-const LOCAL_KEY = 'grosher-subcon-demo-v4';
+const LOCAL_KEY = 'grosher-subcon-demo-v5';
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
   const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
 
 const TABLES = ['tenants', 'memberships', 'main_contractors', 'projects', 'variations', 'boq_items', 'cost_lines', 'expenses', 'change_log', 'members_demo',
   'workers', 'work_days', 'work_entries', 'work_qty', 'purchase_orders', 'po_lines', 'bills', 'bill_lines', 'bill_fines', 'bill_payments',
-  'vendors', 'documents', 'guarantees', 'contacts'];
+  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log'];
 
 function match(row, q = {}) {
   for (const [k, v] of Object.entries(q.eq || {})) if (String(row[k] ?? '') !== String(v ?? '')) return false;
@@ -82,7 +82,7 @@ class LocalDB {
     const T = this.data.tables;
     T[table] = T[table].filter(r => !ids.includes(r.id));
     const deps = {
-      tenants: [['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
+      tenants: [['files', 'tenant_id'], ['alert_log', 'tenant_id'], ['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
       projects: [['variations', 'project_id'], ['boq_items', 'project_id'], ['cost_lines', 'project_id'], ['expenses', 'project_id'], ['change_log', 'project_id'],
         ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id']],
       vendors: [['documents', 'vendor_id']],
@@ -121,7 +121,7 @@ class LocalDB {
       else T.work_days.push({ id: uuid(), tenant_id: pr.tenant_id, project_id: args.p, log_date: args.d, weather: P.weather || null, delays: P.delays || null, notes: P.notes || null, created_at: new Date().toISOString() });
       const num = v => v === '' || v == null ? null : +v;
       for (const e of P.entries || []) T.work_entries.push({ id: uuid(), tenant_id: pr.tenant_id, project_id: args.p, log_date: args.d, worker_id: e.worker_id, boq_item_id: e.boq_item_id || null, variation_id: e.variation_id || null,
-        cost_line_id: null, days: num(e.days) ?? 1, ot_hours: num(e.ot_hours) ?? 0, piece_qty: num(e.piece_qty), piece_rate: null, note: e.note || null, created_at: new Date().toISOString() });
+        cost_line_id: null, days: num(e.days) ?? 1, hours: num(e.hours), ot_hours: num(e.ot_hours) ?? 0, piece_qty: num(e.piece_qty), piece_rate: null, note: e.note || null, created_at: new Date().toISOString() });
       for (const q of P.qty || []) T.work_qty.push({ id: uuid(), tenant_id: pr.tenant_id, project_id: args.p, log_date: args.d, boq_item_id: q.boq_item_id, qty: num(q.qty) ?? 0, note: q.note || null });
       this.save(); return 'ok';
     }
@@ -131,6 +131,20 @@ class LocalDB {
   }
   async signOut() {}
 }
+
+// קבצים במצב הדגמה: IndexedDB בדפדפן
+function idb() {
+  return new Promise((res, rej) => { const r = indexedDB.open('grosher-subcon-files', 1); r.onupgradeneeded = () => r.result.createObjectStore('f'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+}
+async function idbDo(mode, fn) { const d = await idb(); return new Promise((res, rej) => { const tx = d.transaction('f', mode); const r = fn(tx.objectStore('f')); tx.oncomplete = () => res(r?.result); tx.onerror = () => rej(tx.error); }); }
+LocalDB.prototype.putFile = async function (path, blob) { await idbDo('readwrite', s => s.put(blob, path)); };
+LocalDB.prototype.getFile = async function (path) { const b = await idbDo('readonly', s => s.get(path)); if (!b) throw new Error('הקובץ לא נמצא בדפדפן הזה'); return b; };
+LocalDB.prototype.removeFile = async function (path) { await idbDo('readwrite', s => s.delete(path)); };
+// קריאת מסמך: במצב הדגמה אין שרת. בדיקות יכולות להזריק תשובה מדומה
+LocalDB.prototype.intake = async function (body) {
+  if (window.__INTAKE_MOCK__) return window.__INTAKE_MOCK__(body);
+  throw Object.assign(new Error('במצב הדגמה אין קריאה אוטומטית של מסמכים. אפשר לבחור סוג ולמלא ידנית.'), { demo: true });
+};
 
 // ===== מצב ענן =====
 class CloudDB {
@@ -208,6 +222,27 @@ class CloudDB {
     for (const [k, arr] of Object.entries(q.in || {})) s = s.in(k, arr);
     for (const k of q.isNull || []) s = s.is(k, null);
     const { error } = await s; if (error) throw dbErr(error);
+  }
+  async putFile(path, blob) {
+    const { error } = await this.sb.storage.from('files').upload(path, blob, { contentType: blob.type || 'application/octet-stream', upsert: false });
+    if (error) throw dbErr(error);
+  }
+  async getFile(path) {
+    const { data, error } = await this.sb.storage.from('files').download(path);
+    if (error) throw dbErr(error); return data;
+  }
+  async removeFile(path) { const { error } = await this.sb.storage.from('files').remove([path]); if (error) throw dbErr(error); }
+  // קריאת מסמך ב-Claude דרך פונקציית השרת intake (המפתח שמור בשרת בלבד)
+  async intake(body) {
+    const { data, error } = await this.sb.functions.invoke('intake', { body });
+    if (error) {
+      let m = error.message || '';
+      try { const j = await error.context?.json?.(); if (j?.error) m = j.error; } catch { /* */ }
+      if (/Failed to send|not found|404/i.test(m)) m = 'פונקציית הקריאה (intake) עוד לא הותקנה ב-Supabase. ראו בחוברת ההתקנה של חבילה 5, שלב 3.';
+      throw new Error(m);
+    }
+    if (data?.error) throw new Error(data.error);
+    return data;
   }
   async rpc(name, args) {
     if (name === 'remove_member') return this.remove('memberships', args.id);

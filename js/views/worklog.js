@@ -1,9 +1,10 @@
 // יומן עבודה: מסך יום (מתוכנן לטלפון), רשימת ימים במשרד, ושמירה בלי קליטה (תור שנשלח כשהקליטה חוזרת)
 import { h, esc, $, $$, toast, money, num, store, fmtDate, confirmBox } from '../util.js';
 import { db } from '../db.js';
-import { S, can, render } from '../app.js';
+import { S, can, render, settings } from '../app.js';
 import { n } from '../calc.js';
 import { PAY_TYPES } from '../quota.js';
+import { uploadFile } from '../files.js';
 
 const OUTBOX = 'subcon-outbox';
 const today = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
@@ -24,7 +25,7 @@ export async function flushOutbox() {
   return sent;
 }
 
-// פריטים לבחירה: סעיפי חוזה וסעיפי חריגים (למנהל עבודה בלי מחירים)
+// פריטים לבחירה: סעיפי חוזה וסעיפי הוראות שינוי (למנהל עבודה בלי מחירים)
 async function itemsFor(P) {
   const items = can.prices() ? P.pd.items : await db.rpc('field_boq', { p: P.id });
   const vos = can.prices() ? P.pd.variations : [];
@@ -35,7 +36,7 @@ function itemOptions({ items, vos }, sel, { general = true } = {}) {
   const contract = items.filter(i => !i.variation_id);
   const byVo = {};
   for (const i of items.filter(i => i.variation_id)) (byVo[i.variation_id] ||= []).push(i);
-  const voName = id => { const v = vos.find(x => x.id === id); return v ? `${v.number} ${v.title}` : 'חריג'; };
+  const voName = id => { const v = vos.find(x => x.id === id); return v ? `${v.number} ${v.title}` : 'הוראת שינוי'; };
   return `${general ? `<option value="">כללי לפרויקט</option>` : '<option value="">בחירת סעיף</option>'}
     <optgroup label="סעיפי חוזה">${contract.map(i => `<option value="i:${i.id}" ${sel === 'i:' + i.id ? 'selected' : ''}>${lab(i)}</option>`).join('')}</optgroup>
     ${Object.entries(byVo).map(([vid, is]) => `<optgroup label="${esc(voName(vid))}">${is.map(i => `<option value="i:${i.id}" ${sel === 'i:' + i.id ? 'selected' : ''}>${lab(i)}</option>`).join('')}</optgroup>`).join('')}`;
@@ -54,7 +55,9 @@ export async function dayView(P, date) {
   const pending = outbox().find(j => j.p === P.id && j.d === d);
 
   // מצב: שורות רישום (עובד יכול להופיע פעמיים אם פוצל בין סעיפים)
-  const toRow = e => ({ worker_id: e.worker_id, days: n(e.days) || 1, ot_hours: n(e.ot_hours) || '', piece_qty: e.piece_qty ?? '', note: e.note || '', link: e.boq_item_id ? 'i:' + e.boq_item_id : '' });
+  const DH = n(settings().day_hours) || 9;
+  const hrsOf = r => r.hours !== '' && r.hours != null ? n(r.hours) : n(r.days) * DH;
+  const toRow = e => ({ worker_id: e.worker_id, days: n(e.days) || 1, hours: e.hours ?? '', ot_hours: n(e.ot_hours) || '', piece_qty: e.piece_qty ?? '', note: e.note || '', link: e.boq_item_id ? 'i:' + e.boq_item_id : '' });
   let rows = pending ? pending.payload.entries.map(e => toRow(e)) : pe.filter(e => e.log_date === d).map(toRow);
   let qty = (pending ? pending.payload.qty : P.data.wqty.filter(q => q.project_id === P.id && q.log_date === d)).map(q => ({ link: 'i:' + q.boq_item_id, qty: q.qty ?? '', note: q.note || '' }));
   const meta = pending ? pending.payload : (dayRow || {});
@@ -85,17 +88,19 @@ export async function dayView(P, date) {
     wl.innerHTML = order.map(w => {
       const rs = rows.map((r, i) => ({ r, i })).filter(x => x.r.worker_id === w.id);
       const on = rs.length > 0;
-      return `<div class="wrow ${on ? 'on' : ''}"><label class="whd"><input type="checkbox" data-w="${w.id}" ${on ? 'checked' : ''}><b>${esc(w.name)}</b><span class="chip ${w.pay_type === 'piece' ? 'blue' : w.pay_type === 'salary' ? 'green' : 'amber'}">${PAY_TYPES[w.pay_type]}</span>${w.trade ? `<span class="small mut">${esc(w.trade)}</span>` : ''}</label>
+      return `<div class="wrow ${on ? 'on' : ''}"><label class="whd"><input type="checkbox" data-w="${w.id}" ${on ? 'checked' : ''}><b>${esc(w.name)}</b><span class="chip ${w.pay_type === 'piece' ? 'blue' : w.pay_type === 'salary' ? 'green' : w.pay_type === 'hourly' ? 'violet' : 'amber'}">${PAY_TYPES[w.pay_type]}</span>${w.trade ? `<span class="small mut">${esc(w.trade)}</span>` : ''}</label>
         ${rs.map(({ r, i }) => `<div class="wdet" data-i="${i}">
           <select data-k="link" aria-label="סעיף">${itemOptions(lists, r.link)}</select>
           ${w.pay_type === 'piece' ? `<label class="mini"><span>כמות${r.link && itemById[r.link.slice(2)]?.unit ? ' (' + esc(itemById[r.link.slice(2)].unit) + ')' : ''}</span><input type="number" inputmode="decimal" dir="ltr" data-k="piece_qty" value="${esc(r.piece_qty)}"></label>`
+            : w.pay_type === 'hourly' ? `<label class="mini"><span>שעות</span><input type="number" inputmode="decimal" dir="ltr" data-k="hours" value="${esc(r.hours === '' ? DH : r.hours)}"></label>
+               <label class="mini"><span>ש' נוספות</span><input type="number" inputmode="decimal" dir="ltr" data-k="ot_hours" value="${esc(r.ot_hours)}"></label>`
             : `<div class="seg sm" role="group" aria-label="חלק מיום">${DAY_OPTS.map(([v, l]) => `<button type="button" data-days="${v}" class="${n(r.days) === v ? 'on' : ''}">${l}</button>`).join('')}</div>
                <label class="mini"><span>ש' נוספות</span><input type="number" inputmode="decimal" dir="ltr" data-k="ot_hours" value="${esc(r.ot_hours)}"></label>`}
           <button type="button" class="btn small ghost" data-split title="פיצול לסעיף נוסף">+ סעיף</button>${rs.length > 1 ? '<button type="button" class="btn small ghost" data-rm aria-label="הסרת השורה">✕</button>' : ''}</div>`).join('')}</div>`;
     }).join('');
     $$('[data-w]', wl).forEach(cb => cb.onchange = () => {
       const w = W[cb.dataset.w];
-      if (cb.checked) rows.push({ worker_id: w.id, days: 1, ot_hours: '', piece_qty: '', note: '', link: $('#all', el).value || lastLink(w.id) });
+      if (cb.checked) rows.push({ worker_id: w.id, days: 1, hours: w.pay_type === 'hourly' ? DH : '', ot_hours: '', piece_qty: '', note: '', link: $('#all', el).value || lastLink(w.id) });
       else rows = rows.filter(r => r.worker_id !== w.id);
       drawWorkers(); summary();
     });
@@ -103,7 +108,9 @@ export async function dayView(P, date) {
       const r = rows[+box.dataset.i];
       $$('[data-k]', box).forEach(inp => inp.onchange = () => { r[inp.dataset.k] = inp.value; if (inp.dataset.k === 'link') drawWorkers(); summary(); });
       $$('[data-days]', box).forEach(b => b.onclick = () => { r.days = +b.dataset.days; drawWorkers(); summary(); });
-      $('[data-split]', box).onclick = () => { if (W[r.worker_id]?.pay_type !== 'piece' && n(r.days) === 1) r.days = 0.5; rows.splice(+box.dataset.i + 1, 0, { ...r, link: '', days: W[r.worker_id]?.pay_type === 'piece' ? 1 : 0.5, piece_qty: '', ot_hours: '' }); drawWorkers(); summary(); };
+      $('[data-split]', box).onclick = () => { const hourly = W[r.worker_id]?.pay_type === 'hourly';
+        if (hourly) { const half = Math.round(hrsOf(r) / 2 * 4) / 4; r.hours = half; rows.splice(+box.dataset.i + 1, 0, { ...r, link: '', hours: half, piece_qty: '', ot_hours: '' }); drawWorkers(); summary(); return; }
+        if (W[r.worker_id]?.pay_type !== 'piece' && n(r.days) === 1) r.days = 0.5; rows.splice(+box.dataset.i + 1, 0, { ...r, link: '', days: W[r.worker_id]?.pay_type === 'piece' ? 1 : 0.5, piece_qty: '', ot_hours: '' }); drawWorkers(); summary(); };
       $('[data-rm]', box)?.addEventListener('click', () => { rows.splice(+box.dataset.i, 1); drawWorkers(); summary(); });
     });
   };
@@ -120,7 +127,7 @@ export async function dayView(P, date) {
   };
   const summary = () => {
     const ppl = new Set(rows.map(r => r.worker_id)).size;
-    const days = rows.filter(r => W[r.worker_id]?.pay_type !== 'piece').reduce((a, r) => a + n(r.days), 0);
+    const days = rows.filter(r => W[r.worker_id]?.pay_type !== 'piece').reduce((a, r) => a + (W[r.worker_id]?.pay_type === 'hourly' ? hrsOf(r) / DH : n(r.days)), 0);
     $('#cnt', el).textContent = ppl ? `${ppl} סומנו` : '';
     $('#sum', el).innerHTML = `${ppl} עובדים · ${num(days, 2)} ימי עבודה`;
   };
@@ -137,7 +144,8 @@ export async function dayView(P, date) {
   const payloadOf = () => ({
     weather: $('#we', el).value || null, delays: $('#dl', el).value.trim() || null, notes: $('#nt', el).value.trim() || null,
     entries: rows.map(r => { const it = r.link ? itemById[r.link.slice(2)] : null;
-      return { worker_id: r.worker_id, boq_item_id: it?.id || null, variation_id: it?.variation_id || null, days: W[r.worker_id]?.pay_type === 'piece' ? 1 : n(r.days) || 1,
+      const pt = W[r.worker_id]?.pay_type, hrs = pt === 'hourly' ? hrsOf(r) : null;
+      return { worker_id: r.worker_id, boq_item_id: it?.id || null, variation_id: it?.variation_id || null, days: pt === 'piece' ? 1 : pt === 'hourly' ? Math.round(hrs / DH * 1000) / 1000 : n(r.days) || 1, hours: hrs,
         ot_hours: n(r.ot_hours) || 0, piece_qty: r.piece_qty === '' ? null : n(r.piece_qty), note: r.note || null }; }),
     qty: qty.filter(q => q.link && q.qty !== '').map(q => ({ boq_item_id: q.link.slice(2), qty: n(q.qty), note: q.note || null }))
   });
@@ -212,9 +220,28 @@ export function fieldProject(P, fieldItems) {
   const pe = P.data.entries.filter(e => e.project_id === P.id);
   const dates = [...new Set(pe.map(e => e.log_date))].sort().reverse().slice(0, 14);
   const pend = outbox().filter(j => j.p === P.id);
-  return h(`<div><div class="top"><div><h1>${esc(P.project.name)}</h1><div class="sub">${esc(P.project.address || '')}</div></div></div>
+  const el = h(`<div><div class="top"><div><h1>${esc(P.project.name)}</h1><div class="sub">${esc(P.project.address || '')}</div></div></div>
     <a class="btn big" href="#/project/${P.id}/day/today">יומן עבודה להיום</a>
+    <button class="btn big ghost" id="dnote" style="margin-top:8px">📷 צילום תעודת משלוח</button><input type="file" id="dnf" accept="image/*,application/pdf" capture="environment" multiple hidden>
+    <p class="small mut" style="margin:4px 0 12px">התעודה נשלחת למשרד לבדיקה ולקליטה מול ההזמנה.</p>
     ${pend.length ? `<div class="note">${pend.length} ימים ממתינים לשליחה (אין קליטה).</div>` : ''}
     <div class="card"><h2>ימים אחרונים</h2>${dates.map(d => { const de = pe.filter(e => e.log_date === d); return `<a class="act" href="#/project/${P.id}/day/${d}"><div><b>${fmtDate(d)}</b><small>${esc([...new Set(de.map(e => W[e.worker_id]?.name || '?'))].join(', '))}</small></div><span class="amt">${new Set(de.map(e => e.worker_id)).size} עובדים</span></a>`; }).join('') || '<div class="empty">עדיין אין רישומים</div>'}</div>
     <details class="card"><summary><b>סעיפי העבודה בפרויקט (${fieldItems.length})</b></summary>${fieldItems.map(i => `<div class="act"><div><b>${esc(i.code || '')}</b> ${esc(i.description)}<small>${esc(i.chapter || '')} · ${esc(i.unit || '')}</small></div></div>`).join('')}</details></div>`);
+  wireDeliveryPhoto(el, P.id);
+  return el;
+}
+
+// מנהל עבודה מצלם תעודת משלוח: הקובץ עולה לתיבת המסמכים של המשרד, מסומן כתעודת משלוח של הפרויקט
+export function wireDeliveryPhoto(el, projectId) {
+  const btn = $('#dnote', el), inp = $('#dnf', el); if (!btn) return;
+  btn.onclick = () => inp.click();
+  inp.onchange = async () => {
+    const list = [...inp.files]; inp.value = ''; if (!list.length) return;
+    if (!navigator.onLine) return toast('אין קליטה. צריך לצלם שוב כשיש אינטרנט', 'bad');
+    btn.disabled = true; btn.textContent = 'שולח...';
+    let k = 0;
+    for (const f of list) { try { await uploadFile(f, { projectId, docType: 'delivery', status: 'new' }); k++; } catch (e) { toast(e.message, 'bad'); } }
+    btn.disabled = false; btn.textContent = '📷 צילום תעודת משלוח';
+    if (k) toast(k === 1 ? 'התעודה נשלחה למשרד' : `${k} תעודות נשלחו למשרד`);
+  };
 }

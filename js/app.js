@@ -14,6 +14,7 @@ import { viewCashflow } from './views/cashflow.js';
 import { viewReports } from './views/reports.js';
 import { viewVendors, viewContacts } from './views/vendors.js';
 import { flushOutbox } from './views/worklog.js';
+import { viewInbox } from './views/inbox.js';
 
 export const S = { user: null, ctx: null, tenants: [], tenantId: null, role: null, mode: 'approved' };
 
@@ -35,7 +36,7 @@ export const settings = () => ({ employer_factor: 1.3, crit_pct: 15, vat_pct: 18
 
 export function setMode(m) { S.mode = m; store('subcon-mode-' + (S.user?.id || ''), m); }
 export function modeSwitch(onChange) {
-  const el = h(`<div class="seg" role="group" aria-label="תצוגת רווחיות">${Object.entries({ contract: 'בלי חריגים', approved: 'עם חריגים מאושרים', all: 'כולל לא מאושרים' })
+  const el = h(`<div class="seg" role="group" aria-label="תצוגת רווחיות">${Object.entries({ contract: 'בלי הוראות שינוי', approved: 'עם הוראות שינוי מאושרות', all: 'כולל לא מאושרים' })
     .map(([k, v]) => `<button type="button" data-m="${k}" class="${S.mode === k ? 'on' : ''}" title="${esc(PROFIT_MODES[k])}">${v}</button>`).join('')}</div>`);
   $$('button', el).forEach(b => b.onclick = () => { setMode(b.dataset.m); onChange ? onChange() : render(); });
   return el;
@@ -52,7 +53,7 @@ export async function loadTenantData(tenantId = S.tenantId) {
     const m = S.ctx.memberships.find(x => x.tenant_id === tenantId);
     const vis = S.role === 'foreman' ? projects.filter(p => (m?.project_ids || []).includes(p.id)) : projects;
     const workers = await db.rpc('field_workers', { t: tenantId });
-    return { projects: vis, mcs: [], items: [], lines: [], vos: [], expenses: [], workers, entries, days, wqty, pos: [], poLines: [], bills: [], billLines: [], fines: [], payments: [], vendors: [], documents: [], guarantees: [] };
+    return { projects: vis, mcs: [], items: [], lines: [], vos: [], expenses: [], workers, entries, days, wqty, pos: [], poLines: [], bills: [], billLines: [], fines: [], payments: [], vendors: [], documents: [], guarantees: [], files: [] };
   }
   const [items, lines, vos, expenses, workers, pos, poLines, bills, billLines, fines, payments] = await Promise.all([
     db.select('boq_items', { ...q, order: ['sort', 'code'] }),
@@ -64,8 +65,9 @@ export async function loadTenantData(tenantId = S.tenantId) {
     db.select('po_lines', { ...q, order: 'sort' }),
     db.select('bills', { ...q, order: 'number' }), db.select('bill_lines', q), db.select('bill_fines', q), db.select('bill_payments', { ...q, order: 'pay_date' })
   ]);
-  const [vendors, documents, guarantees] = await Promise.all([db.select('vendors', { ...q, order: 'name' }), db.select('documents', { ...q, order: 'expiry' }), db.select('guarantees', { ...q, order: 'expiry' })]);
-  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees };
+  const [vendors, documents, guarantees, files] = await Promise.all([db.select('vendors', { ...q, order: 'name' }), db.select('documents', { ...q, order: 'expiry' }), db.select('guarantees', { ...q, order: 'expiry' }),
+    can.expense() ? db.select('files', { ...q, order: 'created_at desc' }) : []]);
+  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files };
 }
 
 export async function logChange(e) {
@@ -79,6 +81,7 @@ export async function logChange(e) {
 const NAV = () => [
   ['#/', '◧', 'מה דורש טיפול', true],
   ['#/projects', '▤', 'פרויקטים', true],
+  ['#/inbox', '⇪', 'תיבת מסמכים', can.expense()],
   ['#/workers', '☺', 'עובדים ונוכחות', can.workers()],
   ['#/collection', '₪', 'חשבונות וגבייה', can.prices()],
   ['#/cashflow', '≋', 'תזרים מזומנים', can.prices()],
@@ -148,6 +151,7 @@ export async function render() {
     if (!route) { view = await viewHome(); title = 'מה דורש טיפול'; }
     else if (route === 'projects') { view = await viewProjects(); title = 'פרויקטים'; }
     else if (route === 'project') { view = await viewProject(a, b || 'control', c); title = b === 'day' ? 'יומן עבודה' : b === 'bill' ? 'חשבון חלקי' : 'פרויקט'; }
+    else if (route === 'inbox') { view = await viewInbox(); title = 'תיבת מסמכים'; }
     else if (route === 'collection') { view = await viewCollection(); title = 'חשבונות וגבייה'; }
     else if (route === 'vendors') { view = await viewVendors(a || 'list'); title = 'ספקים ומסמכים'; }
     else if (route === 'contacts') { view = await viewContacts(); title = 'ספר טלפונים'; }

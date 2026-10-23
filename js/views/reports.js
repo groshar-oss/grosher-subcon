@@ -18,7 +18,7 @@ export const REPORTS = [
   ['profit', 'רווחיות: חוזה, תוספות, סה"כ', () => can.costing()],
   ['labor', 'עלות עבודה', () => can.prices()],
   ['expenses', 'הוצאות לפי ספק ולפי סוג', () => can.prices()],
-  ['vo', 'תוספות (חריגים)', () => can.costing()],
+  ['vo', 'הוראות שינוי', () => can.costing()],
   ['retention', 'עיכבונות וערבויות', () => can.prices()],
   ['client', 'דוח חודשי ללקוח', () => can.costing()]
 ];
@@ -92,7 +92,7 @@ function repProfit({ sums }) {
   const tt = { sale: S2(r => r.tot.sale), forecast: S2(r => r.tot.forecast), planned: S2(r => r.tot.planned) };
   return h(`<div data-sheet="רווחיות">${T([['פרויקט'], ['חוזה: מכירה', 1], ['חוזה: צפי עלות', 1], ['חוזה: רווח', 1], ['%', 1], ['תוספות מאושרות: מכירה', 1], ['צפי עלות', 1], ['רווח', 1], ['לא מאושרות: מבוקש', 1], ['רווח בסיכון', 1], ['סה"כ בתצוגה: מכירה', 1], ['רווח', 1], ['%', 1], ['חריגת עלות', 1]], rows,
     ['סה"כ', m0(tc.sale), m0(tc.forecast), cls(tc.sale - tc.forecast), pct(tc.sale ? (tc.sale - tc.forecast) / tc.sale * 100 : 0), m0(ta.sale), m0(ta.forecast), cls(ta.sale - ta.forecast), m0(tr.sale), cls(tr.sale - tr.forecast), m0(tt.sale), cls(tt.sale - tt.forecast), pct(tt.sale ? (tt.sale - tt.forecast) / tt.sale * 100 : 0), pct(overrunPct(tt.forecast, tt.planned), { sign: true })])}
-    <p class="small mut">רווח = מכירה פחות צפי עלות לסיום. "סה"כ בתצוגה" לפי המתג למעלה: ${esc(PROFIT_MODES[S.mode])}. תוספות לא מאושרות הן חריגים שהוגשו או בוצעו ועדיין לא אושרו.</p></div>`);
+    <p class="small mut">רווח = מכירה פחות צפי עלות לסיום. "סה"כ בתצוגה" לפי המתג למעלה: ${esc(PROFIT_MODES[S.mode])}. תוספות לא מאושרות הן הוראות שינוי שהוגשו או בוצעו ועדיין לא אושרו.</p></div>`);
 }
 const cls = v => `<span class="${v < 0 ? 'neg' : ''}">${m0(v)}</span>`;
 
@@ -203,7 +203,7 @@ function repClient({ data, sums, o }) {
     <h2>סיכום ${monthLabel(month)} · ${sums.length} פרויקטים</h2>
     <div class="kpis"><div class="kpi"><div class="l">היקף מכירה</div><div class="v">${money(t.sale)}</div></div>
       <div class="kpi"><div class="l">רווח צפוי</div><div class="v ${t.sale - t.forecast < 0 ? 'neg' : 'pos'}">${money(t.sale - t.forecast)}</div><div class="n">${pct(t.sale ? (t.sale - t.forecast) / t.sale * 100 : 0)} מהמכירה</div></div>
-      <div class="kpi"><div class="l">לגבייה מהראשיים</div><div class="v">${money(sum(col, c => c.outstanding))}</div><div class="n ${sum(col, c => c.overdue.length) ? 'neg' : ''}">${sum(col, c => c.overdue.length)} חשבונות באיחור</div></div>
+      <div class="kpi"><div class="l">לגבייה מהקבלנים הראשיים</div><div class="v">${money(sum(col, c => c.outstanding))}</div><div class="n ${sum(col, c => c.overdue.length) ? 'neg' : ''}">${sum(col, c => c.overdue.length)} חשבונות באיחור</div></div>
       <div class="kpi"><div class="l">יתרת מזומנים צפויה בעוד 3 חודשים</div><div class="v ${cf.months.at(-1).cum < n(st.cash_min) ? 'neg' : ''}">${money(cf.months.at(-1).cum)}</div><div class="n">${cf.belowMonths.length ? `<span class="neg">מתחת למינימום ב${cf.belowMonths.map(m => monthLabel(m.m)).join(', ')}</span>` : 'מעל המינימום'}</div></div></div>
     ${T([['פרויקט'], ['מכירה ₪', 1], ['צפי עלות ₪', 1], ['רווח צפוי ₪', 1], ['%', 1], ['ביצוע', 1], ['חריגת עלות', 1], ['תוספות בסיכון ₪', 1], ['לגבייה ₪', 1]],
       sums.map(({ p, s }, i) => [`<b>${esc(p.name)}</b>`, m0(s.total.sale), m0(s.total.forecast), cls(s.total.profit), pct(s.total.profitPct), pct(s.total.progress, { d: 0 }), pct(s.total.overrun, { sign: true }), s.riskAmount ? m0(s.riskAmount) : '', m0(col[i].outstanding)]))}
@@ -234,7 +234,7 @@ function repClient({ data, sums, o }) {
           ['+ לא מאושרות (בסיכון)', m0(s.contract.sale + s.approved.sale + s.atRisk.sale), cls(prof(s.contract) + prof(s.approved) + prof(s.atRisk)), (() => { const sl = s.contract.sale + s.approved.sale + s.atRisk.sale; return pct(sl ? (prof(s.contract) + prof(s.approved) + prof(s.atRisk)) / sl * 100 : 0); })()]])}</div>
         <div><h3>החודש</h3>${T([['נושא'], ['₪', 1]], [
           [`חשבונות שהוגשו (${billsMonth.map(r => r.bill.number).join(', ') || 'אין'})`, m0(sum(billsMonth, r => r.curSub))],
-          ['תקבולים מהראשי (כולל מע"מ)', m0(paidMonth)], ['עלות עבודה מהיומן', m0(labMonth)], ['הוצאות (לפי תאריך מסמך)', m0(expMonth)],
+          ['תקבולים מהקבלן הראשי (כולל מע"מ)', m0(paidMonth)], ['עלות עבודה מהיומן', m0(labMonth)], ['הוצאות (לפי תאריך מסמך)', m0(expMonth)],
           [`לגבייה כעת${c.overdue.length ? ` · <span class="neg">${c.overdue.length} באיחור</span>` : ''}`, m0(c.outstanding)],
           ['תזרים נטו צפוי ב-3 החודשים הקרובים', cls(sum(pcf.months, m => m.net))]])}</div></div>
       <h3>סעיפים בחריגה (5 הגדולים)</h3>${T([['סעיף'], ['תמחיר ₪', 1], ['צפי ₪', 1], ['חריגה', 1], ['ביצוע / הוצאה', 1]],

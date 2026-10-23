@@ -1,4 +1,4 @@
-// עובדים ונוכחות: כרטיסי עובדים (שכיר / יומי / קבלנות) ודוח נוכחות חודשי לשכר
+// עובדים ונוכחות: כרטיסי עובדים (שכיר / יומי / שעתי / קבלנות) ודוח נוכחות חודשי לשכר
 import { h, esc, $, $$, modal, field, select, area, toast, money, num, numOrNull, confirmBox } from '../util.js';
 import { db } from '../db.js';
 import { S, can, loadTenantData, render, settings, logChange } from '../app.js';
@@ -7,7 +7,7 @@ import { PAY_TYPES, entryCosts, attendance } from '../quota.js';
 import { loadXLSX } from '../import.js';
 
 const monthNow = () => new Date().toISOString().slice(0, 7);
-const rateText = w => w.pay_type === 'salary' ? `${money(w.monthly_salary)} לחודש` : w.pay_type === 'daily' ? `${money(w.daily_rate)} ליום` : (n(w.piece_rate) ? `${money(w.piece_rate, { unit: true })} ליח'` : 'לפי תמחיר הסעיף');
+const rateText = w => w.pay_type === 'salary' ? `${money(w.monthly_salary)} לחודש` : w.pay_type === 'daily' ? `${money(w.daily_rate)} ליום` : w.pay_type === 'hourly' ? `${money(w.hourly_rate)} לשעה` : (n(w.piece_rate) ? `${money(w.piece_rate, { unit: true })} ליח'` : 'לפי תמחיר הסעיף');
 
 export async function viewWorkers(tab = 'list') {
   if (!can.workers() && S.role !== 'viewer') return h('<div class="card empty">אין הרשאה</div>');
@@ -57,9 +57,10 @@ async function workerDialog(data, w) {
     <div class="grid g2">
       <div data-for="salary">${field('שכר ברוטו חודשי ₪', 'monthly_salary', w?.monthly_salary, { type: 'number' })}</div>
       <div data-for="daily">${field('תעריף יומי ₪', 'daily_rate', w?.daily_rate, { type: 'number' })}</div>
+      <div data-for="hourly">${field('תעריף לשעה ₪', 'hourly_rate', w?.hourly_rate, { type: 'number', hint: `יום עבודה = ${st.day_hours} שעות (בהגדרות הלקוח)` })}</div>
       <div data-for="piece">${field('מחיר קבלנות קבוע ₪ ליחידה (רשות)', 'piece_rate', w?.piece_rate, { type: 'number', hint: 'ריק = לפי מחיר הקבלנות בתמחיר הסעיף' })}</div>
-      <div data-for="salary daily">${field('מקדם עלות מעביד', 'cost_factor', w?.cost_factor ?? '', { type: 'number', hint: `ריק = ${st.employer_factor} לשכיר, 1 ליומי` })}</div>
-      <div data-for="salary daily">${field('תעריף שעה נוספת ₪ (עלות)', 'ot_rate', w?.ot_rate, { type: 'number', hint: 'ריק = 125% משעה רגילה' })}</div></div>
+      <div data-for="salary daily hourly">${field('מקדם עלות מעביד', 'cost_factor', w?.cost_factor ?? '', { type: 'number', hint: `ריק = ${st.employer_factor} לשכיר, 1 ליומי ולשעתי` })}</div>
+      <div data-for="salary daily hourly">${field('תעריף שעה נוספת ₪ (עלות)', 'ot_rate', w?.ot_rate, { type: 'number', hint: 'ריק = 125% משעה רגילה' })}</div></div>
     <label class="chk"><input type="checkbox" name="is_foreign" ${w?.is_foreign ? 'checked' : ''}> עובד זר (היטל, מגורים וביטוח רפואי נכללים במקדם)</label>
     ${w ? `<label class="chk"><input type="checkbox" name="active" ${w.active !== false ? 'checked' : ''}> פעיל (לא פעיל לא מופיע ביומן)</label>` : ''}
     ${area('הערות', 'notes', w?.notes)}
@@ -76,17 +77,18 @@ async function workerDialog(data, w) {
     if (!x.name.trim()) return 'חסר שם';
     if (x.pay_type === 'salary' && !n(x.monthly_salary)) return 'לשכיר צריך שכר חודשי';
     if (x.pay_type === 'daily' && !n(x.daily_rate)) return 'לעובד יומי צריך תעריף יומי';
+    if (x.pay_type === 'hourly' && !n(x.hourly_rate)) return 'לעובד שעתי צריך תעריף לשעה';
     return null;
   } });
   if (!d) return;
   const row = { name: d.name.trim(), pay_type: d.pay_type, id_no: d.id_no || null, phone: d.phone || null, trade: d.trade || null, agency: d.agency || null,
-    monthly_salary: d.pay_type === 'salary' ? numOrNull(d.monthly_salary) : null, daily_rate: d.pay_type === 'daily' ? numOrNull(d.daily_rate) : null,
+    monthly_salary: d.pay_type === 'salary' ? numOrNull(d.monthly_salary) : null, daily_rate: d.pay_type === 'daily' ? numOrNull(d.daily_rate) : null, hourly_rate: d.pay_type === 'hourly' ? numOrNull(d.hourly_rate) : null,
     piece_rate: d.pay_type === 'piece' ? numOrNull(d.piece_rate) : null, cost_factor: d.pay_type === 'piece' ? null : numOrNull(d.cost_factor),
     ot_rate: d.pay_type === 'piece' ? null : numOrNull(d.ot_rate), is_foreign: !!d.is_foreign, notes: d.notes || null };
   if (w) {
     row.active = !!d.active;
     await db.update('workers', w.id, row);
-    for (const k of ['monthly_salary', 'daily_rate', 'piece_rate', 'cost_factor', 'pay_type']) if (String(w[k] ?? '') !== String(row[k] ?? ''))
+    for (const k of ['monthly_salary', 'daily_rate', 'hourly_rate', 'piece_rate', 'cost_factor', 'pay_type']) if (String(w[k] ?? '') !== String(row[k] ?? ''))
       await logChange({ entity: 'worker', entity_id: w.id, label: `עובד: ${row.name}`, field: k, old_value: w[k], new_value: row[k] });
   } else await db.insert('workers', { tenant_id: S.tenantId, active: true, ...row });
   toast('נשמר'); render();

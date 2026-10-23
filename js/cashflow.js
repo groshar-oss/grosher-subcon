@@ -1,7 +1,7 @@
 // שלב 6: תזרים מזומנים חודשי. פונקציות טהורות.
 // כניסות: תקבולים בפועל, יתרות של חשבונות שהוגשו (במועד התשלום), וחשבונות עתידיים לפי יתרת המכירה עד סוף הפרויקט.
 // יציאות: הוצאות ששולמו, חשבוניות פתוחות לפי תנאי ספק, הזמנות רכש פתוחות, שכר לפי יומן העבודה (חודש אחרי), ויתרת צפי העלות.
-// מע"מ מוצג בנפרד: נגבה מהראשי, שולם לספקים, והתשלום (או ההחזר) לרשות בחודש שאחרי.
+// מע"מ מוצג בנפרד: נגבה מהקבלן הראשי, שולם לספקים, והתשלום (או ההחזר) לרשות בחודש שאחרי.
 import { n, lineCost } from './calc.js';
 import { dueDate } from './bills.js';
 
@@ -13,7 +13,7 @@ export const HE_MONTHS = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'י�
 export const monthLabel = m => `${HE_MONTHS[+m.slice(5, 7) - 1]} ${m.slice(2, 4)}`;
 
 export const CF_ROWS = {
-  in_paid: 'תקבולים מהראשי', in_billed: 'חשבונות שהוגשו (יתרה לגבייה)', in_future: 'חשבונות עתידיים (לפי יתרת המכירה)', in_retention: 'שחרור עיכבון',
+  in_paid: 'תקבולים מהקבלן הראשי', in_billed: 'חשבונות שהוגשו (יתרה לגבייה)', in_future: 'חשבונות עתידיים (לפי יתרת המכירה)', in_retention: 'שחרור עיכבון',
   out_paid: 'הוצאות ששולמו', out_open: 'חשבוניות ספקים פתוחות', out_po: 'הזמנות רכש פתוחות', out_labor: 'שכר עובדים (מהיומן)', out_future: 'יתרת עלויות לפי צפי'
 };
 export const CF_IN = ['in_paid', 'in_billed', 'in_future', 'in_retention'];
@@ -21,7 +21,7 @@ export const CF_OUT = ['out_paid', 'out_open', 'out_po', 'out_labor', 'out_futur
 
 /**
  * projects: [{ project, summary, pd, costs }] (summary מ-summarize: billing, rows, total; pd: expenses, pos, poLines, entries)
- * opts: { settings, today: 'YYYY-MM-DD', back: 3, ahead: 12, delay: 0 (חודשי עיכוב בתשלומי הראשי) }
+ * opts: { settings, today: 'YYYY-MM-DD', back: 3, ahead: 12, delay: 0 (חודשי עיכוב בתשלומי הקבלן הראשי) }
  */
 export function cashflow(projects, opts = {}) {
   const s = { ...DEF, ...(opts.settings || {}) };
@@ -59,7 +59,7 @@ export function cashflow(projects, opts = {}) {
       if (r.due) { const dm = mkey(r.due); if (M[dm] && dm < cur) M[dm].schedIn += r.totalWithVat; }
       if (r.outstanding > 1) put(addMonths(notPast(mkey(r.due || today)), delay), 'in_billed', r.outstanding / (1 + vat), true, `חשבון ${r.bill.number}${r.due && r.due < today ? ' (באיחור)' : ''}`, P.id);
     }
-    // חשבונות עתידיים: יתרת המכירה (חוזה + חריגים מאושרים) מתחלקת עד סוף הפרויקט; הגשה בחודש שאחרי, תשלום בשוטף+X
+    // חשבונות עתידיים: יתרת המכירה (חוזה + הוראות שינוי מאושרות) מתחלקת עד סוף הפרויקט; הגשה בחודש שאחרי, תשלום בשוטף+X
     const sale = S.contract.sale + S.approved.sale;
     const lastBill = bills[bills.length - 1];
     const billed = lastBill ? lastBill.cumEffTotal : 0;
