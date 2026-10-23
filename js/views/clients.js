@@ -1,0 +1,121 @@
+// לקוחות (קבלני משנה), הגדרות לקוח, משתמשים וקבלנים ראשיים
+import { h, esc, $, $$, modal, field, select, toast, numOrNull, confirmBox } from '../util.js';
+import { db } from '../db.js';
+import { S, can, reloadTenants, render, roleName, logChange } from '../app.js';
+import { n } from '../calc.js';
+import { store } from '../util.js';
+
+const tenantForm = (t = {}) => `<div class="grid g2">
+  ${field('שם החברה', 'name', t.name, { req: true })}${field('ח"פ', 'company_no', t.company_no)}
+  ${field('מקצועות', 'trades', t.trades, { hint: 'למשל: גבס, תקרות, בידוד' })}${field('איש קשר', 'contact_name', t.contact_name)}
+  ${field('טלפון', 'phone', t.phone, { type: 'tel', attrs: 'dir="ltr"' })}${field('אימייל', 'email', t.email, { type: 'email', attrs: 'dir="ltr"' })}</div>`;
+
+export async function viewClients() {
+  if (!can.admin()) return h('<div class="empty">אין הרשאה</div>');
+  const projects = await db.select('projects', {});
+  const el = h(`<div><div class="top"><div><h1>לקוחות (קבלני משנה)</h1><div class="sub">כל לקוח הוא חברה נפרדת. הנתונים של לקוח אחד לא נראים ללקוח אחר.</div></div>
+    <div class="actions"><button class="btn" id="add">+ לקוח חדש</button></div></div>
+    <div class="tw"><table><thead><tr><th>שם</th><th>ח"פ</th><th>מקצועות</th><th>איש קשר</th><th class="n">פרויקטים</th><th></th></tr></thead><tbody>
+    ${S.tenants.map(t => `<tr><td><b>${esc(t.name)}</b></td><td>${esc(t.company_no || '')}</td><td>${esc(t.trades || '')}</td><td>${esc(t.contact_name || '')} ${esc(t.phone || '')}</td>
+      <td class="n">${projects.filter(p => p.tenant_id === t.id).length}</td><td><button class="btn small ghost" data-open="${t.id}">פתיחה</button> <a class="btn small ghost" href="#/client/${t.id}">הגדרות</a></td></tr>`).join('') || '<tr><td colspan="6" class="empty">אין לקוחות עדיין</td></tr>'}
+    </tbody></table></div></div>`);
+  $('#add', el).onclick = async () => {
+    const v = await modal({ title: 'לקוח חדש', body: tenantForm(), validate: d => !d.name.trim() && 'חסר שם' });
+    if (!v) return;
+    const [t] = await db.insert('tenants', { ...v, settings: { employer_factor: 1.3, crit_pct: 15, vat_pct: 18, overhead_pct: 0, work_days_month: 22, day_hours: 9, quota_warn_pct: 80, quota_gap_pct: 10 } });
+    await reloadTenants(); S.tenantId = t.id; store('subcon-tenant', t.id); toast('הלקוח נוסף'); location.hash = '#/client/' + t.id;
+  };
+  $$('[data-open]', el).forEach(b => b.onclick = () => { S.tenantId = b.dataset.open; store('subcon-tenant', S.tenantId); reloadTenants().then(() => { location.hash = '#/'; render(); }); });
+  return el;
+}
+
+export async function viewClient(id) {
+  const t = S.tenants.find(x => x.id === id);
+  if (!t) return h('<div class="empty">הלקוח לא נמצא</div>');
+  if (S.tenantId !== id) { S.tenantId = id; store('subcon-tenant', id); await reloadTenants(); }
+  if (!can.edit()) return h('<div class="empty">אין הרשאה</div>');
+  const st = { employer_factor: 1.3, crit_pct: 15, vat_pct: 18, overhead_pct: 0, work_days_month: 22, day_hours: 9, quota_warn_pct: 80, quota_gap_pct: 10, cash_opening: 0, cash_min: 0, supplier_terms_days: 60, ...(t.settings || {}) };
+  const [members, mcs, projects] = await Promise.all([db.rpc('tenant_members', { t: id }), db.select('main_contractors', { eq: { tenant_id: id }, order: 'name' }), db.select('projects', { eq: { tenant_id: id }, order: 'name' })]);
+  const pname = pid => projects.find(p => p.id === pid)?.name || '';
+  const el = h(`<div><div class="top"><div><h1>${esc(t.name)}</h1><div class="sub">הגדרות לקוח, משתמשים וקבלנים ראשיים</div></div></div>
+  <div class="cols even">
+    <div class="card"><h2>פרטי הלקוח</h2><form id="tf">${tenantForm(t)}<button class="btn">שמירת פרטים</button></form></div>
+    <div class="card"><h2>הגדרות חישוב</h2><form id="sf"><div class="grid g2">
+      ${field('מקדם עלות מעביד', 'employer_factor', st.employer_factor, { type: 'number', hint: 'שכר ברוטו × מקדם = עלות מעביד. ברירת מחדל 1.30' })}
+      ${field('סף חריגה קריטית (%)', 'crit_pct', st.crit_pct, { type: 'number' })}
+      ${field('שיעור מע"מ (%)', 'vat_pct', st.vat_pct, { type: 'number' })}
+      ${field('תקורה ברירת מחדל לפרויקט חדש (%)', 'overhead_pct', st.overhead_pct, { type: 'number' })}
+      ${field('ימי עבודה בחודש (לשכירים)', 'work_days_month', st.work_days_month, { type: 'number', hint: 'עלות חודשית של שכיר מתחלקת לפי ימי העבודה ביומן. ברירת מחדל 22' })}
+      ${field('שעות ביום עבודה', 'day_hours', st.day_hours, { type: 'number', hint: 'לחישוב שעה נוספת כשאין תעריף לעובד (125%)' })}
+      ${field('התראת מכסה מוקדמת (% ניצול)', 'quota_warn_pct', st.quota_warn_pct, { type: 'number', hint: 'למשל 80: התראה כשנוצלו 8 מתוך 10 ימים' })}
+      ${field('ניצול שמקדים את הביצוע (נקודות %)', 'quota_gap_pct', st.quota_gap_pct, { type: 'number', hint: 'התראה כשאחוז הניצול גבוה מאחוז הביצוע בפער הזה' })}
+      ${field('יתרה בבנק ₪', 'cash_opening', st.cash_opening, { type: 'number', hint: 'היתרה בתחילת החודש שבשדה הבא. כדאי לעדכן פעם בחודש' })}
+      ${field('נכון לתחילת חודש', 'cash_asof', st.cash_asof || new Date().toISOString().slice(0, 7), { type: 'month' })}
+      ${field('יתרת מינימום רצויה ₪', 'cash_min', st.cash_min, { type: 'number', hint: 'התראה כשהתזרים צפוי לרדת מתחת לסכום הזה' })}
+      ${field('תנאי תשלום לספקים (שוטף + ימים)', 'supplier_terms_days', st.supplier_terms_days, { type: 'number', hint: 'לחשבוניות בלי תאריך תשלום' })}</div>
+      <p class="small mut">צבעי חריגה: עד 3% צהוב, 3%-5% כתום, 5%-10% אדום, מעל 10% אדום שמתכהה. מעל הסף הקריטי השורה מסומנת "קריטי".</p>
+      <button class="btn">שמירת הגדרות</button></form></div>
+  </div>
+  <div class="card"><h2>משתמשים <button class="btn small" id="addm">+ הוספת משתמש</button></h2>
+    <p class="small mut">המשתמש נרשם קודם בעצמו במסך הכניסה, ואז מוסיפים אותו כאן לפי האימייל. מנהל עבודה רואה רק את הפרויקטים שמסומנים לו, ובלי מחירים, רווח ושכר.</p>
+    <div class="tw"><table><thead><tr><th>אימייל</th><th>תפקיד</th><th>פרויקטים (למנהל עבודה)</th><th></th></tr></thead><tbody>
+    ${members.map(m => `<tr><td dir="ltr" style="text-align:right">${esc(m.email)}</td><td>${roleName(m.role)}</td><td class="wrap">${m.role === 'foreman' ? esc((m.project_ids || []).map(pname).join(', ') || 'אין') : '<span class="mut">כולם</span>'}</td>
+      <td><button class="btn small ghost" data-em="${esc(m.email)}" data-role="${m.role}" data-pids="${(m.project_ids || []).join(',')}">עריכה</button> <button class="btn small ghost" data-rm="${m.id}">הסרה</button></td></tr>`).join('') || '<tr><td colspan="4" class="empty">אין משתמשים מלבד מנהלת השירות</td></tr>'}
+    </tbody></table></div></div>
+  <div class="card"><h2>קבלנים ראשיים <button class="btn small" id="addmc">+ קבלן ראשי</button></h2>
+    <div class="tw"><table><thead><tr><th>שם</th><th>ח"פ</th><th>איש קשר</th><th>טלפון</th><th class="n">תנאי תשלום</th><th></th></tr></thead><tbody>
+    ${mcs.map(m => `<tr><td><b>${esc(m.name)}</b></td><td>${esc(m.company_no || '')}</td><td>${esc(m.contact_name || '')}</td><td dir="ltr" style="text-align:right">${esc(m.phone || '')}</td><td class="n">שוטף+${m.pay_terms_days}</td>
+      <td><button class="btn small ghost" data-mc="${m.id}">עריכה</button></td></tr>`).join('') || '<tr><td colspan="6" class="empty">אין קבלנים ראשיים</td></tr>'}
+    </tbody></table></div></div>
+  ${can.admin() ? `<div class="card"><h2>מחיקת לקוח</h2><p class="small mut">מוחקת את הלקוח וכל הפרויקטים והנתונים שלו. אי אפשר לשחזר.</p><button class="btn danger" id="del">מחיקת הלקוח</button></div>` : ''}</div>`);
+
+  $('#tf', el).onsubmit = async e => {
+    e.preventDefault(); const v = Object.fromEntries(new FormData(e.target));
+    if (!v.name.trim()) return toast('חסר שם', 'bad');
+    await db.update('tenants', id, v); await reloadTenants(); toast('נשמר'); render();
+  };
+  $('#sf', el).onsubmit = async e => {
+    e.preventDefault(); const v = Object.fromEntries(new FormData(e.target));
+    const ns = { ...st, employer_factor: n(v.employer_factor) || 1.3, crit_pct: n(v.crit_pct) || 15, vat_pct: n(v.vat_pct), overhead_pct: n(v.overhead_pct),
+      work_days_month: n(v.work_days_month) || 22, day_hours: n(v.day_hours) || 9, quota_warn_pct: n(v.quota_warn_pct) || 80, quota_gap_pct: n(v.quota_gap_pct) || 10,
+      cash_opening: n(v.cash_opening), cash_asof: v.cash_asof || '', cash_min: n(v.cash_min), supplier_terms_days: v.supplier_terms_days === '' ? 60 : Math.round(n(v.supplier_terms_days)) };
+    await db.update('tenants', id, { settings: ns });
+    for (const k of Object.keys(ns)) if (String(ns[k]) !== String(st[k])) await logChange({ entity: 'tenant', entity_id: id, label: 'הגדרות לקוח', field: k, old_value: st[k], new_value: ns[k] });
+    await reloadTenants(); toast('ההגדרות נשמרו'); render();
+  };
+  const memberDlg = async (m = {}) => {
+    const pids = (m.pids || '').split(',').filter(Boolean);
+    const v = await modal({ title: m.email ? 'עריכת משתמש' : 'הוספת משתמש', body: `
+      ${field('אימייל', 'email', m.email || '', { type: 'email', req: true, attrs: `dir="ltr" ${m.email ? 'readonly' : ''}` })}
+      ${select('תפקיד', 'role', { owner: 'בעלים', foreman: 'מנהל עבודה', accountant: 'הנהלת חשבונות', viewer: 'צפייה בלבד' }, m.role || 'owner')}
+      <div class="fld"><span>פרויקטים למנהל עבודה</span>${projects.map(p => `<label class="chk"><input type="checkbox" name="p_${p.id}" ${pids.includes(p.id) ? 'checked' : ''}> ${esc(p.name)}</label>`).join('') || '<span class="mut small">אין פרויקטים</span>'}</div>`,
+      validate: d => !/^\S+@\S+\.\S+$/.test(d.email) && 'אימייל לא תקין' });
+    if (!v) return;
+    const chosen = projects.filter(p => v['p_' + p.id]).map(p => p.id);
+    const r = await db.rpc('add_member', { t: id, member_email: v.email.trim(), member_role: v.role, member_projects: v.role === 'foreman' ? chosen : [] });
+    if (r === 'not_registered') return toast('המשתמש עוד לא נרשם. בקשי ממנו להירשם במסך הכניסה ואז להוסיף שוב.', 'bad');
+    toast('המשתמש נשמר'); render();
+  };
+  $('#addm', el).onclick = () => memberDlg();
+  $$('[data-em]', el).forEach(b => b.onclick = () => memberDlg({ email: b.dataset.em, role: b.dataset.role, pids: b.dataset.pids }));
+  $$('[data-rm]', el).forEach(b => b.onclick = async () => { if (await confirmBox('הסרת משתמש', 'המשתמש לא יוכל לראות יותר את נתוני הלקוח.', 'הסרה', true)) { await db.rpc('remove_member', { id: b.dataset.rm }); render(); } });
+  const mcDlg = async (m = {}) => {
+    const v = await modal({ title: m.id ? 'עריכת קבלן ראשי' : 'קבלן ראשי חדש', body: mcForm(m), validate: d => !d.name.trim() && 'חסר שם' });
+    if (!v) return;
+    const row = { ...v, pay_terms_days: Math.round(n(v.pay_terms_days)) };
+    if (m.id) await db.update('main_contractors', m.id, row); else await db.insert('main_contractors', { tenant_id: id, ...row });
+    toast('נשמר'); render();
+  };
+  $('#addmc', el).onclick = () => mcDlg();
+  $$('[data-mc]', el).forEach(b => b.onclick = () => mcDlg(mcs.find(m => m.id === b.dataset.mc)));
+  $('#del', el)?.addEventListener('click', async () => {
+    const v = await modal({ title: 'מחיקת לקוח', body: `<p>כדי לאשר, כתבי את שם הלקוח: <b>${esc(t.name)}</b></p>${field('שם הלקוח', 'confirm', '')}`, ok: 'מחיקה לצמיתות', danger: true, validate: d => d.confirm.trim() !== t.name.trim() && 'השם לא תואם' });
+    if (!v) return;
+    await db.remove('tenants', id); await reloadTenants(); toast('הלקוח נמחק'); location.hash = '#/clients';
+  });
+  return el;
+}
+
+export const mcForm = (m = {}) => `<div class="grid g2">${field('שם', 'name', m.name, { req: true })}${field('ח"פ', 'company_no', m.company_no)}
+  ${field('איש קשר', 'contact_name', m.contact_name)}${field('טלפון', 'phone', m.phone, { type: 'tel', attrs: 'dir="ltr"' })}
+  ${field('אימייל', 'email', m.email, { type: 'email', attrs: 'dir="ltr"' })}${field('תנאי תשלום (שוטף + ימים)', 'pay_terms_days', m.pay_terms_days ?? 60, { type: 'number' })}</div>`;
