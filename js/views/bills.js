@@ -1,4 +1,5 @@
 // חשבונות חלקיים: רשימה, מסך חשבון (מצטבר קודם / נוכחי / מצטבר, מוגש מול מאושר), ניכויים, קנסות, תקבולים וגבייה
+import { has as hasMod, latestIndex } from '../modules.js';
 import { h, esc, $, $$, modal, field, select, toast, money, num, pct, fmtDate, nullIfEmpty, numOrNull, confirmBox } from '../util.js';
 import { db } from '../db.js';
 import { S, can, render, logChange, settings, loadTenantData } from '../app.js';
@@ -66,7 +67,7 @@ export function tabBills(P) {
     <table class="sumt" style="margin-top:10px"><tr><td>עיכבון שנצבר</td><td class="n">${money(B.retentionTotal)}</td></tr><tr><td>שוחרר</td><td class="n">${money(n(pr.retention_released))}</td></tr><tr class="tot"><td>עיכבון לשחרור</td><td class="n">${money(fb.toRelease)}</td></tr>
       <tr><td>סוף תקופת הבדק</td><td class="n">${fb.warrantyEnd ? fmtDate(fb.warrantyEnd) : '<span class="mut">אחרי תאריך מסירה</span>'}</td></tr></table>
     ${hasFinal ? '' : fb.ready ? (edit ? '<button class="btn" id="addfinal" style="margin-top:10px">+ חשבון סופי</button>' : '') : `<p class="small neg">לפני חשבון סופי חסר: ${fb.missing.join(' · ')}</p>`}</div>
-    <div class="card"><h2>ערבויות בפרויקט ${edit ? '<button class="btn small" id="addg" type="button">+ ערבות</button>' : ''}</h2>
+    <div class="card" ${hasMod(P.project, 'guarantees') ? '' : 'hidden'}><h2>ערבויות בפרויקט ${edit ? '<button class="btn small" id="addg" type="button">+ ערבות</button>' : ''}</h2>
       ${gs.map(g => { const st = guaranteeState(g, today); return `<div class="act"><div><b>${GUAR_KINDS[g.kind]}</b> · ${esc(g.bank || '')} ${esc(g.number || '')}<small>${st === 'returned' ? 'הוחזרה' : `בתוקף עד ${fmtDate(g.expiry)}${st === 'expired' ? ' · פג תוקף' : st === 'soon' ? ' · פג בקרוב' : ''}`}</small></div><span class="amt ${['expired', 'soon'].includes(st) ? 'neg' : ''}">${money(g.amount)}</span></div>`; }).join('') || '<div class="small mut">אין ערבויות בפרויקט</div>'}
       <p class="small mut">ערבות ביצוע מוחלפת בדרך כלל בערבות בדק בחשבון הסופי.</p></div></div>`);
   el.appendChild(close);
@@ -110,6 +111,10 @@ export function billView(P, billId) {
   const lineOf = Object.fromEntries(P.pd.billLines.filter(l => l.bill_id === billId).map(l => [l.boq_item_id, l]));
   // מצב עריכה מקומי
   const st = { head: { ...bill }, lines: {}, fines: P.pd.fines.filter(f => f.bill_id === billId).map(f => ({ ...f })) };
+  // מדד: חשבון שעוד לא אושר מקבל אוטומטית את המדד האחרון שהוזן בהגדרות הלקוח
+  const idxOn = hasMod(P.project, 'index'), lastIdx = idxOn ? latestIndex(P.data.indexSeries || [], String(bill.period_to || todayStr()).slice(0, 7)) : null;
+  const idxAuto = idxOn && st.head.index_value == null && lastIdx && ['draft', 'submitted'].includes(bill.status);
+  if (idxAuto) st.head.index_value = Number(lastIdx.value);
   for (const it of items) { const l = lineOf[it.id]; st.lines[it.id] = { cum_qty_sub: l?.cum_qty_sub ?? prevOf[it.id] ?? 0, cum_qty_app: l?.cum_qty_app ?? null, cut_reason: l?.cut_reason || '' }; }
   const vo = Object.fromEntries(P.pd.variations.map(v => [v.id, v]));
   const isLast = n(bill.number) === Math.max(...P.pd.bills.map(b => n(b.number)));
@@ -124,14 +129,14 @@ export function billView(P, billId) {
       ${field('עד תאריך (תקופה)', 'period_to', bill.period_to, { type: 'date' })}${field('תאריך החשבון', 'bill_date', bill.bill_date, { type: 'date' })}
       ${select('סטטוס', 'status', BILL_STATUS, bill.status)}${field('תאריך הגשה', 'submitted_date', bill.submitted_date, { type: 'date' })}
       ${field('תאריך אישור', 'approved_date', bill.approved_date, { type: 'date' })}${field('מועד תשלום (ריק = שוטף+' + P.project.pay_terms_days + ')', 'due_date', bill.due_date, { type: 'date' })}
-      ${P.project.indexation ? field(`מדד החשבון (בסיס ${num(P.project.base_index)})`, 'index_value', bill.index_value, { type: 'number' }) : ''}
+      ${idxOn ? field(`מדד החשבון (בסיס ${num(P.project.base_index)})`, 'index_value', st.head.index_value, { type: 'number', attrs: 'step="0.01"', hint: lastIdx ? `${idxAuto ? 'מולא אוטומטית: ' : ''}המדד האחרון שהוזן ${lastIdx.month.split('-').reverse().join('/')} = ${num(lastIdx.value)}` : 'עוד לא הוזן מדד חודשי בהגדרות הלקוח' }) : ''}
       ${field('קיזוזים נוספים ₪', 'offsets', bill.offsets, { type: 'number' })}${field('סיבת הקיזוז', 'offsets_note', bill.offsets_note)}</div></div>
     ${edit ? `<div class="actions" style="margin-bottom:10px">
       <button class="btn ghost small" id="fromlog" title="מצטבר קודם + כמויות שדווחו ביומן העבודה עד תאריך החשבון">מילוי מוגש לפי כמויות מהיומן</button>
       <button class="btn ghost small" id="fromprog" title="כמות חוזית × אחוז הביצוע בבקרה">מילוי מוגש לפי אחוז הביצוע</button>
       <button class="btn ghost small" id="appall">מאושר = מוגש</button></div>` : ''}
     <div class="tw" id="lt"></div>
-    <div class="cols even"><div class="card"><h2>קנסות ${edit ? '<button class="btn small" id="addf" type="button">+ קנס</button>' : ''}</h2><div id="fl"></div><p class="small mut" id="ft"></p></div>
+    <div class="cols even"><div class="card" ${hasMod(P.project, 'fines') || st.fines.length ? '' : 'hidden'}><h2>קנסות ${edit ? '<button class="btn small" id="addf" type="button">+ קנס</button>' : ''}</h2><div id="fl"></div><p class="small mut" id="ft"></p></div>
       <div class="card"><h2>סיכום החשבון</h2><div id="sum"></div></div></div>
     <div class="card"><h2>תקבולים ${edit && bill.status !== 'draft' ? '<button class="btn small" id="addp" type="button">+ תקבול</button>' : ''}</h2><div id="pl"></div></div>
     ${edit ? `<div class="savebar"><span id="sb"></span><span class="sp"></span>${bill.status === 'draft' || isLast ? '<button class="btn ghost danger-t" id="del" type="button">מחיקת החשבון</button>' : ''}<button class="btn ghost" id="prog" type="button">עדכון אחוזי ביצוע לפי החשבון</button><button class="btn" id="save" type="button">שמירה</button></div>` : ''}</div>`);

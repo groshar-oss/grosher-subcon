@@ -2,19 +2,20 @@
 import { n } from './calc.js';
 import { mkey, addMonths, monthLabel } from './cashflow.js';
 import { COMMITTED } from './dev.js';
+import { has, indexRate, fixedMonths } from './modules.js';
 
 export const INCOME_SOURCES = { buyer: 'רוכשים', bank: 'בנק מלווה', equity: 'הון עצמי', other: 'אחר' };
 export const DCF_ROWS = {
   in_buyer: 'תקבולים מרוכשים', in_bank: 'משיכות מהבנק המלווה', in_equity: 'הון עצמי', in_other: 'הכנסות אחרות',
-  out_paid: 'תשלומים ששולמו', out_open: 'חשבונות שאושרו ועוד לא שולמו', out_contract: 'יתרת התקשרויות (לפי לו"ז)', out_rest: 'יתרת תקציב שטרם נסגרה', out_delay: 'עלות עיכוב בלו"ז'
+  out_paid: 'תשלומים ששולמו', out_open: 'חשבונות שאושרו ועוד לא שולמו', out_contract: 'יתרת התקשרויות (לפי לו"ז)', out_index: 'הפרש הצמדה צפוי', out_fixed: 'עלויות חודשיות קבועות', out_rest: 'יתרת תקציב שטרם נסגרה', out_delay: 'עלות עיכוב בלו"ז'
 };
 export const DCF_IN = ['in_buyer', 'in_bank', 'in_equity', 'in_other'];
-export const DCF_OUT = ['out_paid', 'out_open', 'out_contract', 'out_rest', 'out_delay'];
+export const DCF_OUT = ['out_paid', 'out_open', 'out_contract', 'out_index', 'out_fixed', 'out_rest', 'out_delay'];
 const termsMonths = d => Math.max(0, Math.ceil(n(d) / 30));
 
 /**
  * projects: [{ project, s (devSummary), pd }]
- * opts: { settings, today, back, ahead, incomeDelay (ימים), schedDelay (חודשים), delayCost (₪ לחודש עיכוב, לפני מע"מ) }
+ * opts: { settings, today, back, ahead, incomeDelay (ימים), schedDelay (חודשים), delayCost (₪ לחודש עיכוב, לפני מע"מ), indexSeries: [] }
  */
 export function devCashflow(projects, opts = {}) {
   const st = { cash_opening: 0, cash_asof: '', cash_min: 0, supplier_terms_days: 45, vat_pct: 18, ...(opts.settings || {}) };
@@ -66,7 +67,13 @@ export function devCashflow(projects, opts = {}) {
     for (const c of s.contracts.filter(c => COMMITTED.includes(c.contract.status))) {
       const left = Math.max(0, c.amount - c.invoiced);
       spread(left * vat, 'out_contract', `${c.contract.vendor_name || ''} · ${c.contract.title}`, termsMonths(c.contract.pay_terms_days ?? st.supplier_terms_days));
+      // התקשרות צמודה: הפרש לפי המדד האחרון שפורסם מול מדד הבסיס של ההתקשרות. לא נספר כחריגה
+      const r = has(P, 'index') && c.contract.indexation ? indexRate(c.contract.base_index, opts.indexSeries || pd.indexSeries || [], cur) : 0;
+      if (r) spread(left * vat * r, 'out_index', `הצמדה ${(r * 100).toFixed(1)}% · ${c.contract.vendor_name || ''}`, termsMonths(c.contract.pay_terms_days ?? st.supplier_terms_days));
     }
+    // עלויות חודשיות קבועות מהחודש הנוכחי, לפי תנאי התשלום לספקים
+    if (has(P, 'fixed')) for (const fc of pd.fixedCosts || []) for (const fm of fixedMonths(fc, cur))
+      put(addMonths(fm, termsMonths(st.supplier_terms_days)), 'out_fixed', n(fc.amount) * (fc.vat === false ? 1 : vat), `${fc.name}${fc.supplier_name ? ' · ' + fc.supplier_name : ''} (${monthLabel(fm)})`, P.id);
     // מה שבצפי ועוד לא נסגר בהתקשרות (סעיפים בהערכה, צפי ידני מעל ההתקשרות)
     const rest = s.rows.reduce((a, r) => a + Math.max(0, r.forecast - Math.max(r.committed, r.invoiced)), 0);
     spread(rest * vat, 'out_rest', 'יתרת תקציב', termsMonths(st.supplier_terms_days));

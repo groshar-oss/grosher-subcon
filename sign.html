@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>אישור הוראת שינוי · גרושר</title>
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0f1f4b">
+<link rel="icon" href="icons/favicon.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{--navy:#0f1f4b;--ink:#13284b;--mut:#6b7491;--line:#d5dbec;--bg:#f3f5fb;--ok:#1b7a3a;--bad:#c62828;--acc:#2f5bea}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:Heebo,Arial,Helvetica,sans-serif;font-size:15px}
+  header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px}
+  header img{height:34px}header b{font-size:16px}header small{display:block;color:#b9c4e8;font-size:12px}
+  main{max-width:1060px;margin:0 auto;padding:16px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 2px 10px rgba(15,31,75,.05)}
+  .sheet{overflow-x:auto}
+  h2{margin:0 0 10px;font-size:18px}
+  label{display:block;margin:10px 0 4px;font-weight:600;font-size:14px}
+  input[type=text],textarea{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink)}
+  textarea{min-height:70px}
+  .pad{position:relative;border:2px dashed #9aa3b8;border-radius:12px;background:#fff;touch-action:none;height:190px}
+  .pad canvas{width:100%;height:100%;display:block;border-radius:10px;cursor:crosshair}
+  .pad span{position:absolute;inset:auto 0 10px;text-align:center;color:#9aa3b8;font-size:13px;pointer-events:none}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;align-items:center}
+  button{font:inherit;font-weight:700;border:0;border-radius:10px;padding:12px 20px;cursor:pointer;min-height:46px}
+  .ok{background:var(--ok);color:#fff;flex:1 1 200px}.no{background:#fff;color:var(--bad);border:1px solid var(--bad);flex:0 1 160px}.ghost{background:#eef1fa;color:var(--ink);padding:8px 14px;min-height:36px;font-weight:600}
+  button:disabled{opacity:.55;cursor:default}
+  .chk{display:flex;gap:8px;align-items:flex-start;font-weight:500;margin-top:12px}.chk input{width:20px;height:20px;margin-top:2px;flex:none}
+  .err{color:var(--bad);font-weight:600;margin-top:10px}
+  .done{font-size:18px;font-weight:800}.done.ok2{color:var(--ok)}.done.bad2{color:var(--bad)}
+  .mut{color:var(--mut);font-size:13px}
+  @media (max-width:600px){main{padding:10px}.card{padding:12px}}
+</style>
+</head>
+<body>
+<header><img src="icons/logo-neg.png" alt=""><div><b>גרושר פרויקטים</b><small>אישור הוראת שינוי</small></div></header>
+<main id="app"><div class="card">טוען…</div></main>
+<script type="module" src="js/sign.js"></script>
+</body>
+</html>

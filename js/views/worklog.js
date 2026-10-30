@@ -199,7 +199,7 @@ export function tabWorkLog(P) {
     $('#k', el).innerHTML = `<div class="kpi"><div class="l">ימי רישום</div><div class="v">${dates.length}</div></div>
       <div class="kpi"><div class="l">ימי עבודה (שכירים ויומיים)</div><div class="v">${num(days, 1)}</div></div>
       <div class="kpi"><div class="l">עלות עבודה בחודש</div><div class="v">${money(cost)}</div><div class="n">סה"כ בפרויקט ${money(P.summary.laborCost)}</div></div>`;
-    $('#t', el).innerHTML = `<table><thead><tr><th>תאריך</th><th>עובדים</th><th class="n">ימים</th><th class="n hide-m">ש' נוספות</th><th class="hide-m">סעיפים</th><th class="hide-m">כמויות</th><th class="n">עלות</th><th class="hide-m">הערות</th></tr></thead><tbody>
+    $('#t', el).innerHTML = `<table><thead><tr><th>תאריך</th><th>עובדים</th><th class="n">ימים</th><th class="n hide-m">שעות נוספות</th><th class="hide-m">סעיפים</th><th class="hide-m">כמויות</th><th class="n">עלות</th><th class="hide-m">הערות</th></tr></thead><tbody>
       ${dates.map(dt => { const de = es.filter(e => e.log_date === dt), dq = pq.filter(q => q.log_date === dt), dd = P.pd.days.find(x => x.log_date === dt);
         const its = [...new Set(de.map(e => e.boq_item_id ? (items[e.boq_item_id]?.code || '?') : 'כללי'))];
         return `<tr class="click" data-d="${dt}"><td>${fmtDate(dt)}</td><td class="wrap small">${esc([...new Set(de.map(e => W[e.worker_id]?.name || '?'))].join(', '))}</td>

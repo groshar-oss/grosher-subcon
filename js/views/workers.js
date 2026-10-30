@@ -12,7 +12,7 @@ const rateText = w => w.pay_type === 'salary' ? `${money(w.monthly_salary)} לח
 export async function viewWorkers(tab = 'list') {
   if (!can.workers() && S.role !== 'viewer') return h('<div class="card empty">אין הרשאה</div>');
   const data = await loadTenantData();
-  const el = h(`<div><div class="top"><div><h1>עובדים ונוכחות</h1><div class="sub">שכר ותעריפים גלויים רק למנהלת, לבעלים ולהנהלת חשבונות. מנהל עבודה רואה שמות בלבד.</div></div></div>
+  const el = h(`<div><div class="top"><div><h1>עובדים ונוכחות</h1><div class="sub">שכר ותעריפים גלויים רק למנהל השירות, לבעלים ולהנהלת חשבונות. מנהל עבודה רואה שמות בלבד.</div></div></div>
     <nav class="tabs"><a href="#/workers" class="${tab === 'list' ? 'on' : ''}">עובדים</a><a href="#/workers/attendance" class="${tab === 'attendance' ? 'on' : ''}">נוכחות חודשית</a></nav><div id="wt"></div></div>`);
   $('#wt', el).appendChild(tab === 'attendance' ? attendanceView(data) : listView(data));
   return el;
@@ -29,7 +29,7 @@ function listView(data) {
       <input id="q" placeholder="חיפוש שם או מקצוע" style="width:200px">
       <select id="ft" style="width:auto"><option value="">כל סוגי ההעסקה</option>${Object.entries(PAY_TYPES).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
       <label class="chk"><input type="checkbox" id="fi"> להציג גם לא פעילים</label></div>
-    <div class="tw"><table><thead><tr><th>שם</th><th>סוג העסקה</th><th class="hide-m">מקצוע</th><th class="n">שכר / תעריף</th><th class="n hide-m">מקדם</th><th class="n">ימים החודש</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
+    <div class="tw"><table><thead><tr><th>שם</th><th>סוג העסקה</th><th class="hide-m">מקצוע</th><th class="n">שכר / תעריף</th><th class="n hide-m">מקדם</th><th class="n">ימים בחודש</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
     <p class="small mut">עלות שכיר בפרויקט = ברוטו × מקדם עלות מעביד (ברירת מחדל ${st.employer_factor}) × ימי העבודה בפרויקט ÷ ימי העבודה שלו בחודש (לפחות ${st.work_days_month}).
       עובד יומי: תעריף × ימים. קבלנות: כמות שבוצעה × מחיר קבלנות, לא לפי שעות.</p></div>`);
   const draw = () => {
@@ -110,7 +110,7 @@ function attendanceView(data) {
     rows = attendance({ entries: data.entries, costs, month, piece: e => W[e.worker_id]?.pay_type === 'piece' }).sort((a, b) => (W[a.worker_id]?.name || '').localeCompare(W[b.worker_id]?.name || '', 'he') || pname(a.project_id).localeCompare(pname(b.project_id), 'he'));
     const byW = {};
     for (const r of rows) (byW[r.worker_id] ||= []).push(r);
-    let html = `<div class="tw"><table><thead><tr><th>עובד</th><th>פרויקט</th><th class="n">ימים</th><th class="n">ש' נוספות</th><th class="n">כמות קבלנות</th>${showCost ? '<th class="n">עלות</th>' : ''}</tr></thead><tbody>`;
+    let html = `<div class="tw"><table><thead><tr><th>עובד</th><th>פרויקט</th><th class="n">ימים</th><th class="n">שעות נוספות</th><th class="n">כמות קבלנות</th>${showCost ? '<th class="n">עלות</th>' : ''}</tr></thead><tbody>`;
     for (const [wid, rs] of Object.entries(byW)) {
       const w = W[wid];
       html += rs.map((r, i) => `<tr><td>${i ? '' : `<b>${esc(w?.name || '?')}</b> <span class="small mut">${PAY_TYPES[w?.pay_type] || ''}</span>`}</td><td>${esc(pname(r.project_id))}</td><td class="n">${w?.pay_type === 'piece' ? `<span class="small mut">${r.dates.size} ימי נוכחות</span>` : num(r.days, 2)}</td><td class="n">${num(r.ot, 1)}</td><td class="n">${r.piece ? num(r.piece) : ''}</td>${showCost ? `<td class="n">${money(r.cost)}</td>` : ''}</tr>`).join('');

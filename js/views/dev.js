@@ -5,11 +5,12 @@ import { S, can, render, logChange, settings } from '../app.js';
 import { n, itemSale } from '../calc.js';
 import { devSummary, devAlerts, baselineSnapshot, lineAmount, CONTRACT_KINDS, CONTRACT_STATUS, COMMITTED } from '../dev.js';
 import { rowAttr, legend } from './common.js';
+import { has as hasMod } from '../modules.js';
 import { attachBtn, wireAttach, clip, filesFor } from '../files.js';
 import { loadXLSX } from '../import.js';
 
 export const devSum = P => devSummary({ project: P.project, items: P.pd.items, contracts: P.pd.contracts || [], cLines: P.pd.cLines || [], expenses: P.pd.expenses,
-  cos: P.pd.cos || [], coLines: P.pd.coLines || [], cbills: P.pd.cbills || [], cbLines: P.pd.cbLines || [], vatPct: settings().vat_pct });
+  cos: P.pd.cos || [], signoffs: P.pd.signoffs || [], fixedCosts: P.pd.fixedCosts || [], coLines: P.pd.coLines || [], cbills: P.pd.cbills || [], cbLines: P.pd.cbLines || [], vatPct: settings().vat_pct });
 const alertOpts = P => ({ critPct: settings().crit_pct, vendorsWithContracts: vendorNames(P), today: new Date().toISOString().slice(0, 10), filesFor: id => filesFor(P.data.files, id) });
 const vendorNames = P => new Set((P.pd.contracts || []).filter(c => c.status !== 'cancelled').map(c => (c.vendor_name || '').trim()).filter(Boolean));
 export const devProjectAlerts = P => devAlerts(devSum(P), alertOpts(P));
@@ -34,7 +35,7 @@ export function devControl(P) {
     <div class="card"><h2>איך מחושב</h2><p class="small">צפי לסיום לכל סעיף = התקשרויות חתומות לסעיף. סעיף בלי התקשרות מקבל את סכום התקציב ומסומן "הערכה". צפי ידני אפשר להזין בלחיצה על הסעיף, עם הסבר. הצפי לא יורד מתחת למה שכבר חויב.</p>
     <p class="small mut">הבסיס הוא צילום של התקציב ביום הנעילה. כל שינוי אחריו נמדד מול הבסיס ונרשם ביומן השינויים. התקשרות בטיוטה לא נכנסת לצפי.</p></div></div>`);
 
-  const head = `<thead><tr><th>קוד</th><th>תיאור</th><th class="n">תקציב</th><th class="n hide-m">בסיס</th><th class="n">התקשרויות</th><th class="n">צפי לסיום</th><th class="n hide-m">חויב</th><th class="n hide-m">שולם</th><th class="n">סטייה מהתקציב</th><th class="n hide-m">מול הבסיס</th></tr></thead>`;
+  const head = `<thead><tr><th>קוד</th><th>תיאור</th><th class="n">תקציב</th><th class="n hide-m">בסיס</th><th class="n">התקשרויות</th><th class="n">צפי לסיום</th><th class="n hide-m">חויב</th><th class="n hide-m">שולם</th><th class="n">סטייה מהתקציב</th><th class="n hide-m">סטייה מהבסיס</th></tr></thead>`;
   const row = r => {
     const a = r.estimate ? { cls: '', style: '', crit: false } : rowAttr(r.dev);
     const chips = (r.estimate ? ' <span class="chip amber">הערכה</span>' : '') + (r.manual ? ` <span class="chip blue" title="${esc(r.item.forecast_note || '')}">צפי ידני</span>` : '') + (r.newItem ? ' <span class="chip">נוסף אחרי הבסיס</span>' : '') + (r.draft ? ` <span class="chip" title="התקשרות בטיוטה">טיוטה ${money(r.draft)}</span>` : '') + (r.co ? ` <span class="chip blue" title="הוראות שינוי מאושרות, כלולות בהתקשרויות">שינויים ${money(r.co)}</span>` : '') + (r.coPending ? ` <span class="chip amber" title="הוראות שינוי שטרם אושרו, לא בצפי">בתהליך ${money(r.coPending)}</span>` : '');
@@ -116,7 +117,7 @@ export function devContracts(P) {
   const el = h(`<div>
     ${can.edit() ? '<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ התקשרות</button></div>' : ''}
     <div class="note small">כל התקשרות חתומה עם קבלן, ספק או יועץ: סכום, תנאי תשלום, עיכבון ומקדמה. שורות ההתקשרות משויכות לסעיפי התקציב, ומחיר היחידה בחוזה מושווה למחיר בתקציב.</div>
-    <div class="tw"><table><thead><tr><th>מס'</th><th>גורם</th><th class="hide-m">סוג</th><th>סטטוס</th><th class="n">סכום</th><th class="n hide-m">מול התקציב</th><th class="n">חויב</th><th class="n hide-m">שולם</th><th class="n">יתרה לתשלום</th><th class="hide-m">תנאים</th><th></th></tr></thead><tbody id="tb"></tbody></table></div></div>`);
+    <div class="tw"><table><thead><tr><th>מס'</th><th>קבלן / ספק</th><th class="hide-m">סוג</th><th>סטטוס</th><th class="n">סכום התקשרות</th><th class="n hide-m">מול התקציב</th><th class="n">חויב</th><th class="n hide-m">שולם</th><th class="n">יתרה לתשלום</th><th class="hide-m">תנאים</th><th></th></tr></thead><tbody id="tb"></tbody></table></div></div>`);
   const bud = c => c.lines.filter(l => l.boq_item_id).reduce((a, l) => { const it = P.pd.items.find(i => i.id === l.boq_item_id); return a + (it ? n(l.qty) * n(it.unit_price) : 0); }, 0);
   $('#tb', el).innerHTML = s.contracts.map(c => {
     const k = c.contract, b = bud(c), d = b ? (c.base - b) / b * 100 : null, a = d != null && COMMITTED.includes(k.status) ? rowAttr(d) : { cls: '', style: '' };
@@ -143,7 +144,7 @@ export async function contractDialog(P, c = null) {
     <div class="grid g2">${field('גורם (קבלן / ספק / יועץ)', 'vendor_name', c?.vendor_name || '', { req: true, attrs: 'list="vnd"' })}${field('נושא ההתקשרות', 'title', c?.title || '', { req: true })}</div>
     <div class="grid g4">${field('מספר חוזה', 'number', c?.number || '')}${select('סוג', 'kind', CONTRACT_KINDS, c?.kind || 'contractor')}${select('סטטוס', 'status', CONTRACT_STATUS, c?.status || 'signed')}${field('תאריך חתימה', 'signed_date', c?.signed_date || '', { type: 'date' })}</div>
     <div class="grid g4">${field('תנאי תשלום (שוטף + ימים)', 'pay_terms_days', c?.pay_terms_days ?? 30, { type: 'number' })}${field('עיכבון %', 'retention_pct', c?.retention_pct ?? 5, { type: 'number' })}${field('מקדמה ₪', 'advance_amount', c?.advance_amount ?? 0, { type: 'number' })}${field('קיזוז מקדמה % מכל חשבון', 'advance_offset_pct', c?.advance_offset_pct ?? 0, { type: 'number' })}</div>
-    <label class="chk"><input type="checkbox" name="indexation" ${c?.indexation ? 'checked' : ''}> צמוד למדד תשומות הבנייה</label>${field('מדד בסיס', 'base_index', c?.base_index ?? '', { type: 'number' })}
+    ${hasMod(P.project, 'index') ? `<label class="chk"><input type="checkbox" name="indexation" ${c?.indexation ? 'checked' : ''}> צמוד למדד תשומות הבנייה</label>${field('מדד בסיס', 'base_index', c?.base_index ?? '', { type: 'number', attrs: 'step="0.01"' })}` : ''}
     <h3 style="margin:12px 0 6px">שורות ההתקשרות</h3>
     <p class="small mut">כל שורה משויכת לסעיף תקציב. מחיר התקציב מוצג להשוואה, ואת מחיר החוזה אפשר לשנות.</p>
     ${ro ? '' : `<div class="actions" style="margin-bottom:8px"><select id="pickch" style="width:auto"><option value="">הוספת פרק שלם מהתקציב…</option>${chapters.map(ch => `<option>${esc(ch)}</option>`).join('')}</select>
@@ -192,7 +193,7 @@ export async function contractDialog(P, c = null) {
   let vendor = vendors.find(x => x.name.trim() === vname);
   if (!vendor) [vendor] = await db.insert('vendors', { tenant_id: S.tenantId, name: vname, kind: v.kind === 'consultant' ? 'consultant' : v.kind === 'supplier' ? 'supplier' : 'contractor', pay_terms_days: numOrNull(v.pay_terms_days), active: true });
   const row = { vendor_id: vendor.id, vendor_name: vname, title: v.title.trim(), number: v.number.trim() || null, kind: v.kind, status: v.status, signed_date: nullIfEmpty(v.signed_date),
-    pay_terms_days: numOrNull(v.pay_terms_days), retention_pct: n(v.retention_pct), advance_amount: n(v.advance_amount), advance_offset_pct: n(v.advance_offset_pct), indexation: !!v.indexation, base_index: numOrNull(v.base_index), notes: v.notes || null };
+    pay_terms_days: numOrNull(v.pay_terms_days), retention_pct: n(v.retention_pct), advance_amount: n(v.advance_amount), advance_offset_pct: n(v.advance_offset_pct), ...(hasMod(P.project, 'index') ? { indexation: !!v.indexation, base_index: numOrNull(v.base_index) } : {}), notes: v.notes || null };
   const newTotal = lines.reduce((a, l) => a + lineAmount(l), 0);
   let cid = c?.id;
   if (c) {

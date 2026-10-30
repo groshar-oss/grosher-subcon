@@ -125,7 +125,7 @@ async function importFlow(P, file) {
   }, validate: (d, form) => {
     const p = $('#impbox', form)._parsed;
     if (!p?.ok || !p.items.length) return 'לא נמצאו סעיפים לקליטה';
-    if (p.items.some(i => i.missing.length) && !d.force) return 'יש סעיפים בלי מחיר או כמות. סמני "לקלוט בכל זאת" או תקני את הקובץ.';
+    if (p.items.some(i => i.missing.length) && !d.force) return 'יש סעיפים בלי מחיר או כמות. סמן "לקלוט בכל זאת" או תקן את הקובץ.';
     return null;
   } });
   if (!v) return;
@@ -162,7 +162,7 @@ export function tabCosting(P) {
   let T = { sale: 0, plan: 0 };
   const el = h(`<div>
     <div class="actions" style="margin-bottom:12px">${can.edit() ? '<button class="btn ghost" id="copy">העתקת תמחיר מפרויקט אחר</button>' : ''}<span class="mut small">תקורה בפרויקט: ${oh}% מהעלות הישירה (משנים בהגדרות הפרויקט)</span></div>
-    <div class="tw"><table><thead><tr><th>קוד</th><th>תיאור</th><th class="n">כמות</th><th class="n">מכירה</th><th class="n">עלות ישירה</th><th class="n">תמחיר כולל</th><th class="n">עלות ליח'</th><th class="n">מחיר ליח'</th><th class="n">רווח מתוכנן</th><th class="n">%</th><th></th></tr></thead><tbody id="tb"></tbody></table></div></div>`);
+    <div class="tw"><table><thead><tr><th>קוד</th><th>תיאור</th><th class="n">כמות</th><th class="n">מכירה</th><th class="n">עלות ישירה</th><th class="n">תמחיר כולל</th><th class="n">עלות ליח'</th><th class="n">מחיר ליח'</th><th class="n">רווח מתוכנן</th><th class="n">% רווח</th><th></th></tr></thead><tbody id="tb"></tbody></table></div></div>`);
   const tb = $('#tb', el);
   if (!P.pd.items.length) tb.innerHTML = `<tr><td colspan="11" class="empty">אין סעיפים. <a href="#/project/${P.id}/boq">לכתב הכמויות</a></td></tr>`;
   for (const [g, rs] of groups) {
@@ -209,7 +209,7 @@ export async function costingEditor(P, item) {
           <td><input data-f="unit" value="${esc(l.unit)}" style="width:70px" list="unl2"></td><td><input data-f="unit_cost" type="number" step="any" dir="ltr" value="${esc(l.unit_cost)}" style="width:100px"></td>
           <td>${l.kind === 'labor' ? `<div class="actions" style="flex-wrap:nowrap;gap:4px"><select data-f="labor_type" style="width:auto;min-height:30px" aria-label="סוג עובדים">${Object.entries(LABOR_TYPES).map(([a, b]) => `<option value="${a}" ${a === (l.labor_type || '') ? 'selected' : ''}>${b}</option>`).join('')}</select><input data-f="crew" type="number" step="any" dir="ltr" value="${esc(l.crew)}" style="width:56px" placeholder="צוות" title="מספר עובדים מתוכנן ביום"></div>`
             : `<input data-f="waste_pct" type="number" step="any" dir="ltr" value="${esc(l.waste_pct)}" style="width:64px" ${l.kind === 'material' ? '' : 'disabled'}>`}</td><td class="n" data-tot>${money(lineCost(l))}</td><td><button type="button" class="btn small ghost" data-rm aria-label="מחיקת שורה">✕</button></td></tr>`).join('')
-          || `<tr><td colspan="8" class="empty">אין שורות עלות. הוסיפי שורה או בחרי תבנית.</td></tr>`;
+          || `<tr><td colspan="8" class="empty">אין שורות עלות. הוסף שורה או בחר תבנית.</td></tr>`;
         lt.insertAdjacentHTML('beforeend', `<datalist id="unl2">${UNITS.map(u => `<option value="${esc(u)}">`).join('')}</datalist>`);
         sumUp();
         $$('[data-k]', lt).forEach(tr => {
@@ -247,8 +247,8 @@ export async function costingEditor(P, item) {
       });
     },
     validate: d => {
-      if (lines.some(l => !String(l.description).trim() && !n(l.unit_cost))) return 'יש שורה ריקה. מלאי תיאור ועלות או מחקי אותה.';
-      if (needReason && !String(d.reason || '').trim()) return 'הסעיף כבר בביצוע. כתבי סיבה לתיקון התמחיר.';
+      if (lines.some(l => !String(l.description).trim() && !n(l.unit_cost))) return 'יש שורה ריקה. מלא תיאור ועלות או מחק אותה.';
+      if (needReason && !String(d.reason || '').trim()) return 'הסעיף כבר בביצוע. כתוב סיבה לתיקון התמחיר.';
       return null;
     } });
   if (!v || ro) return;

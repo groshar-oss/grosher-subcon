@@ -90,7 +90,7 @@ export function loadXLSX() {
   return xlsxP ||= new Promise((res, rej) => {
     const s = document.createElement('script');
     s.src = new URL('../vendor/xlsx.full.min.js', import.meta.url).href;
-    s.onload = () => res(window.XLSX); s.onerror = () => rej(new Error('טעינת רכיב האקסל נכשלה. נסי לרענן את הדף.'));
+    s.onload = () => res(window.XLSX); s.onerror = () => rej(new Error('טעינת רכיב האקסל נכשלה. נסה לרענן את הדף.'));
     document.head.appendChild(s);
   });
 }

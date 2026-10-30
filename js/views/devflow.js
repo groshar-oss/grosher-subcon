@@ -8,10 +8,12 @@ import { devFlow, flowAlerts, coTotals, coPrice, needsAnalysis, contractBills, d
   CO_STEPS, CO_STAGES, CO_MANUAL, CO_INITIATORS, CBILL_STATUS, CBILL_STEPS, CBILL_APPROVED } from '../devflow.js';
 import { vendorStatus, findVendor, DOC_TYPES } from '../docs.js';
 import { attachBtn, wireAttach, filesFor } from '../files.js';
+import { signBlock, signChip, signAction, fileNewSignatures } from './cosign.js';
+import { has as hasMod, latestIndex } from '../modules.js';
 
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const has = v => v !== null && v !== undefined && v !== '';
-export const flowOf = P => devFlow({ contracts: P.pd.contracts || [], cLines: P.pd.cLines || [], cos: P.pd.cos || [], coLines: P.pd.coLines || [], cbills: P.pd.cbills || [], cbLines: P.pd.cbLines || [], vatPct: settings().vat_pct });
+export const flowOf = P => devFlow({ signoffs: P.pd.signoffs || [], contracts: P.pd.contracts || [], cLines: P.pd.cLines || [], cos: P.pd.cos || [], coLines: P.pd.coLines || [], cbills: P.pd.cbills || [], cbLines: P.pd.cbLines || [], vatPct: settings().vat_pct });
 const stageChip = st => `<span class="chip ${st === 'rejected' ? '' : st === 'paid' ? 'green' : ['approved', 'executed', 'billed'].includes(st) ? 'blue' : 'amber'}">${CO_STAGES[st] || st}</span>`;
 // פס שלבים: 6 שלבים של הוראת שינוי או 5 של חשבון
 const stepper = (steps, labels, cur, { warn = null } = {}) => {
@@ -37,12 +39,12 @@ export function devCos(P) {
     </div>
     ${can.edit() ? '<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ הוראת שינוי</button></div>' : ''}
     ${alerts.length ? `<div class="card"><h2>דורש תשומת לב (${alerts.length})</h2><ul class="small" id="al">${alerts.map(a => `<li class="${a.crit ? 'neg' : ''}"><b>${esc(a.title)}</b> · ${esc(a.detail)}</li>`).join('')}</ul></div>` : ''}
-    <div class="note small">המסלול: בקשה ← בדיקה ותמחור ← אישור בכתב ← ביצוע ומדידה ← נכלל בחשבון ← שולם. שני השלבים האחרונים מתעדכנים לבד לפי חשבונות הקבלן. בכל שורה ארבעה מחירים: בכתב הכמויות (מכירה), בחוזה עם הקבלן, מבוקש ומאושר. כולם ניתנים לשינוי.</div>
-    <div class="tw"><table><thead><tr><th>מס'</th><th>שינוי</th><th class="hide-m">קבלן</th><th>שלב</th><th class="n">מבוקש</th><th class="n">מאושר</th><th class="n hide-m">לפי מכירה</th><th class="n hide-m">לו"ז</th><th class="hide-m">חשבון</th><th></th></tr></thead><tbody id="tb">
+    <div class="note small">המסלול: בקשה ← בדיקה ותמחור ← ממתין לאישור יזם ← אישור בכתב ← ביצוע ומדידה ← נכלל בחשבון ← שולם. שני השלבים האחרונים מתעדכנים לבד לפי חשבונות הקבלן. בכל שורה ארבעה מחירים: בכתב הכמויות (מכירה), בחוזה עם הקבלן, מבוקש ומאושר. כולם ניתנים לשינוי.</div>
+    <div class="tw"><table><thead><tr><th>מס'</th><th>שינוי</th><th class="hide-m">קבלן</th><th>שלב</th><th class="n">מבוקש</th><th class="n">מאושר</th><th class="n hide-m">מחיר מכירה</th><th class="n hide-m">תוספת לו"ז</th><th class="hide-m">חשבון</th><th></th></tr></thead><tbody id="tb">
     ${F.cos.map(x => { const co = x.co, warn = alerts.find(a => a.co?.id === co.id);
       return `<tr class="click ${x.stage === 'rejected' ? 'dim' : warn?.crit ? 'al-r' : warn ? 'al-y' : ''}" data-co="${co.id}"><td>${esc(co.number || '')}</td>
         <td class="wrap"><b>${esc(co.title)}</b><div class="small mut">${esc(CO_INITIATORS[co.initiator] || '')}${co.initiator_name ? ' · ' + esc(co.initiator_name) : ''}${co.reason ? ' · ' + esc(co.reason) : ''}</div></td>
-        <td class="hide-m">${esc(co.vendor_name || cById[co.contract_id]?.vendor_name || '')}</td><td>${stageChip(x.stage)}${x.analysis && !co.price_analysis ? ' <span class="chip amber">ניתוח מחיר</span>' : ''}</td>
+        <td class="hide-m">${esc(co.vendor_name || cById[co.contract_id]?.vendor_name || '')}</td><td>${stageChip(x.stage)}${signChip(x)}${x.analysis && !co.price_analysis ? ' <span class="chip amber">ניתוח מחיר</span>' : ''}</td>
         <td class="n">${money(x.requested)}</td><td class="n">${x.isApproved ? money(x.approved) : '<span class="mut">—</span>'}</td>
         <td class="n hide-m">${x.gapSale != null ? money(x.sale) : ''}</td><td class="n hide-m">${n(co.schedule_days) ? n(co.schedule_days) + ' ימים' : ''}</td>
         <td class="hide-m small">${x.billing.firstBill ? 'חשבון ' + x.billing.firstBill.number : x.billing.anyBill ? `הוגש בחשבון ${x.billing.anyBill.number}` : ''}</td>
@@ -51,6 +53,8 @@ export function devCos(P) {
   wireAttach(el, P.data.files || [], render);
   $$('[data-co]', el).forEach(tr => tr.onclick = e => { if (e.target.closest('button,a')) return; coDialog(P, P.pd.cos.find(c => c.id === tr.dataset.co)); });
   $('#add', el)?.addEventListener('click', () => coDialog(P));
+  // חתימות חדשות של היזם: נשמרות כמסמך PDF בפרויקט (ובדרייב אם מחובר)
+  setTimeout(() => fileNewSignatures(P, F.cos).then(k => { if (k) render(); }).catch(() => {}), 50);
   return el;
 }
 
@@ -72,15 +76,16 @@ export async function coDialog(P, co = null) {
     <div class="grid g2">${area('סיבה', 'reason', co?.reason || '')}${area('החלטה נדרשת / החלטה שהתקבלה', 'decision_note', co?.decision_note || '')}</div>
     <div class="grid g4">${select('שלב', 'stage', Object.fromEntries(CO_MANUAL.map(k => [k, CO_STAGES[k]])), co?.stage && CO_MANUAL.includes(co.stage) ? co.stage : co?.stage ? 'executed' : 'request')}
       ${field('ימי השפעה על הלו"ז', 'schedule_days', co?.schedule_days ?? 0, { type: 'number' })}${field('תאריך בקשה', 'request_date', co?.request_date || todayStr(), { type: 'date' })}${field('תאריך ביצוע', 'executed_date', co?.executed_date || '', { type: 'date' })}</div>
+    <fieldset class="card signbox" style="margin:8px 0;padding:10px"><legend class="small"><b>אישור יזם בחתימה</b></legend>${signBlock(x)}</fieldset>
     <fieldset class="card" style="margin:8px 0;padding:10px"><legend class="small"><b>אישור בכתב</b></legend><div class="grid g3">${field('תאריך אישור', 'approved_date', co?.approved_date || '', { type: 'date' })}${field('אושר ע"י', 'approved_by', co?.approved_by || '')}${field('אסמכתא (מכתב, פרוטוקול)', 'approval_ref', co?.approval_ref || '')}</div>
-      <p class="small mut" style="margin:4px 0 0">את האישור החתום מצרפים בכפתור 📎 בשורת ההוראה ברשימה.</p></fieldset>
+      <p class="small mut" style="margin:4px 0 0">כשהיזם חותם בקישור, הפרטים כאן מתמלאים לבד והמסמך החתום נשמר בפרויקט. אישור שהגיע בדרך אחרת מצרפים בכפתור 📎 בשורת ההוראה ברשימה.</p></fieldset>
     <h3 style="margin:12px 0 6px">שורות ותמחור</h3>
     <p class="small mut">מחיר בכתב הכמויות = המחיר שמכרת (אם הסעיף מופיע). מחיר בחוזה = המחיר שסגרת עם הקבלן. מבוקש = מה שהקבלן מבקש. מאושר = מה שנקבע (ריק = מחיר החוזה). אם אין מחיר בחוזה ואין בכתב הכמויות, נדרש ניתוח מחיר.</p>
     ${ro ? '' : `<div class="actions" style="margin-bottom:8px"><select id="pickcl" style="width:auto;max-width:320px"><option value="">הוספת שורה מהחוזה…</option></select><button class="btn small ghost" type="button" id="addfree">+ שורה חדשה (לא בחוזה)</button></div>`}
     <div class="tw" style="max-height:360px;overflow:auto"><table><thead><tr><th>תיאור</th><th>יח'</th><th class="n">כמות</th><th class="n">מחיר בכתב הכמויות</th><th class="n">מחיר בחוזה</th><th class="n">מחיר מבוקש</th><th class="n">מחיר מאושר</th><th class="n">סה"כ מאושר</th><th></th></tr></thead><tbody id="ll"></tbody></table></div>
     <div id="ltot" class="small" style="margin-top:6px"></div>
     ${area('ניתוח מחיר (כשאין מחיר בחוזה: הצעות, מחירון, חישוב)', 'price_analysis', co?.price_analysis || '')}${area('הערות', 'notes', co?.notes || '')}`;
-  let host, drawing = false;
+  let host, drawing = false, after = null;
   const curContract = () => $('[name=contract_id]', host)?.value || '';
   const fillPick = () => {
     const sel = $('#pickcl', host); if (!sel) return;
@@ -107,6 +112,7 @@ export async function coDialog(P, co = null) {
   };
   const v = await modal({ title: co ? `הוראת שינוי ${co.number || ''}` : 'הוראת שינוי חדשה', body, wide: true, ok: ro ? null : 'שמירה', cancel: ro ? 'סגירה' : 'ביטול', onMount: el => {
     host = el; fillPick(); draw();
+    $$('[data-sact]', el).forEach(b => b.onclick = () => { after = b.dataset.sact; el.closest('.ov')?.querySelector('[data-ok]')?.click(); });
     $('[name=contract_id]', el)?.addEventListener('change', fillPick);
     $('#pickcl', el)?.addEventListener('change', e => { const l = (P.pd.cLines || []).find(x => x.id === e.target.value); if (!l) return; const it = itemBy[l.boq_item_id];
       lines.push({ contract_line_id: l.id, description: l.description, unit: l.unit, qty: null, price_sale: it ? n(it.unit_price) : null, price_contract: n(l.unit_price), price_requested: null, price_approved: null });
@@ -121,6 +127,8 @@ export async function coDialog(P, co = null) {
     if (lines.some(l => !n(l.qty))) return 'יש שורה בלי כמות';
     if (d.stage === 'approved' && !d.approved_date) return 'באישור צריך תאריך אישור בכתב';
     if (d.approved_date && d.stage !== 'rejected' && lines.some(l => coPrice(l) == null)) return 'יש שורה בלי מחיר מאושר ובלי מחיר בחוזה';
+    if (after === 'send' && lines.some(l => coPrice(l) == null)) { after = null; return 'לפני שליחה ליזם: לכל שורה צריך מחיר מאושר (או מחיר בחוזה)'; }
+    if (after === 'send' && lines.some(needsAnalysis) && !d.price_analysis.trim()) { after = null; return 'לפני שליחה ליזם: יש שורה בלי מחיר בחוזה ובלי מחיר בכתב הכמויות, צריך לכתוב ניתוח מחיר'; }
     if (d.approved_date && lines.some(needsAnalysis) && !d.price_analysis.trim()) return 'יש שורה בלי מחיר בחוזה ובלי מחיר בכתב הכמויות: צריך לכתוב ניתוח מחיר לפני אישור';
     return null;
   } });
@@ -148,7 +156,9 @@ export async function coDialog(P, co = null) {
       price_requested: numOrNull(l.price_requested), price_approved: numOrNull(l.price_approved), sort: sort++ };
     if (l.id) await db.update('co_lines', l.id, lr); else await db.insert('co_lines', { tenant_id: S.tenantId, project_id: P.id, co_id: id, ...lr });
   }
-  toast('הוראת השינוי נשמרה'); render();
+  toast('הוראת השינוי נשמרה');
+  if (after) { try { await signAction(after, P.id, id); } catch (e) { toast(e.message, 'bad'); } }
+  render();
 }
 
 // ===== חשבונות קבלנים =====
@@ -168,7 +178,7 @@ export function devCbills(P) {
     </div>
     ${can.edit() ? '<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ חשבון קבלן</button></div>' : ''}
     <div class="note small">חשבון מצטבר שקבלן או ספק מגיש: ממלאים כמות מצטברת מוגשת לכל שורה בחוזה ובהוראות השינוי, ואת מה שאושר בבדיקה. המערכת בודקת כמות מעל החוזה, מחיר שונה, שינוי לא מאושר, חשבונית כפולה ומסמכים חסרים, ומפיקה דף "בדיקת חשבון והמלצה לתשלום".</div>
-    <div class="tw"><table><thead><tr><th>קבלן / ספק</th><th>חשבון</th><th class="hide-m">התקבל</th><th>סטטוס</th><th class="n">הוגש</th><th class="n">אושר בבדיקה</th><th class="n hide-m">נטו</th><th class="n">לתשלום כולל מע"מ</th><th>ממצאים</th><th></th></tr></thead><tbody>
+    <div class="tw"><table><thead><tr><th>קבלן / ספק</th><th>חשבון</th><th class="hide-m">התקבל</th><th>סטטוס</th><th class="n">הוגש</th><th class="n">מאושר ברוטו</th><th class="n hide-m">נטו</th><th class="n">לתשלום כולל מע"מ</th><th>ממצאי בדיקה</th><th></th></tr></thead><tbody>
     ${res.map(r => { const b = r.bill, c = r.contract; const fl = r.flags.length + (b.invoice_legal ? 0 : 1);
       return `<tr class="click" data-b="${b.id}"><td><b>${esc(c.vendor_name || '')}</b><div class="small mut">${esc(c.number || '')} ${esc(c.title)}</div></td><td><b>${b.number}</b></td><td class="hide-m">${fmtDate(b.received_date)}</td>
         <td><span class="chip ${b.status === 'paid' ? 'green' : b.status === 'approved' ? 'blue' : b.status === 'recommended' ? 'violet' : 'amber'}">${CBILL_STATUS[b.status]}</span></td>
@@ -228,6 +238,9 @@ export async function cbillView(P, billId) {
   const sameContract = (P.pd.cbills || []).filter(b => b.contract_id === contract.id);
   const isLast = Math.max(...sameContract.map(b => n(b.number))) === n(bill.number);
   const st = { head: { ...bill }, lines: {} };
+  const idxOn = hasMod(P.project, 'index') && contract.indexation, lastIdx = idxOn ? latestIndex(P.data.indexSeries || [], String(bill.period_to || new Date().toISOString()).slice(0, 7)) : null;
+  const idxAuto = idxOn && st.head.index_value == null && lastIdx && ['received', 'checked'].includes(bill.status);
+  if (idxAuto) st.head.index_value = Number(lastIdx.value);
   for (const l of (P.pd.cbLines || []).filter(l => l.cbill_id === billId)) st.lines[l.contract_line_id ? 'c:' + l.contract_line_id : 'o:' + l.co_line_id] = { ...l };
   const calcNow = () => {
     const bLines = (P.pd.cbLines || []).filter(l => l.cbill_id !== billId).concat(Object.entries(st.lines).map(([k, l]) => ({ ...l, cbill_id: billId, contract_line_id: k.startsWith('c:') ? k.slice(2) : null, co_line_id: k.startsWith('o:') ? k.slice(2) : null })));
@@ -242,7 +255,7 @@ export async function cbillView(P, billId) {
     <div class="card"><div class="grid g4">
       ${select('סטטוס', 'status', CBILL_STATUS, bill.status)}${field('תאריך קבלה', 'received_date', bill.received_date, { type: 'date' })}${field('עד תאריך (תקופה)', 'period_to', bill.period_to, { type: 'date' })}${field('נבדק ע"י', 'checked_by', bill.checked_by || '')}
       ${field('מספר חשבונית / חשבון עסקה', 'invoice_no', bill.invoice_no || '')}${field('תאריך חשבונית', 'invoice_date', bill.invoice_date, { type: 'date' })}
-      ${C.indexation ? field(`מדד החשבון (בסיס ${num(C.base_index)})`, 'index_value', bill.index_value, { type: 'number' }) : ''}
+      ${idxOn ? field(`מדד החשבון (בסיס ${num(C.base_index)})`, 'index_value', st.head.index_value, { type: 'number', attrs: 'step="0.01"', hint: lastIdx ? `${idxAuto ? 'מולא אוטומטית: ' : ''}המדד האחרון שהוזן ${lastIdx.month.split('-').reverse().join('/')} = ${num(lastIdx.value)}` : 'עוד לא הוזן מדד חודשי בהגדרות הלקוח' }) : ''}
       ${field('ניכויים נוספים ₪', 'other_deductions', bill.other_deductions, { type: 'number' })}${field('סיבת הניכוי', 'other_note', bill.other_note || '')}</div>
       <label class="chk"><input type="checkbox" name="invoice_legal" ${bill.invoice_legal ? 'checked' : ''}> התקבלה חשבונית כחוק (חשבונית מס תקינה, עם מספר עוסק ופירוט)</label></div>
     ${edit ? `<div class="actions" style="margin-bottom:10px"><button class="btn ghost small" id="appall" type="button">מאושר = מוגש</button><span class="small mut">מאושר ריק = כמו המוגש. מחיר מוגש ריק = מחיר החוזה. המחיר המאושר תמיד לפי החוזה.</span></div>` : ''}

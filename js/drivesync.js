@@ -10,7 +10,7 @@ import { loadXLSX } from './import.js';
 export const PROJECT_TABLES = { projects: 'פרטי הפרויקט', items: 'כתב כמויות - תקציב', lines: 'תמחיר', vos: 'הוראות שינוי לקבלן ראשי', expenses: 'הוצאות',
   entries: 'יומן עבודה', days: 'ימי עבודה', wqty: 'כמויות מהשטח', pos: 'הזמנות רכש', poLines: 'שורות הזמנה', bills: 'חשבונות לקבלן ראשי', billLines: 'שורות חשבון',
   fines: 'קנסות', payments: 'תקבולים', documents: 'מסמכים', guarantees: 'ערבויות', files: 'קבצים', contracts: 'התקשרויות', cLines: 'שורות התקשרות',
-  cos: 'הוראות שינוי', coLines: 'שורות הוראות שינוי', cbills: 'חשבונות קבלנים', cbLines: 'שורות חשבונות קבלנים', income: 'הכנסות', alertStates: 'מצב התרעות' };
+  cos: 'הוראות שינוי', coLines: 'שורות הוראות שינוי', cbills: 'חשבונות קבלנים', cbLines: 'שורות חשבונות קבלנים', income: 'הכנסות', alertStates: 'מצב התרעות', signoffs: 'אישורי יזם', fixedCosts: 'עלויות קבועות' };
 
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const clientName = () => tenant()?.name || 'לקוח';
@@ -30,7 +30,8 @@ async function putFile(blob, name, folder, key) {
     setGconf({ folders: { ...gconf().folders, [key]: r.id } }); return r;
   }
 }
-const flat = rows => rows.map(r => Object.fromEntries(Object.entries(r).map(([a, v]) => [a, v && typeof v === 'object' ? JSON.stringify(v) : v])));
+// תא באקסל מוגבל ל-32,767 תווים: החתימה (תמונה) לא נכנסת לגיליון, היא נשמרת ב-PDF החתום
+const flat = rows => rows.map(r => Object.fromEntries(Object.entries(r).filter(([a]) => a !== 'signature').map(([a, v]) => [a, v && typeof v === 'object' ? JSON.stringify(v).slice(0, 32000) : typeof v === 'string' ? v.slice(0, 32000) : v])));
 
 /** אקסל עם כל הנתונים של פרויקט אחד: גיליון לכל סוג נתונים */
 export async function projectDataBook(data, p) {
@@ -113,16 +114,29 @@ function mirrorParens(doc) {
   const w = doc.createTreeWalker(doc.body, 4); let n;
   while ((n = w.nextNode())) if (HEB.test(n.nodeValue) && /[()]/.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(/[()]/g, c => (c === '(' ? ')' : '('));
 }
+async function loadPdfLib() {
+  if (!window.html2pdf) await new Promise((res, rej) => { const s = document.createElement('script'); s.src = new URL('../vendor/html2pdf.bundle.min.js', import.meta.url).href; s.onload = res; s.onerror = () => rej(new Error('טעינת רכיב ה-PDF נכשלה. נסה לרענן את הדף.')); document.head.appendChild(s); });
+}
+/** אלמנט כ-PDF (לרוחב A4) */
+export async function nodePdfBlob(node, { orientation = 'landscape' } = {}) {
+  await loadPdfLib();
+  document.body.classList.add('pdfing');
+  try {
+    return await window.html2pdf().set({ margin: [8, 8, 10, 8], image: { type: 'jpeg', quality: 0.92 }, html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', onclone: mirrorParens },
+      jsPDF: { unit: 'mm', format: 'a4', orientation }, pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', '.kpi'] } }).from(node).outputPdf('blob');
+  } finally { document.body.classList.remove('pdfing'); }
+}
+/** HTML חופשי כ-PDF: מוסיפים לדף זמנית (מחוץ למסך) ומצלמים */
+export async function htmlPdfBlob(html, { width = 1030, orientation = 'landscape' } = {}) {
+  const wrap = document.createElement('div'); wrap.style.cssText = 'position:fixed;top:0;left:-12000px';
+  const box = document.createElement('div'); box.className = 'pdfbox'; box.style.cssText = `background:#fff;padding:6px;width:${width}px`; box.innerHTML = html;
+  wrap.appendChild(box); document.body.appendChild(wrap);
+  try { return await nodePdfBlob(box, { orientation }); } finally { wrap.remove(); }
+}
 /** דוח כ-PDF לתיקיית הדוחות של הפרויקט (או של הלקוח, לדוח של כל הפרויקטים) */
 export async function savePdfToDrive(node, title, project = null) {
   if (!gReady()) await gConnect();
-  if (!window.html2pdf) await new Promise((res, rej) => { const s = document.createElement('script'); s.src = new URL('../vendor/html2pdf.bundle.min.js', import.meta.url).href; s.onload = res; s.onerror = () => rej(new Error('טעינת רכיב ה-PDF נכשלה. נסה לרענן את הדף.')); document.head.appendChild(s); });
-  document.body.classList.add('pdfing');
-  let blob;
-  try {
-    blob = await window.html2pdf().set({ margin: [8, 8, 10, 8], image: { type: 'jpeg', quality: 0.92 }, html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff', onclone: mirrorParens },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }, pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', '.kpi'] } }).from(node).outputPdf('blob');
-  } finally { document.body.classList.remove('pdfing'); }
+  const blob = await nodePdfBlob(node);
   const d = new Date(), stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   const folder = project ? await projFolder(project, 'דוחות') : await folderPath([clientName(), 'דוחות']);
   const r = await driveUpload(blob, { name: `${title} ${stamp}.pdf`, folder, description: `הופק ${d.toLocaleString('he-IL')}` });

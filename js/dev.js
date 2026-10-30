@@ -1,6 +1,7 @@
 // פרויקט יזם: תקציב לפי סעיפים, בסיס נעול, התקשרויות עם קבלנים, ספקים ויועצים, וצפי עלות לסיום. פונקציות טהורות.
 import { n, itemSale, overrunPct } from './calc.js';
 import { devFlow, flowAlerts, CBILL_APPROVED } from './devflow.js';
+import { has, fixedTotal } from './modules.js';
 
 export const isDev = p => p?.project_type === 'dev';
 export const PROJECT_TYPES = { sub: 'קבלן משנה', dev: 'יזם / בעלים' };
@@ -27,11 +28,11 @@ export function baselineSnapshot(items) {
  * לכל סעיף: תקציב, בסיס, התקשרויות, חויב, שולם, צפי לסיום וסטייה.
  * צפי לסיום = צפי ידני אם הוזן, אחרת התקשרויות (אם יש), אחרת התקציב (מסומן "הערכה"). הצפי לא יורד מתחת למה שכבר חויב.
  */
-export function devSummary({ project, items = [], contracts = [], cLines = [], expenses: allExpenses = [], cos = [], coLines = [], cbills = [], cbLines = [], vatPct = 18 }) {
+export function devSummary({ project, signoffs = [], fixedCosts = [], items = [], contracts = [], cLines = [], expenses: allExpenses = [], cos = [], coLines = [], cbills = [], cbLines = [], vatPct = 18 }) {
   const base = project?.baseline || null;
   // הוצאה שנוצרה מחשבון קבלן היא רק רישום התשלום. הבקרה סופרת את החשבון עצמו (ברוטו לפי שורות)
   const expenses = allExpenses.filter(e => !e.cbill_id);
-  const flow = devFlow({ contracts, cLines, cos, coLines, cbills, cbLines, vatPct });
+  const flow = devFlow({ contracts, cLines, cos, coLines, cbills, cbLines, vatPct, signoffs });
   const live = new Set(contracts.filter(c => COMMITTED.includes(c.status)).map(c => c.id));
   const draft = new Set(contracts.filter(c => c.status === 'draft').map(c => c.id));
   const budgetItems = items.filter(i => !i.variation_id);
@@ -70,6 +71,8 @@ export function devSummary({ project, items = [], contracts = [], cLines = [], e
   for (const [k, v] of Object.entries(cbInv)) add(invBy, k, v);
   for (const [k, v] of Object.entries(cbPaid)) add(paidBy, k, v);
   for (const [k, v] of Object.entries(coBy)) add(commitBy, k, v);
+  // עלות חודשית קבועה = התקשרות לכל התקופה על הסעיף שלה
+  if (has(project, 'fixed')) for (const fc of fixedCosts) if (fc.boq_item_id && itemIds.has(fc.boq_item_id)) add(commitBy, fc.boq_item_id, fixedTotal(fc));
   const rows = budgetItems.map(item => {
     const budget = itemSale(item);
     const baseAmt = base?.items ? (base.items[item.id] ?? null) : null;

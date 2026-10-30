@@ -4,6 +4,7 @@ import { money, pct, esc } from '../util.js';
 import { S, settings } from '../app.js';
 import { entryCosts, entriesAsCosts, openCommitments, quotaRows } from '../quota.js';
 import { computeBills } from '../bills.js';
+import { has, fixedLeft } from '../modules.js';
 
 export const STATUS = { tender: 'מכרז / הצעה', active: 'בביצוע', closing: 'לקראת סיום', closed: 'סגור' };
 export const CONTRACT = { measure: 'לפי מדידה', milestones: 'פאושלי לפי אבני דרך', percent: 'לפי אחוז ביצוע', mixed: 'משולב' };
@@ -14,7 +15,7 @@ export function projData(data, projectId) {
     entries: f(data.entries), days: f(data.days), wqty: f(data.wqty), pos: f(data.pos), poLines: f(data.poLines),
     bills: f(data.bills), billLines: f(data.billLines), fines: f(data.fines), payments: f(data.payments),
     workers: data.workers || [], allEntries: data.entries || [], contracts: f(data.contracts), cLines: f(data.cLines),
-    cos: f(data.cos), coLines: f(data.coLines), cbills: f(data.cbills), cbLines: f(data.cbLines), income: f(data.income) };
+    cos: f(data.cos), coLines: f(data.coLines), cbills: f(data.cbills), cbLines: f(data.cbLines), income: f(data.income), signoffs: f(data.signoffs), fixedCosts: f(data.fixedCosts), indexSeries: data.indexSeries || [] };
 }
 
 // סיכום פרויקט: הוצאות + עלות עבודה מהיומן + התקשרויות רכש פתוחות, ומכסות
@@ -24,6 +25,10 @@ export function summarize(pd, mode = S.mode) {
   const all = pd.expenses.concat(entriesAsCosts(pd.entries || [], costs));
   const act = actualsByItem(pd.items, pd.lines, all, pd.project?.overhead_pct);
   const com = openCommitments(pd.pos || [], pd.poLines || [], pd.expenses);
+  // עלויות חודשיות קבועות: מה שנשאר מהחודש הנוכחי נחשב התקשרות פתוחה של הסעיף
+  if (has(pd.project, 'fixed')) { const cur = new Date().toISOString().slice(0, 7);
+    for (const fc of pd.fixedCosts || []) { const left = fixedLeft(fc, cur); if (!left) continue;
+      if (fc.boq_item_id) com.byItem[fc.boq_item_id] = (com.byItem[fc.boq_item_id] || 0) + left; else com.unassigned += left; } }
   const s = projectSummary({ ...pd, actualByItem: act.byItem, commitByItem: com.byItem }, mode);
   s.unallocated = act.unallocated;
   s.costs = costs;

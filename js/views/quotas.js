@@ -26,7 +26,7 @@ export function tabQuota(P) {
     צוות: כשבשורת התמחיר מוגדר מספר עובדים ביום, כל יום עם יותר עובדים מסומן. ההגדרות בהגדרות הלקוח.</p></div>`);
   const draw = () => {
     const rs = rows.filter(r => !only || r.status);
-    $('#t', el).innerHTML = `<table><thead><tr><th>סעיף</th><th>שורת תמחיר</th><th class="n">מכסה</th><th class="n">נוצל</th><th class="n">%</th><th class="n hide-m">תמחיר ₪</th><th class="n hide-m">בפועל ₪</th><th class="n">% ביצוע</th><th>מה קרה</th></tr></thead><tbody>
+    $('#t', el).innerHTML = `<table><thead><tr><th>סעיף</th><th>שורת תמחיר</th><th class="n">מכסה</th><th class="n">נוצל</th><th class="n">% ניצול</th><th class="n hide-m">תמחיר ₪</th><th class="n hide-m">בפועל ₪</th><th class="n">% ביצוע</th><th>מה קרה</th></tr></thead><tbody>
       ${rs.map(r => { const a = r.status === 'over' ? rowAttr(Math.max(r.overPct, 0.1)) : { cls: '', style: '' };
         return `<tr class="${a.cls}"${a.style}><td class="wrap"><b>${esc(r.item.code || '')}</b> ${esc(r.item.description)}</td>
         <td class="wrap small">${r.line ? `${COST_KINDS[r.line.kind]}${r.line.labor_type ? ' · ' + LABOR_TYPES[r.line.labor_type] : ''}${r.crew ? ` · צוות ${num(r.crew)}` : ''}<div class="mut">${esc(r.line.description || '')}</div>` : '<span class="chip red">אין שורת עבודה בתמחיר</span>'}</td>

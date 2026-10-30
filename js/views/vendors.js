@@ -1,5 +1,8 @@
 // שלב 7: ספקים וקבלנים, מסמכים עם תוקף, מסמכי הלקוח מול הקבלן הראשי, ערבויות וספר טלפונים
-import { h, esc, $, $$, modal, field, select, area, toast, money, fmtDate, nullIfEmpty, confirmBox } from '../util.js';
+import { guarVisible } from '../modules.js';
+import { composeMail } from '../mailui.js';
+import { h, esc, $, $$, modal, field, select, area, toast, money, fmtDate, nullIfEmpty, confirmBox, WA_ICON } from '../util.js';
+import { phoneIntl } from '../alertsui.js';
 import { db } from '../db.js';
 import { S, can, render, loadTenantData, logChange } from '../app.js';
 import { n } from '../calc.js';
@@ -131,8 +134,9 @@ function tabGuar(data) {
     <div class="kpis" id="k"></div><div class="tw"><table><thead><tr><th>פרויקט</th><th>סוג</th><th class="hide-m">קבלן ראשי</th><th class="hide-m">בנק / מספר</th><th class="n">סכום</th><th>בתוקף עד</th><th>מצב</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
     <p class="small mut">ערבות שהלקוח נתן לקבלן הראשי (ביצוע, מקדמה, בדק). התראה 30 יום לפני פקיעה, כדי להאריך או לבקש החזרה.</p></div>`);
   const draw = () => {
-    const gs = data.guarantees.filter(g => F.all || g.status !== 'returned');
-    const act = data.guarantees.filter(g => g.status !== 'returned');
+    const vis = data.guarantees.filter(guarVisible(data));
+    const gs = vis.filter(g => F.all || g.status !== 'returned');
+    const act = vis.filter(g => g.status !== 'returned');
     $('#k', el).innerHTML = `<div class="kpi"><div class="l">ערבויות פתוחות</div><div class="v">${money(act.reduce((a, g) => a + n(g.amount), 0))}</div><div class="n">${act.length} ערבויות</div></div>
       <div class="kpi"><div class="l">פג תוקף או יפוג ב-30 יום</div><div class="v ${act.some(g => ['soon', 'expired'].includes(guaranteeState(g, today))) ? 'neg' : ''}">${act.filter(g => ['soon', 'expired'].includes(guaranteeState(g, today))).length}</div></div>`;
     $('#tb', el).innerHTML = gs.map(g => { const s = guaranteeState(g, today); return `<tr class="${s === 'expired' ? 'al-r' : s === 'soon' ? 'al-y' : s === 'returned' ? 'dim' : ''}"><td>${esc(data.projects.find(p => p.id === g.project_id)?.name || '')}</td><td>${GUAR_KINDS[g.kind]}</td>
@@ -179,10 +183,11 @@ export async function viewContacts() {
     const q = F.q;
     const rows = list.filter(c => !q || [c.name, c.company, c.role, c.phone, c.phone2, c.email].join(' ').toLowerCase().includes(q.toLowerCase()) || (q.replace(/\D/g, '').length >= 3 && [c.phone, c.phone2].join(' ').replace(/\D/g, '').includes(q.replace(/\D/g, ''))));
     $('#cl', el).innerHTML = `<div class="ctl">${rows.slice(0, 300).map(c => `<div class="ccard"><div class="cn"><b>${esc(c.name)}</b>${c.role ? `<span class="small mut"> · ${esc(c.role)}</span>` : ''}<div class="small mut">${esc(c.company || '')}</div></div>
-      <div class="cp">${c.phone ? `<a href="tel:${esc(c.phone)}" dir="ltr">${esc(c.phone)}</a>` : ''}${c.phone2 ? `<a href="tel:${esc(c.phone2)}" dir="ltr" class="small">${esc(c.phone2)}</a>` : ''}${c.email ? `<a href="mailto:${esc(c.email)}" dir="ltr" class="small">${esc(c.email)}</a>` : ''}</div>
+      <div class="cp">${c.phone ? `<span class="nw"><a href="tel:${esc(c.phone)}" dir="ltr">${esc(c.phone)}</a> <a href="https://wa.me/${phoneIntl(c.phone)}" target="_blank" rel="noopener" class="wa-a" title="וואטסאפ" aria-label="וואטסאפ">${WA_ICON}</a></span>` : ''}${c.phone2 ? `<a href="tel:${esc(c.phone2)}" dir="ltr" class="small">${esc(c.phone2)}</a>` : ''}${c.email ? `<a href="#" data-mail="${esc(c.email)}" dir="ltr" class="small" title="שליחת מייל ישירה">${esc(c.email)}</a>` : ''}</div>
       ${edit ? `<button class="btn small ghost" data-c="${c.id}" aria-label="עריכה">✎</button>` : ''}</div>`).join('') || '<div class="card empty">אין אנשי קשר. אפשר לייבא מאקסל עם עמודות: שם, חברה, תפקיד, נייד, אימייל.</div>'}</div>
       ${rows.length > 300 ? `<p class="small mut">מוצגים 300 מתוך ${rows.length}. צמצמי בחיפוש.</p>` : ''}`;
     $$('[data-c]', el).forEach(b => b.onclick = () => contactDialog(list.find(c => c.id === b.dataset.c)));
+    $$('[data-mail]', el).forEach(a => a.onclick = e => { e.preventDefault(); e.stopPropagation(); composeMail({ to: [a.dataset.mail] }); });
   };
   $('#q', el).oninput = e => { F.q = e.target.value.trim(); draw(); };
   $('#add', el)?.addEventListener('click', () => contactDialog(null));

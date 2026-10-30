@@ -3,20 +3,20 @@ import { h, esc, $, $$, modal, field, select, area, toast, money, fmtDate, confi
 import { db } from '../db.js';
 import { S, can, render, logChange, settings } from '../app.js';
 import { n } from '../calc.js';
-import { monthLabel } from '../cashflow.js';
+import { monthLabel, usedRows, groupPeriods, PERIODS } from '../cashflow.js';
 import { devCashflow, devCashAlerts, INCOME_SOURCES, DCF_ROWS, DCF_IN, DCF_OUT } from '../devcash.js';
 import { devSummary } from '../dev.js';
 import { projData } from './common.js';
-import { chart } from './cashflow.js';
+import { chart, perSeg } from './cashflow.js';
 import { loadXLSX } from '../import.js';
 
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
-const opt = () => ({ ahead: 12, incomeDelay: 0, schedDelay: 0, delayCost: 0, ...(store('subcon-dcf') || {}) });
+const opt = () => ({ ahead: 12, incomeDelay: 0, schedDelay: 0, delayCost: 0, per: 'month', ...(store('subcon-dcf') || {}) });
 const m0 = v => money(v, { sym: false });
 
 export function devCfFor(data, ids, o = opt()) {
-  const list = ids.map(id => { const pd = projData(data, id); const s = devSummary({ project: pd.project, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses, cos: pd.cos, coLines: pd.coLines, cbills: pd.cbills, cbLines: pd.cbLines, vatPct: settings().vat_pct }); return { project: pd.project, s, pd }; });
-  return devCashflow(list, { settings: settings(), today: todayStr(), back: 3, ahead: o.ahead, incomeDelay: o.incomeDelay, schedDelay: o.schedDelay, delayCost: o.delayCost });
+  const list = ids.map(id => { const pd = projData(data, id); const s = devSummary({ project: pd.project, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses, cos: pd.cos, signoffs: pd.signoffs, fixedCosts: pd.fixedCosts, coLines: pd.coLines, cbills: pd.cbills, cbLines: pd.cbLines, vatPct: settings().vat_pct }); return { project: pd.project, s, pd }; });
+  return devCashflow(list, { settings: settings(), today: todayStr(), back: 3, ahead: o.ahead, incomeDelay: o.incomeDelay, schedDelay: o.schedDelay, delayCost: o.delayCost, indexSeries: data.indexSeries || [] });
 }
 
 // לשונית "הכנסות ותזרים" בפרויקט יזם
@@ -69,7 +69,7 @@ export function devCashBlock(data, ids, title) {
   const draw = () => {
     const o = opt(), st = settings();
     const r = devCfFor(data, ids, o);
-    const view = r.months, fut = view.filter(m => !m.past);
+    const view = groupPeriods(r.months, o.per, r.cur), fut = r.months.filter(m => !m.past);
     const alerts = devCashAlerts(r);
     const next3 = fut.slice(0, 3).reduce((a, m) => a + m.net, 0);
     const low = r.lowest;
@@ -80,6 +80,7 @@ export function devCashBlock(data, ids, title) {
         <span class="mut small">איחור בתקבולים:</span><div class="seg" id="idl">${[0, 30, 60].map(k => `<button type="button" data-k="${k}" class="${o.incomeDelay === k ? 'on' : ''}">${k ? `+${k} יום` : 'בזמן'}</button>`).join('')}</div>
         <span class="mut small">עיכוב בלו"ז:</span><div class="seg" id="sdl">${[0, 1, 3, 6].map(k => `<button type="button" data-k="${k}" class="${o.schedDelay === k ? 'on' : ''}">${k ? `+${k} ח'` : 'בזמן'}</button>`).join('')}</div>
         ${o.schedDelay ? `<label class="small" style="display:flex;align-items:center;gap:6px">עלות לחודש עיכוב ₪ <input id="dcost" type="number" dir="ltr" step="any" value="${o.delayCost || ''}" placeholder="פיקוח, שמירה, מימון" style="width:120px"></label>` : ''}
+        ${perSeg(o.per)}
         <button class="btn ghost small" id="xl">ייצוא לאקסל</button></div>
       <div class="kpis">
         <div class="kpi"><div class="l">יתרה בתחילת ${monthLabel(r.cur)}</div><div class="v ${r.opening < 0 ? 'neg' : ''}">${money(r.opening)}</div><div class="n">יתרה בבנק ${money(st.cash_opening || 0)} נכון ל-${monthLabel(r.asof)}${can.edit() ? ` · <a href="#/client/${S.tenantId}">עדכון</a>` : ''}</div></div>
@@ -89,26 +90,27 @@ export function devCashBlock(data, ids, title) {
       </div>
       ${alerts.length ? `<div class="note neg" id="cfal">${alerts.map(a => `<div><b>${esc(a.title)}</b> · ${esc(a.detail)}</div>`).join('')}${o.incomeDelay || o.schedDelay ? `<div class="small">בתרחיש: ${[o.incomeDelay ? `איחור ${o.incomeDelay} יום בתקבולים` : '', o.schedDelay ? `עיכוב ${o.schedDelay} חודשים בלו"ז` : ''].filter(Boolean).join(', ')}</div>` : ''}</div>` : '<div class="note small pos">אין חודש שבו ההוצאות עולות על ההכנסות, והיתרה לא יורדת מתחת למינימום.</div>'}
       <div class="card" style="padding:10px 6px">${chart(view, n(st.cash_min))}</div>
-      <div class="tw cft"><table><thead><tr><th class="stk">₪ כולל מע"מ</th>${view.map(m => `<th class="n ${m.m === r.cur ? 'curm' : ''}">${monthLabel(m.m)}${m.past ? '<div class="small mut">בפועל</div>' : m.m === r.cur ? '<div class="small">החודש</div>' : ''}</th>`).join('')}</tr></thead><tbody>
+      <div class="tw cft"><table><thead><tr><th class="stk">₪ כולל מע"מ</th>${view.map(m => `<th class="n ${m.cur ? 'curm' : ''}">${m.label}${m.past ? '<div class="small mut">בפועל</div>' : m.cur ? `<div class="small">${o.per === 'month' ? 'החודש' : 'כולל החודש'}</div>` : ''}</th>`).join('')}</tr></thead><tbody>
         <tr class="sec"><td class="stk"><b>הכנסות</b></td>${view.map(() => '<td></td>').join('')}</tr>
-        ${DCF_IN.map(k => row(k, view)).join('')}
-        <tr class="tot"><td class="stk">סה"כ הכנסות</td>${view.map(m => `<td class="n">${m0(m.inTotal)}</td>`).join('')}</tr>
+        ${usedRows(DCF_IN, view).map(k => row(k, view)).join('')}
+        <tr class="tot"><td class="stk">סה"כ הכנסות</td>${view.map(m => `<td class="n">${money(m.inTotal)}</td>`).join('')}</tr>
         <tr class="sec"><td class="stk"><b>הוצאות</b></td>${view.map(() => '<td></td>').join('')}</tr>
-        ${DCF_OUT.map(k => row(k, view)).join('')}
-        <tr class="tot"><td class="stk">סה"כ הוצאות</td>${view.map(m => `<td class="n ${m.outOverIn ? 'neg' : ''}">${m0(m.outTotal)}</td>`).join('')}</tr>
-        <tr class="tot"><td class="stk">נטו בחודש</td>${view.map(m => `<td class="n ${m.net < 0 ? 'neg' : 'pos'}">${m0(m.net)}</td>`).join('')}</tr>
-        <tr class="tot"><td class="stk"><b>יתרה מצטברת</b></td>${view.map(m => `<td class="n ${m.below && !m.past ? 'al-r' : ''}"><b>${m0(m.cum)}</b></td>`).join('')}</tr>
+        ${usedRows(DCF_OUT, view).map(k => row(k, view)).join('')}
+        <tr class="tot"><td class="stk">סה"כ הוצאות</td>${view.map(m => `<td class="n ${m.outOverIn ? 'neg' : ''}">${money(m.outTotal)}</td>`).join('')}</tr>
+        <tr class="tot"><td class="stk">נטו ב${PERIODS[o.per] || 'חודש'}</td>${view.map(m => `<td class="n ${m.net < 0 ? 'neg' : 'pos'}">${money(m.net)}</td>`).join('')}</tr>
+        <tr class="tot"><td class="stk"><b>יתרה מצטברת</b></td>${view.map(m => `<td class="n ${m.below && !m.past ? 'al-r' : ''}"><b>${money(m.cum)}</b></td>`).join('')}</tr>
       </tbody></table></div>
       <p class="small mut">חודשים שעברו: תקבולים שהתקבלו ותשלומים ששולמו. מהחודש הנוכחי: הכנסות צפויות (באיחור נכנסות לחודש הנוכחי), חשבונות שאושרו לפי תנאי התשלום של כל התקשרות, יתרת ההתקשרויות החתומות ויתרת הצפי שטרם נסגרה, מתחלקות עד סיום הפרויקט. בעיכוב בלו"ז: ההוצאות מתפרסות על תקופה ארוכה יותר, תקבולי הרוכשים והמשיכות מהבנק זזים באותו מספר חודשים, ועלות החודש הנוסף נכנסת בסוף. לחיצה על סכום מציגה פירוט.</p>
     </div>`);
     $$('#ah button', el).forEach(b => b.onclick = () => { store('subcon-dcf', { ...opt(), ahead: +b.dataset.k }); draw(); });
     $$('#idl button', el).forEach(b => b.onclick = () => { store('subcon-dcf', { ...opt(), incomeDelay: +b.dataset.k }); draw(); });
     $$('#sdl button', el).forEach(b => b.onclick = () => { store('subcon-dcf', { ...opt(), schedDelay: +b.dataset.k }); draw(); });
+    $$('#per button', el).forEach(b => b.onclick = () => { store('subcon-dcf', { ...opt(), per: b.dataset.k }); draw(); });
     $('#dcost', el)?.addEventListener('change', e => { store('subcon-dcf', { ...opt(), delayCost: n(e.target.value) }); draw(); });
     $$('[data-cell]', el).forEach(td => td.onclick = () => {
       const [mk, key] = td.dataset.cell.split('|'); const M = view.find(x => x.m === mk);
       const pn = id => data.projects.find(p => p.id === id)?.name || '';
-      modal({ title: `${DCF_ROWS[key]} · ${monthLabel(mk)}`, ok: 'סגירה', cancel: null, body: `<div class="tw" style="box-shadow:none"><table><thead><tr>${ids.length > 1 ? '<th>פרויקט</th>' : ''}<th>פירוט</th><th class="n">₪</th></tr></thead><tbody>
+      modal({ title: `${DCF_ROWS[key]} · ${M.label}`, ok: 'סגירה', cancel: null, body: `<div class="tw" style="box-shadow:none"><table><thead><tr>${ids.length > 1 ? '<th>פרויקט</th>' : ''}<th>פירוט</th><th class="n">₪</th></tr></thead><tbody>
         ${M.items.filter(i => i.key === key).map(i => `<tr class="${i.late ? 'al-r' : ''}">${ids.length > 1 ? `<td>${esc(pn(i.projectId))}</td>` : ''}<td>${esc(i.label)}</td><td class="n">${m0(i.amt)}</td></tr>`).join('')}</tbody></table></div>` });
     });
     $('#xl', el).onclick = () => exportDcf(view, title, o);
@@ -123,10 +125,10 @@ async function exportDcf(view, title, o) {
   const XLSX = await loadXLSX();
   const r = v => Math.round(n(v));
   const aoa = [[`תזרים יזם - ${title}`], [`הופק ${todayStr()} · איחור בתקבולים ${o.incomeDelay} יום · עיכוב בלו"ז ${o.schedDelay} חודשים · כולל מע"מ`], [],
-    ['', ...view.map(m => monthLabel(m.m) + (m.past ? ' (בפועל)' : ''))],
-    ['הכנסות'], ...DCF_IN.map(k => [DCF_ROWS[k], ...view.map(m => r(m.rows[k]))]), ['סה"כ הכנסות', ...view.map(m => r(m.inTotal))],
-    ['הוצאות'], ...DCF_OUT.map(k => [DCF_ROWS[k], ...view.map(m => r(m.rows[k]))]), ['סה"כ הוצאות', ...view.map(m => r(m.outTotal))],
-    ['נטו בחודש', ...view.map(m => r(m.net))], ['יתרה מצטברת', ...view.map(m => r(m.cum))]];
+    ['', ...view.map(m => (m.label || monthLabel(m.m)) + (m.past ? ' (בפועל)' : ''))],
+    ['הכנסות'], ...usedRows(DCF_IN, view).map(k => [DCF_ROWS[k], ...view.map(m => r(m.rows[k]))]), ['סה"כ הכנסות', ...view.map(m => r(m.inTotal))],
+    ['הוצאות'], ...usedRows(DCF_OUT, view).map(k => [DCF_ROWS[k], ...view.map(m => r(m.rows[k]))]), ['סה"כ הוצאות', ...view.map(m => r(m.outTotal))],
+    ['נטו לתקופה', ...view.map(m => r(m.net))], ['יתרה מצטברת', ...view.map(m => r(m.cum))]];
   const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [{ wch: 32 }, ...view.map(() => ({ wch: 12 }))];
   const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] }; XLSX.utils.book_append_sheet(wb, ws, 'תזרים יזם');
   XLSX.writeFile(wb, `תזרים יזם - ${String(title).replace(/[\\/:*?"<>|·]/g, '-')}.xlsx`);

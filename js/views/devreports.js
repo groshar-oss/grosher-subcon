@@ -1,8 +1,9 @@
 // פרויקט יזם: שמונת הדוחות שבהצעה. כל דוח לפרויקט אחד או לכל פרויקטי היזם, עם הדפסה / PDF ו-Excel.
+import { guarVisible } from '../modules.js';
 import { h, esc, $, money, pct, num, fmtDate, store } from '../util.js';
 import { can, settings, loadTenantData, tenant } from '../app.js';
 import { n } from '../calc.js';
-import { monthLabel, addMonths } from '../cashflow.js';
+import { monthLabel, addMonths, usedRows, groupPeriods, PERIODS } from '../cashflow.js';
 import { isDev, devSummary, CONTRACT_KINDS, CONTRACT_STATUS, COMMITTED } from '../dev.js';
 import { CO_STAGES, CO_INITIATORS, CBILL_STATUS, CBILL_APPROVED, FLAG_TEXT, dupInvoice, docGate } from '../devflow.js';
 import { DCF_ROWS, DCF_IN, DCF_OUT, devCashflow } from '../devcash.js';
@@ -59,7 +60,7 @@ export async function viewDevReports(kind) {
   if (o.pid && !devs.some(p => p.id === o.pid)) o.pid = '';
   const projects = o.pid ? devs.filter(p => p.id === o.pid) : devs.filter(p => p.status !== 'closed');
   const vat = settings().vat_pct;
-  const sums = projects.map(p => { const pd = projData(data, p.id); return { p, pd, s: devSummary({ project: p, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses, cos: pd.cos, coLines: pd.coLines, cbills: pd.cbills, cbLines: pd.cbLines, vatPct: vat }) }; });
+  const sums = projects.map(p => { const pd = projData(data, p.id); return { p, pd, s: devSummary({ project: p, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses, cos: pd.cos, signoffs: pd.signoffs, fixedCosts: pd.fixedCosts, coLines: pd.coLines, cbills: pd.cbills, cbLines: pd.cbLines, vatPct: vat }) }; });
   const title = DEV_REPORTS.find(r => r[0] === kind)[1];
   const scope = o.pid ? projects[0]?.name : 'כל פרויקטי היזם הפעילים';
   const el = h(`<div><div class="top no-print"><div><h1>דוחות</h1><div class="sub">פרויקטי יזם · כל דוח לפרויקט אחד או לכולם · הדפסה / PDF ו-Excel</div></div></div>
@@ -67,7 +68,8 @@ export async function viewDevReports(kind) {
     <div class="actions no-print" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <select id="pid" aria-label="פרויקט"><option value="">כל פרויקטי היזם הפעילים</option>${devs.map(p => `<option value="${p.id}" ${p.id === o.pid ? 'selected' : ''}>${esc(p.name)}${p.status === 'closed' ? ' (סגור)' : ''}</option>`).join('')}</select>
       ${kind === 'd-budget' ? `<label class="chk small"><input type="checkbox" id="items" ${o.items ? 'checked' : ''}> פירוט לפי סעיף</label>` : ''}
-      ${kind === 'd-cash' ? `<label class="small mut">טבלה חודשית ל-<select id="hz">${[3, 6, 12].map(k => `<option value="${k}" ${+o.h === k ? 'selected' : ''}>${k} חודשים</option>`).join('')}</select></label>` : ''}
+      ${kind === 'd-cash' ? `<label class="small mut">טבלה חודשית ל-<select id="hz">${[3, 6, 12, 24].map(k => `<option value="${k}" ${+o.h === k ? 'selected' : ''}>${k} חודשים</option>`).join('')}</select></label>
+        <label class="small mut">תצוגה לפי <select id="per">${Object.entries(PERIODS).map(([k, l]) => `<option value="${k}" ${(o.per || 'month') === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>` : ''}
       ${kind === 'd-alerts' ? `<label class="chk small"><input type="checkbox" id="handled" ${o.handled ? 'checked' : ''}> כולל מה שטופל</label>` : ''}
       <button class="btn ghost small" id="print">הדפסה / PDF</button><button class="btn ghost small" id="xl">ייצוא לאקסל</button><button class="btn ghost small" id="gdrive" title="שומר את הדוח כ-PDF בתיקיית הדוחות של הפרויקט בדרייב">שמירה לדרייב</button></div>
     <div id="rep"></div></div>`);
@@ -76,6 +78,7 @@ export async function viewDevReports(kind) {
   $('#items', el)?.addEventListener('change', e => { setOpt({ items: e.target.checked }); rerender(); });
   $('#handled', el)?.addEventListener('change', e => { setOpt({ handled: e.target.checked }); rerender(); });
   $('#hz', el)?.addEventListener('change', e => { setOpt({ h: +e.target.value }); rerender(); });
+  $('#per', el)?.addEventListener('change', e => { setOpt({ per: e.target.value }); rerender(); });
   const fn = { 'd-budget': repBudget, 'd-cash': repCash, 'd-cos': repCos, 'd-cbills': repCbills, 'd-vendors': repVendors, 'd-docs': repDocs, 'd-group': repGroup, 'd-alerts': repAlerts }[kind];
   const body = projects.length ? fn({ data, sums, o, multi: projects.length > 1 }) : h('<div class="card empty">אין פרויקטי יזם פעילים</div>');
   $('#rep', el).append(h(`<div class="rephead"><img src="icons/icon-192.png" alt=""><div><b>${esc(title)}</b><span>${esc(tenant()?.name || '')} · ${esc(scope || '')} · הופק ${fmtDate(todayStr())}</span></div></div>`), h(`<p class="small mut repnote">${NOTE[kind]}</p>`), body);
@@ -88,7 +91,7 @@ export async function viewDevReports(kind) {
 // ===== 1. בקרה תקציבית: לפי פרויקט ופרק (או סעיף) =====
 function repBudget({ sums, o }) {
   const wrap = h('<div></div>');
-  const cols = [[o.items ? 'פרק / סעיף' : 'פרק'], ['תקציב', 1], ['בסיס נעול', 1], ['התקשרויות', 1], ['מתוכן שינויים מאושרים', 1], ['שינויים בתהליך', 1], ['חויב', 1], ['שולם', 1], ['צפי סופי', 1], ['סטייה מהתקציב', 1], ['סטייה מהבסיס', 1]];
+  const cols = [[o.items ? 'פרק / סעיף' : 'פרק'], ['תקציב', 1], ['בסיס נעול', 1], ['התקשרויות', 1], ['מתוכן שינויים מאושרים', 1], ['שינויים בתהליך', 1], ['חויב', 1], ['שולם', 1], ['צפי לסיום', 1], ['סטייה מהתקציב', 1], ['סטייה מהבסיס', 1]];
   for (const { p, s } of sums) {
     const rows = [];
     for (const c of s.chapters) {
@@ -109,21 +112,22 @@ function repBudget({ sums, o }) {
 
 // ===== 2. הכנסות מול הוצאות: 3/6/12 חודשים =====
 function repCash({ data, sums, o }) {
-  const cf = devCashflow(sums.map(({ p, s, pd }) => ({ project: p, s, pd })), { settings: settings(), today: todayStr(), back: 3, ahead: 12 });
+  const cf = devCashflow(sums.map(({ p, s, pd }) => ({ project: p, s, pd })), { settings: settings(), today: todayStr(), back: 3, ahead: Math.max(12, +o.h || 0) });
   const fut = cf.months.filter(m => !m.past);
   const win = k => { const ms = fut.slice(0, k); const inT = sum(ms, m => m.inTotal), outT = sum(ms, m => m.outTotal); const low = ms.reduce((a, m) => (m.cum < a.cum ? m : a), ms[0]);
     return [`${k} חודשים (עד ${monthLabel(ms[ms.length - 1].m)})`, m0(inT), m0(outT), neg(inT - outT), neg(ms[ms.length - 1].cum), `${neg(low.cum)} <span class="small mut">${monthLabel(low.m)}</span>`, ms.filter(m => m.below).length || '', ms.filter(m => m.outOverIn).length || '']; };
   const head = T([['תקופה'], ['הכנסות', 1], ['הוצאות', 1], ['נטו', 1], ['יתרה בסוף', 1], ['יתרה נמוכה', 1], ['חודשים מתחת למינימום', 1], ['חודשים שבהם הוצאות > הכנסות', 1]], [3, 6, 12].map(win));
-  const view = cf.months.filter(m => m.past || m.m <= addMonths(cf.cur, +o.h - 1));
+  const per = PERIODS[o.per] ? o.per : 'month';
+  const view = groupPeriods(cf.months.filter(m => m.past || m.m <= addMonths(cf.cur, +o.h - 1)), per, cf.cur);
   const row = (k) => [DCF_ROWS[k], ...view.map(m => m.rows[k] ? m0(m.rows[k]) : '')];
-  const monthly = T([['₪ כולל מע"מ'], ...view.map(m => [monthLabel(m.m) + (m.past ? ' (בפועל)' : ''), 1])], [
-    { cls: 'grp', cells: ['<b>הכנסות</b>', ...view.map(() => '')] }, ...DCF_IN.map(row), { cls: 'tot', cells: ['סה"כ הכנסות', ...view.map(m => m0(m.inTotal))] },
-    { cls: 'grp', cells: ['<b>הוצאות</b>', ...view.map(() => '')] }, ...DCF_OUT.filter(k => k !== 'out_delay').map(row), { cls: 'tot', cells: ['סה"כ הוצאות', ...view.map(m => m0(m.outTotal))] },
-    { cls: 'tot', cells: ['נטו בחודש', ...view.map(m => neg(m.net))] }, { cls: 'tot', cells: ['יתרה מצטברת', ...view.map(m => `<span class="${m.below ? 'neg' : ''}">${m0(m.cum)}</span>`)] }]);
+  const monthly = T([['₪ כולל מע"מ'], ...view.map(m => [m.label + (m.past ? ' (בפועל)' : ''), 1])], [
+    { cls: 'grp', cells: ['<b>הכנסות</b>', ...view.map(() => '')] }, ...usedRows(DCF_IN, view).map(row), { cls: 'tot', cells: ['סה"כ הכנסות', ...view.map(m => m0(m.inTotal))] },
+    { cls: 'grp', cells: ['<b>הוצאות</b>', ...view.map(() => '')] }, ...usedRows(DCF_OUT, view).filter(k => k !== 'out_delay').map(row), { cls: 'tot', cells: ['סה"כ הוצאות', ...view.map(m => m0(m.outTotal))] },
+    { cls: 'tot', cells: [`נטו ב${PERIODS[per]}`, ...view.map(m => neg(m.net))] }, { cls: 'tot', cells: ['יתרה מצטברת', ...view.map(m => `<span class="${m.below ? 'neg' : ''}">${m0(m.cum)}</span>`)] }]);
   const st = cf.settings;
   return h(`<div><div class="card" data-sheet="סיכום 3-6-12"><h2>סיכום</h2>
     <div class="small mut" style="margin:-6px 0 8px">יתרת פתיחה ${m0(cf.opening)} ₪ · מינימום ${m0(st.cash_min)} ₪ · התקבל עד היום ${m0(cf.incomeReceived)} ₪ מתוך ${m0(cf.incomeTotal)} ₪ · צפי עלות כולל מע"מ ${m0(cf.costTotal)} ₪${cf.overdueIncome.length ? ` · <span class="neg">${cf.overdueIncome.length} תקבולים באיחור</span>` : ''}</div>${head}</div>
-    <div class="card" data-sheet="חודשי"><h2>לפי חודש</h2>${monthly}</div></div>`);
+    <div class="card" data-sheet="${{ week: 'שבועי', month: 'חודשי', quarter: 'רבעוני', year: 'שנתי' }[per]}"><h2>לפי ${PERIODS[per]}</h2>${per === 'week' ? '<p class="small mut">הצפי נבנה לפי חודשים. בתצוגה שבועית הסכום החודשי מתחלק לפי ימים.</p>' : ''}${monthly}</div></div>`);
 }
 
 // ===== 3. יומן הוראות שינוי =====
@@ -167,14 +171,14 @@ function repCbills({ data, sums, multi }) {
       rows.push({ cls: flags.length ? 'al-y' : '', cells: [...(multi ? [esc(p.name)] : []),
         `<a href="#/project/${p.id}/cbill/${b.id}">${esc(c.vendor_name || '')}</a><div class="small mut">${esc(c.title)}</div>`, `<b>${b.number}</b>`, fmtDate(b.received_date),
         m0(R.claimed), m0(R.gross), R.cut > 0.5 ? `<span class="neg">${m0(R.cut)}</span>` : '', R.retention ? m0(R.retention) : '', R.advance ? m0(R.advance) : '', m0(R.net), `<b>${m0(R.total)}</b>`,
-        flags.length ? `<span class="neg">${flags.map(esc).join('<br>')}</span>` : '<span class="pos">תקין</span>',
-        gateTxt.length ? (b.doc_override ? `<span class="mut">${gateTxt.map(esc).join(', ')}<br>אושר חריג: ${esc(b.doc_override)}</span>` : `<span class="neg">${gateTxt.map(esc).join('<br>')}</span>`) : '✓',
-        `${CBILL_STATUS[b.status]}${b.paid_date ? `<div class="small mut">${fmtDate(b.paid_date)}</div>` : b.approved_date ? `<div class="small mut">${fmtDate(b.approved_date)}</div>` : ''}`] });
+        flags.length ? `<span class="neg">${flags.map(x => `<span class="nw">${esc(x)}</span>`).join('<br>')}</span>` : '<span class="pos">תקין</span>',
+        gateTxt.length ? (b.doc_override ? `<span class="mut">${gateTxt.map(x => `<span class="nw">${esc(x)}</span>`).join(', ')}<br>אושר חריג: ${esc(b.doc_override)}</span>` : `<span class="neg">${gateTxt.map(x => `<span class="nw">${esc(x)}</span>`).join('<br>')}</span>`) : '✓',
+        `<span class="nw">${CBILL_STATUS[b.status]}</span>${b.paid_date ? `<div class="small mut">${fmtDate(b.paid_date)}</div>` : b.approved_date ? `<div class="small mut">${fmtDate(b.approved_date)}</div>` : ''}`] });
     }
   }
-  const cols = [...(multi ? [['פרויקט']] : []), ['קבלן / התקשרות'], ['חשבון'], ['התקבל'], ['מוגש', 1], ['מאושר ברוטו', 1], ['קוצץ', 1], ['עיכבון', 1], ['קיזוז מקדמה', 1], ['נטו', 1], ['לתשלום כולל מע"מ', 1], ['ממצאי בדיקה'], ['מסמכים'], ['סטטוס']];
+  const cols = [...(multi ? [['פרויקט']] : []), ['קבלן / התקשרות'], ['חשבון'], ['התקבל'], ['הוגש', 1], ['מאושר ברוטו', 1], ['קוצץ', 1], ['עיכבון', 1], ['קיזוז מקדמה', 1], ['נטו', 1], ['לתשלום כולל מע"מ', 1], ['ממצאי בדיקה'], ['מסמכים'], ['סטטוס']];
   return h(`<div class="card" data-sheet="בדיקת חשבונות">${T(cols, rows, ['סה"כ', ...(multi ? [''] : []), '', '', m0(tot.claimed), m0(tot.gross), m0(tot.cut), m0(tot.ret), m0(tot.adv), m0(tot.net), m0(tot.total), '', '', ''], 'אין חשבונות קבלנים')}
-    <p class="small mut">לכל חשבון יש דף "בדיקה והמלצה לתשלום" להדפסה: לוחצים על שם הקבלן ואז על הכפתור בראש החשבון. "מוגש" הוא מה שהקבלן ביקש בחשבון הזה; "מאושר" לפי מחירי החוזה והכמות שנבדקה.</p></div>`);
+    <p class="small mut">לכל חשבון יש דף "בדיקה והמלצה לתשלום" להדפסה: לוחצים על שם הקבלן ואז על הכפתור בראש החשבון. "הוגש" הוא מה שהקבלן ביקש בחשבון הזה; "מאושר ברוטו" לפי מחירי החוזה והכמות שנבדקה.</p></div>`);
 }
 
 // ===== 5. מצב קבלנים וספקים =====
@@ -186,7 +190,7 @@ function repVendors({ data, sums, multi }) {
       const C = c.contract, R = s.flow.byContract[C.id]?.bills || [];
       const lastApp = [...R].reverse().find(x => CBILL_APPROVED.includes(x.bill.status));
       const ret = lastApp?.retentionCum || 0, adv = lastApp?.advanceCum || 0;
-      const gs = (data.guarantees || []).filter(g => g.status !== 'returned' && (g.contract_id === C.id || (!g.contract_id && g.vendor_id && g.vendor_id === C.vendor_id && g.project_id === p.id)));
+      const gs = (data.guarantees || []).filter(guarVisible(data)).filter(g => g.status !== 'returned' && (g.contract_id === C.id || (!g.contract_id && g.vendor_id && g.vendor_id === C.vendor_id && g.project_id === p.id)));
       const gsum = sum(gs, g => g.amount), bad = gs.filter(g => ['expired', 'soon'].includes(guaranteeState(g, today)));
       const bal = c.amount - c.paid;
       if (COMMITTED.includes(C.status)) { T0.amount += c.amount; T0.inv += c.invoiced; T0.paid += c.paid; T0.bal += bal; T0.ret += ret; T0.gu += gsum; }
@@ -251,7 +255,7 @@ function repGroup({ data, sums }) {
       <div class="kpi"><div class="l">צפי עלות לסיום</div><div class="v">${money(tf)}</div><div class="n">${pct(tb ? (tf - tb) / tb * 100 : 0, { sign: true })} מהתקציב</div></div>
       <div class="kpi"><div class="l">הכנסות שהתקבלו</div><div class="v">${money(S2(r => r.rec))}</div><div class="n">צפויות עוד ${money(S2(r => r.exp))}</div></div>
       <div class="kpi"><div class="l">יתרה נמוכה ב-12 חודשים</div><div class="v ${cfAll.lowest?.below ? 'neg' : ''}">${money(cfAll.lowest?.cum || 0)}</div><div class="n">${cfAll.lowest ? monthLabel(cfAll.lowest.m) : ''} · כולל מע"מ</div></div></div>
-    <div class="card" data-sheet="ריכוז פרויקטים">${T([['פרויקט'], ['תקציב', 1], ['בסיס', 1], ['התקשרויות', 1], ['שינויים מאושרים', 1], ['צפי סופי', 1], ['סטייה', 1], ['שולם', 1], ['הכנסות שהתקבלו', 1], ['הכנסות צפויות', 1], ['נטו 12 חודשים (כולל מע"מ)', 1], ['התרעות פתוחות', 1]], rows,
+    <div class="card" data-sheet="ריכוז פרויקטים">${T([['פרויקט'], ['תקציב', 1], ['בסיס נעול', 1], ['התקשרויות', 1], ['שינויים מאושרים', 1], ['צפי לסיום', 1], ['סטייה מהתקציב', 1], ['שולם', 1], ['הכנסות שהתקבלו', 1], ['הכנסות צפויות', 1], ['נטו 12 חודשים (כולל מע"מ)', 1], ['התרעות פתוחות', 1]], rows,
       ['סה"כ', m0(tb), '', m0(S2(r => r.t.committed + r.t.outside)), m0(S2(r => r.t.coApproved)), m0(tf), over(tb ? (tf - tb) / tb * 100 : 0), m0(S2(r => r.t.paid)), m0(S2(r => r.rec)), m0(S2(r => r.exp)), neg(S2(r => r.net12)), S2(r => r.open)])}
     <p class="small mut">עלויות לפני מע"מ. הכנסות ותזרים כולל מע"מ. "נטו 12 חודשים" הוא הכנסות פחות הוצאות בפרויקט ב-12 החודשים הקרובים, בלי יתרת הפתיחה.</p></div></div>`);
 }
@@ -275,7 +279,7 @@ export function devReportNodes(data, pid) {
   if (!can.prices()) return [];
   const p = data.projects.find(x => x.id === pid); if (!p) return [];
   const pd = projData(data, pid), vat = settings().vat_pct;
-  const sums = [{ p, pd, s: devSummary({ project: p, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses, cos: pd.cos, coLines: pd.coLines, cbills: pd.cbills, cbLines: pd.cbLines, vatPct: vat }) }];
+  const sums = [{ p, pd, s: devSummary({ project: p, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses, cos: pd.cos, signoffs: pd.signoffs, fixedCosts: pd.fixedCosts, coLines: pd.coLines, cbills: pd.cbills, cbLines: pd.cbLines, vatPct: vat }) }];
   const o = { pid, h: 12, items: true, handled: false };
   const fns = { 'd-budget': repBudget, 'd-cash': repCash, 'd-cos': repCos, 'd-cbills': repCbills, 'd-vendors': repVendors, 'd-docs': repDocs, 'd-group': repGroup, 'd-alerts': repAlerts };
   return DEV_REPORTS.filter(([k]) => k !== 'd-group').map(([kind, title]) => { try { return { kind, title, node: fns[kind]({ data, sums, o, multi: false }) }; } catch (e) { console.warn('report', kind, e); return null; } }).filter(Boolean);

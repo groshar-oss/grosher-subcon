@@ -1,4 +1,5 @@
 // מעטפת המערכת: התחברות, בחירת לקוח, ניווט, הרשאות וטעינת נתונים
+import { mods } from './modules.js';
 import { db, isCloud } from './db.js';
 import { CONFIG } from './config.js';
 import { esc, h, $, $$, toast, store, modal, field } from './util.js';
@@ -22,7 +23,7 @@ const HELP_KEYS = Object.keys(HELP);
 
 export const S = { user: null, ctx: null, tenants: [], tenantId: null, role: null, mode: 'approved' };
 
-const ROLE_NAMES = { admin: 'מנהלת שירות', owner: 'בעלים', foreman: 'מנהל עבודה', accountant: 'הנהלת חשבונות', viewer: 'צפייה בלבד' };
+const ROLE_NAMES = { admin: 'מנהל שירות', owner: 'בעלים', foreman: 'מנהל עבודה', accountant: 'הנהלת חשבונות', viewer: 'צפייה בלבד' };
 export const roleName = r => ROLE_NAMES[r] || r;
 
 export const can = {
@@ -74,8 +75,9 @@ export async function loadTenantData(tenantId = S.tenantId) {
     can.expense() ? db.select('files', { ...q, order: 'created_at desc' }) : [],
     db.select('contracts', { ...q, order: 'created_at' }), db.select('contract_lines', { ...q, order: 'sort' }),
     db.select('change_orders', { ...q, order: 'created_at' }), db.select('co_lines', { ...q, order: 'sort' }), db.select('cbills', { ...q, order: 'number' }), db.select('cbill_lines', q)]);
-  const [income, alertStates] = await Promise.all([db.select('dev_income', { ...q, order: 'due_date' }), db.select('alert_state', q)]);
-  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines, income, alertStates };
+  const [income, alertStates, signoffs] = await Promise.all([db.select('dev_income', { ...q, order: 'due_date' }), db.select('alert_state', q), db.select('co_signoffs', { ...q, order: 'sent_at' }).catch(() => [])]);
+  const [indexSeries, fixedCosts] = await Promise.all([db.select('index_series', { ...q, order: 'month' }).catch(() => []), db.select('fixed_costs', { ...q, order: 'from_month' }).catch(() => [])]);
+  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines, income, alertStates, signoffs, indexSeries, fixedCosts };
 }
 
 export async function logChange(e) {
@@ -110,7 +112,9 @@ const NAV_ADMIN = () => [
 // פרויקט יזם: תקציב, התקשרויות, הוצאות ותשלומים
 const PROJECT_TABS_DEV = [['control', 'בקרה תקציבית', '◔'], ['boq', 'תקציב', '☰'], ['contracts', 'התקשרויות', '✍'], ['cos', 'הוראות שינוי', '±'], ['cbills', 'חשבונות קבלנים', '₪'], ['cashflow', 'הכנסות ותזרים', '≋'], ['expenses', 'הוצאות ותשלומים', '−'], ['docs', 'מסמכים', '⇪'], ['log', 'יומן שינויים', '↺'], ['settings', 'הגדרות פרויקט', '⚙']];
 const PROJECT_TABS = [['control', 'בקרה ורווחיות', '◔'], ['boq', 'כתב כמויות', '☰'], ['costing', 'תמחיר', '∑'], ['quota', 'מכסות', '◫'], ['vo', 'הוראות שינוי', '±'], ['worklog', 'יומן עבודה', '✎'], ['purchase', 'רכש', '⛟'], ['expenses', 'הוצאות', '−'], ['bills', 'חשבונות', '₪'], ['cashflow', 'תזרים', '≋'], ['docs', 'מסמכים', '⇪'], ['log', 'יומן שינויים', '↺'], ['settings', 'הגדרות פרויקט', '⚙']];
-export const projectTabs = (pr = null) => !can.prices() ? [['control', 'יומן עבודה', '✎']] : (pr?.project_type === 'dev' ? PROJECT_TABS_DEV : PROJECT_TABS).filter(([k]) => (!['costing', 'quota'].includes(k) || can.costing()) && (k !== 'log' || can.edit()) && (k !== 'docs' || can.expense()) && (k !== 'settings' || can.edit()));
+// לשונית של מודול כבוי לא מוצגת (worklog = עובדים ויומן, purchase = רכש)
+const TAB_MODULE = { worklog: 'workers', purchase: 'purchase' };
+export const projectTabs = (pr = null) => !can.prices() ? [['control', 'יומן עבודה', '✎']] : (pr?.project_type === 'dev' ? PROJECT_TABS_DEV : PROJECT_TABS).filter(([k]) => (!TAB_MODULE[k] || !pr || mods(pr)[TAB_MODULE[k]]) && (!['costing', 'quota'].includes(k) || can.costing()) && (k !== 'log' || can.edit()) && (k !== 'docs' || can.expense()) && (k !== 'settings' || can.edit()));
 // הפרויקט הפתוח נשמר לכל לקוח, גם אחרי רענון
 const PKEY = () => 'subcon-proj-' + (S.tenantId || '');
 export const openProjectId = () => store(PKEY());
@@ -125,8 +129,8 @@ const navLinks = (items, hash) => items.map(([href, ico, label]) => `<a href="${
 function shell(content, title) {
   const t = tenant();
   const tenantBox = S.tenants.length > 1 || can.admin()
-    ? `<div class="tsel"><span>לקוח</span><select id="tsel" aria-label="בחירת לקוח">${S.tenants.map(x => `<option value="${x.id}" ${x.id === S.tenantId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}${S.tenants.length ? '' : '<option>אין לקוחות עדיין</option>'}</select></div>`
-    : `<div class="tsel"><span>לקוח</span><b>${esc(t?.name || '')}</b></div>`;
+    ? `<div class="tsel"><span>לקוח <i class="rolebadge" title="סוג המשתמש שלך">${esc(roleName(S.role))}</i></span><select id="tsel" aria-label="בחירת לקוח">${S.tenants.map(x => `<option value="${x.id}" ${x.id === S.tenantId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}${S.tenants.length ? '' : '<option>אין לקוחות עדיין</option>'}</select></div>`
+    : `<div class="tsel"><span>לקוח <i class="rolebadge" title="סוג המשתמש שלך">${esc(roleName(S.role))}</i></span><b>${esc(t?.name || '')}</b></div>`;
   const hash = location.hash || '#/';
   const root = h(`<div class="app">
     <div class="mobile-top"><button id="mnav" aria-label="תפריט">☰</button><b>${esc(title || CONFIG.appName)}</b><a href="#" id="gdotb" aria-label="${esc(pillState().t)}" title="${esc(pillState().t)}"><i id="gdot" class="gdot ${pillState().st}"></i></a></div>
@@ -237,7 +241,7 @@ function renderLogin() {
     try { const r = await db.signUp(v.email, v.password); if (r === 'signed_in') await boot(); else err('נשלח אימייל לאישור. אחרי האישור אפשר להיכנס.'); } catch (x) { err(x.message); }
   };
   $('#forgot').onclick = async () => {
-    err(''); const v = vals(); if (!v.email) return err('כתבי את האימייל ואז לחצי שוב');
+    err(''); const v = vals(); if (!v.email) return err('כתוב את האימייל ולחץ שוב');
     try { await db.resetPassword(v.email); err('נשלח קישור לאיפוס סיסמה'); } catch (x) { err(x.message); }
   };
 }
@@ -268,7 +272,7 @@ async function boot() {
     await reloadTenants();
   } catch (e) {
     console.error(e);
-    $('#root').replaceChildren(h(`<div class="login"><div class="box"><h2>לא הצלחנו להתחבר</h2><p class="neg">${esc(e.message)}</p><p class="mut small">בדקי את הכתובת והמפתח ב-config.js ואת החיבור לאינטרנט.</p></div></div>`));
+    $('#root').replaceChildren(h(`<div class="login"><div class="box"><h2>לא הצלחנו להתחבר</h2><p class="neg">${esc(e.message)}</p><p class="mut small">בדוק את הכתובת והמפתח ב-config.js ואת החיבור לאינטרנט.</p></div></div>`));
     return;
   }
   render();

@@ -1,5 +1,6 @@
 // שלב 6: דוחות. כל דוח לפרויקט אחד או לכולם, עם הדפסה ו-Excel.
-import { h, esc, $, $$, money, pct, num, fmtDate, store } from '../util.js';
+import { guarVisible } from '../modules.js';
+import { h, esc, $, $$, money, pct, num, fmtDate, store, totSym } from '../util.js';
 import { S, can, settings, loadTenantData, modeSwitch, tenant } from '../app.js';
 import { n, PROFIT_MODES, VO_STATUS, VO_APPROVED, VO_AT_RISK, EXPENSE_KINDS, EXPENSE_STATUS, overrunPct } from '../calc.js';
 import { PAY_TYPES } from '../quota.js';
@@ -43,8 +44,8 @@ export const T = (cols, rows, foot, empty = 'אין נתונים', groups = null
     ? `<tr><th rowspan="2">${cols[0][0]}</th>${groups.map(([g, span]) => `<th colspan="${span}" class="grp gs">${g}</th>`).join('')}</tr><tr>${cols.slice(1).map(([h, isN], i) => `<th class="${c(i + 1, isN)}">${h}</th>`).join('')}</tr>`
     : `<tr>${cols.map(([h, isN]) => `<th class="${isN ? 'n' : ''}">${h}</th>`).join('')}</tr>`;
   return `<div class="tw"><table class="${groups ? 'gt' : ''}"><thead>${head}</thead><tbody>
-  ${rows.map(r => `<tr${r.cls ? ` class="${r.cls}"` : ''}>${(r.cells || r).map((x, i) => `<td class="${c(i, cols[i]?.[1])}">${x ?? ''}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length}" class="empty">${empty}</td></tr>`}
-  ${foot ? `<tr class="tot">${foot.map((x, i) => `<td class="${c(i, cols[i]?.[1])}">${x ?? ''}</td>`).join('')}</tr>` : ''}</tbody></table></div>`;
+  ${rows.map(r => `<tr${r.cls ? ` class="${r.cls}"` : ''}>${(r.cells || r).map((x, i) => `<td class="${c(i, cols[i]?.[1])}">${/\btot\b/.test(r.cls || '') ? totSym(x) : (x ?? '')}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${cols.length}" class="empty">${empty}</td></tr>`}
+  ${foot ? `<tr class="tot">${foot.map((x, i) => `<td class="${c(i, cols[i]?.[1])}">${totSym(x)}</td>`).join('')}</tr>` : ''}</tbody></table></div>`;
 };
 const sum = (xs, f) => xs.reduce((a, x) => a + n(f(x)), 0);
 const inPeriod = (d, o) => d && d.slice(0, 7) >= o.from && d.slice(0, 7) <= o.to;
@@ -114,7 +115,7 @@ function repProfit({ sums }) {
   const S2 = k => sum(rows, k);
   const tc = { sale: S2(r => r.c.sale), forecast: S2(r => r.c.forecast) }, ta = { sale: S2(r => r.a.sale), forecast: S2(r => r.a.forecast) }, tr = { sale: S2(r => r.r.sale), forecast: S2(r => r.r.forecast) };
   const tt = { sale: S2(r => r.tot.sale), forecast: S2(r => r.tot.forecast), planned: S2(r => r.tot.planned) };
-  return h(`<div data-sheet="רווחיות">${T([['פרויקט'], ['מכירה', 1], ['צפי עלות', 1], ['רווח', 1], ['%', 1], ['מכירה', 1], ['צפי עלות', 1], ['רווח', 1], ['מבוקש', 1], ['רווח בסיכון', 1], ['מכירה', 1], ['רווח', 1], ['%', 1], ['חריגת עלות', 1]], rows,
+  return h(`<div data-sheet="רווחיות">${T([['פרויקט'], ['מכירה', 1], ['צפי עלות', 1], ['רווח', 1], ['% רווח', 1], ['מכירה', 1], ['צפי עלות', 1], ['רווח', 1], ['מבוקש', 1], ['רווח בסיכון', 1], ['מכירה', 1], ['רווח', 1], ['% רווח', 1], ['חריגת עלות', 1]], rows,
     ['סה"כ', m0(tc.sale), m0(tc.forecast), cls(tc.sale - tc.forecast), pct(tc.sale ? (tc.sale - tc.forecast) / tc.sale * 100 : 0), m0(ta.sale), m0(ta.forecast), cls(ta.sale - ta.forecast), m0(tr.sale), cls(tr.sale - tr.forecast), m0(tt.sale), cls(tt.sale - tt.forecast), pct(tt.sale ? (tt.sale - tt.forecast) / tt.sale * 100 : 0), pct(overrunPct(tt.forecast, tt.planned), { sign: true })], 'אין נתונים', [['חוזה', 4], ['תוספות מאושרות', 3], ['לא מאושרות', 2], ['סה"כ בתצוגה', 4]])}
     <p class="small mut">רווח = מכירה פחות צפי עלות לסיום. "סה"כ בתצוגה" לפי המתג למעלה: ${esc(PROFIT_MODES[S.mode])}. תוספות לא מאושרות הן הוראות שינוי שהוגשו או בוצעו ועדיין לא אושרו.</p></div>`);
 }
@@ -132,14 +133,14 @@ function repLabor({ data, sums, o, rerender }) {
   const ot = xs => sum(xs, x => x.e.ot_hours), cost = xs => sum(xs, x => x.cost);
   let cols, rows;
   if (by === 'worker') {
-    cols = [['עובד'], ['סוג העסקה'], ['פרויקטים'], ['ימים', 1], ['שעות נוספות', 1], ['כמות בקבלנות', 1], ['עלות ₪', 1], ['עלות ליום ₪', 1]];
+    cols = [['עובד'], ['סוג העסקה'], ['פרויקטים'], ['ימים', 1], ['שעות נוספות', 1], ['כמות בקבלנות', 1], ['עלות', 1], ['עלות ליום', 1]];
     rows = Object.values(groups).sort((a, b) => cost(b.xs) - cost(a.xs)).map(({ xs, first }) => [`<b>${esc(first.w?.name || '?')}</b>`, PAY_TYPES[first.w?.pay_type] || '', esc([...new Set(xs.map(x => x.p.name))].join(', ')), first.w?.pay_type === 'piece' ? '' : num(days(xs), 1), num(ot(xs), 1), first.w?.pay_type === 'piece' ? num(sum(xs, x => x.e.piece_qty), 1) : '', m0(cost(xs)), days(xs) ? m0(cost(xs) / days(xs)) : '']);
   } else if (by === 'project') {
-    cols = [['פרויקט'], ['עובדים', 1], ['ימים', 1], ['שכירים ₪', 1], ['יומיים ₪', 1], ['קבלנות ₪', 1], ['סה"כ עלות ₪', 1]];
+    cols = [['פרויקט'], ['עובדים', 1], ['ימים', 1], ['שכירים', 1], ['יומיים', 1], ['קבלנות', 1], ['סה"כ עלות', 1]];
     const t = (xs, pt) => sum(xs.filter(x => x.w?.pay_type === pt), x => x.cost);
     rows = Object.values(groups).map(({ xs, first }) => [`<b>${esc(first.p.name)}</b>`, new Set(xs.map(x => x.e.worker_id)).size, num(days(xs), 1), m0(t(xs, 'salary')), m0(t(xs, 'daily')), m0(t(xs, 'piece')), m0(cost(xs))]);
   } else {
-    cols = [['פרויקט'], ['סעיף'], ['ימים', 1], ['כמות בקבלנות', 1], ['עלות עבודה בפועל ₪', 1], ['עבודה בתמחיר ₪', 1], ['ביצוע', 1]];
+    cols = [['פרויקט'], ['סעיף'], ['ימים', 1], ['כמות בקבלנות', 1], ['עלות עבודה בפועל', 1], ['עבודה בתמחיר', 1], ['ביצוע', 1]];
     rows = Object.values(groups).map(({ xs, first }) => {
       const it = first.pd.items.find(i => i.id === first.e.boq_item_id);
       const planned = it ? sum(first.pd.lines.filter(l => l.boq_item_id === it.id && ['labor', 'piece'].includes(l.kind)), l => n(l.qty) * n(l.unit_cost)) : 0;
@@ -166,10 +167,10 @@ function repExpenses({ sums, o }) {
   const sup = Object.entries(bySup).sort((a, b) => amt(b[1]) - amt(a[1]));
   const kinds = Object.entries(byKind).sort((a, b) => amt(b[1]) - amt(a[1]));
   return h(`<div><div class="cols even">
-    <div data-sheet="לפי ספק"><h2>לפי ספק</h2>${T([['ספק'], ['מסמכים', 1], ['לפני מע"מ ₪', 1], ['כולל מע"מ ₪', 1], ['שולם ₪', 1], ['פתוח ₪', 1], ['פרויקטים']],
+    <div data-sheet="לפי ספק"><h2>לפי ספק</h2>${T([['ספק'], ['מסמכים', 1], ['לפני מע"מ', 1], ['כולל מע"מ', 1], ['שולם', 1], ['פתוח', 1], ['פרויקטים']],
       sup.map(([s, a]) => [`<b>${esc(s)}</b>`, a.length, m0(amt(a)), m0(withVat(a)), m0(paid(a)), m0(amt(a) - paid(a)), esc([...new Set(a.map(x => x.p.name))].join(', '))]),
       ['סה"כ', xs.length, m0(tot), m0(withVat(xs)), m0(paid(xs)), m0(tot - paid(xs)), ''], 'אין הוצאות בתקופה')}</div>
-    <div data-sheet="לפי סוג"><h2>לפי סוג</h2>${T([['סוג'], ['מסמכים', 1], ['לפני מע"מ ₪', 1], ['חלק', 1]],
+    <div data-sheet="לפי סוג"><h2>לפי סוג</h2>${T([['סוג'], ['מסמכים', 1], ['לפני מע"מ', 1], ['חלק', 1]],
       kinds.map(([k, a]) => [EXPENSE_KINDS[k] || k, a.length, m0(amt(a)), pct(tot ? amt(a) / tot * 100 : 0)]), ['סה"כ', xs.length, m0(tot), '100%'], 'אין הוצאות בתקופה')}</div></div>
     <p class="small mut">לפי תאריך המסמך. עלות עובדים מיומן העבודה מופיעה בדוח עלות עבודה ולא כאן. סטטוסים: ${Object.values(EXPENSE_STATUS).join(', ')}; "פתוח" = כל מה שלא סומן שולם.</p></div>`);
 }
@@ -189,9 +190,9 @@ function repVo({ sums }) {
     <div class="kpis"><div class="kpi"><div class="l">סכום בסיכון</div><div class="v neg">${money(sum(risk, x => x.g.requested))}</div><div class="n">${risk.length} תוספות שהוגשו או בוצעו בלי אישור</div></div>
       <div class="kpi"><div class="l">עלות שכבר הוצאה על תוספות בסיכון</div><div class="v">${money(sum(risk, x => x.g.actual))}</div></div>
       <div class="kpi"><div class="l">תוספות מאושרות</div><div class="v">${money(sum(all.filter(x => VO_APPROVED.includes(x.g.vo.status)), x => x.g.approvedSale))}</div></div></div>
-    <div data-sheet="תוספות">${T([['פרויקט'], ['תוספת'], ['סטטוס'], ['הוראה בכתב'], ['ממתין'], ['מבוקש ₪', 1], ['מאושר ₪', 1], ['עלות בפועל ₪', 1], ['צפי עלות ₪', 1], ['רווח צפוי ₪', 1], ['בסיכון ₪', 1]], rows,
+    <div data-sheet="תוספות">${T([['פרויקט'], ['תוספת'], ['סטטוס'], ['הוראה בכתב'], ['ממתין'], ['מבוקש', 1], ['מאושר', 1], ['עלות בפועל', 1], ['צפי עלות', 1], ['רווח צפוי', 1], ['בסיכון', 1]], rows,
       ['סה"כ', '', '', '', '', m0(sum(all, x => x.g.requested)), m0(sum(all, x => x.g.approvedSale)), m0(sum(all, x => x.g.actual)), m0(sum(all, x => x.g.forecast)), '', m0(sum(risk, x => x.g.requested))], 'אין תוספות')}</div>
-    <div data-sheet="לפי סטטוס"><h2>לפי סטטוס</h2>${T([['סטטוס'], ['מספר', 1], ['מבוקש ₪', 1], ['עלות בפועל ₪', 1]], st)}</div></div>`);
+    <div data-sheet="לפי סטטוס"><h2>לפי סטטוס</h2>${T([['סטטוס'], ['מספר', 1], ['מבוקש', 1], ['עלות בפועל', 1]], st)}</div></div>`);
 }
 
 // ===== 9. עיכבונות וערבויות =====
@@ -204,11 +205,11 @@ function repRetention({ data, sums }) {
     return { p, ret: B.retentionTotal, ins: sum(Object.values(B.byBill), r => r.insurance), shared: sum(Object.values(B.byBill), r => r.shared), cum, rel,
       cells: [`<b>${esc(p.name)}</b>`, m0(cum), `${p.retention_pct}%${n(p.retention_cap) ? ` · תקרה ${m0(p.retention_cap)}` : ''}`, m0(B.retentionTotal), m0(n(p.retention_released)), m0(Math.max(0, B.retentionTotal - n(p.retention_released))), m0(sum(Object.values(B.byBill), r => r.insurance)), m0(sum(Object.values(B.byBill), r => r.shared)), fmtDate(p.end_date), rel ? `${fmtDate(rel)}${rel < today ? ' <span class="chip red">עבר</span>' : ''}` : ''] };
   });
-  const g = (data.guarantees || []).filter(x => sums.some(s => s.p.id === x.project_id) && x.status !== 'returned');
-  return h(`<div><div data-sheet="עיכבונות">${T([['פרויקט'], ['מצטבר בחשבונות ₪', 1], ['שיעור'], ['עיכבון שנצבר ₪', 1], ['שוחרר ₪', 1], ['פתוח ₪', 1], ['ביטוח שנוכה ₪', 1], ['הוצאות משותפות ₪', 1], ['סיום פרויקט'], ['שחרור צפוי']], rows,
+  const g = (data.guarantees || []).filter(guarVisible(data)).filter(x => sums.some(s => s.p.id === x.project_id) && x.status !== 'returned');
+  return h(`<div><div data-sheet="עיכבונות">${T([['פרויקט'], ['מצטבר בחשבונות', 1], ['שיעור', 1], ['עיכבון שנצבר', 1], ['שוחרר', 1], ['פתוח', 1], ['ביטוח שנוכה', 1], ['הוצאות משותפות', 1], ['סיום פרויקט'], ['שחרור צפוי']], rows,
     ['סה"כ', m0(sum(rows, r => r.cum)), '', m0(sum(rows, r => r.ret)), m0(sum(rows, r => n(r.p.retention_released))), m0(sum(rows, r => Math.max(0, r.ret - n(r.p.retention_released)))), m0(sum(rows, r => r.ins)), m0(sum(rows, r => r.shared)), '', ''])}</div>
     <p class="small mut">עיכבון מחושב מהחשבונות החלקיים (כולל תקרה אם הוגדרה). שחרור צפוי: סוף חודש הסיום + תנאי התשלום, בכפוף לחשבון סופי ולתעודת השלמה.</p>
-    <div data-sheet="ערבויות"><h2>ערבויות פתוחות</h2>${T([['פרויקט'], ['סוג'], ['בנק'], ['מספר'], ['סכום ₪', 1], ['בתוקף עד']],
+    <div data-sheet="ערבויות"><h2>ערבויות פתוחות</h2>${T([['פרויקט'], ['סוג'], ['בנק'], ['מספר'], ['סכום', 1], ['בתוקף עד']],
       g.map(x => ({ cls: ['expired', 'soon'].includes(guaranteeState(x, today)) ? 'al-r' : '', cells: [esc(data.projects.find(p => p.id === x.project_id)?.name || ''), GUAR_KINDS[x.kind] || '', esc(x.bank || ''), esc(x.number || ''), m0(x.amount), fmtDate(x.expiry)] })),
       g.length ? ['סה"כ', '', '', '', m0(sum(g, x => x.amount)), ''] : null, 'אין ערבויות פתוחות')}</div></div>`);
 }
@@ -229,7 +230,7 @@ function repClient({ data, sums, o }) {
       <div class="kpi"><div class="l">רווח צפוי</div><div class="v ${t.sale - t.forecast < 0 ? 'neg' : 'pos'}">${money(t.sale - t.forecast)}</div><div class="n">${pct(t.sale ? (t.sale - t.forecast) / t.sale * 100 : 0)} מהמכירה</div></div>
       <div class="kpi"><div class="l">לגבייה מהקבלנים הראשיים</div><div class="v">${money(sum(col, c => c.outstanding))}</div><div class="n ${sum(col, c => c.overdue.length) ? 'neg' : ''}">${sum(col, c => c.overdue.length)} חשבונות באיחור</div></div>
       <div class="kpi"><div class="l">יתרת מזומנים צפויה בעוד 3 חודשים</div><div class="v ${cf.months.at(-1).cum < n(st.cash_min) ? 'neg' : ''}">${money(cf.months.at(-1).cum)}</div><div class="n">${cf.belowMonths.length ? `<span class="neg">מתחת למינימום ב${cf.belowMonths.map(m => monthLabel(m.m)).join(', ')}</span>` : 'מעל המינימום'}</div></div></div>
-    ${T([['פרויקט'], ['מכירה ₪', 1], ['צפי עלות ₪', 1], ['רווח צפוי ₪', 1], ['%', 1], ['ביצוע', 1], ['חריגת עלות', 1], ['תוספות בסיכון ₪', 1], ['לגבייה ₪', 1]],
+    ${T([['פרויקט'], ['מכירה', 1], ['צפי עלות', 1], ['רווח צפוי', 1], ['% רווח', 1], ['ביצוע', 1], ['חריגת עלות', 1], ['תוספות בסיכון', 1], ['לגבייה', 1]],
       sums.map(({ p, s }, i) => [`<b>${esc(p.name)}</b>`, m0(s.total.sale), m0(s.total.forecast), cls(s.total.profit), pct(s.total.profitPct), pct(s.total.progress, { d: 0 }), pct(s.total.overrun, { sign: true }), s.riskAmount ? m0(s.riskAmount) : '', m0(col[i].outstanding)]))}
   </section>`));
   for (const { p, s, pd } of sums) {
@@ -252,16 +253,16 @@ function repClient({ data, sums, o }) {
         <div class="kpi"><div class="l">רווח צפוי</div><div class="v ${tot.profit < 0 ? 'neg' : 'pos'}">${money(tot.profit)}</div><div class="n">${pct(tot.profitPct)} · תוכנן ${pct(tot.plannedProfitPct)}</div></div>
         <div class="kpi"><div class="l">חריגת עלות צפויה</div><div class="v ${tot.overrun > 0 ? 'neg' : ''}">${pct(tot.overrun, { sign: true })}</div><div class="n">${money(tot.forecast - tot.planned, { sign: true })}</div></div></div>
       <div class="cols even">
-        <div><h3>רווחיות בשלוש התצוגות</h3>${T([['תצוגה'], ['מכירה ₪', 1], ['רווח ₪', 1], ['%', 1]], [
+        <div><h3>רווחיות בשלוש התצוגות</h3>${T([['תצוגה'], ['מכירה', 1], ['רווח', 1], ['% רווח', 1]], [
           ['חוזה בלבד', m0(s.contract.sale), cls(prof(s.contract)), pct(s.contract.sale ? prof(s.contract) / s.contract.sale * 100 : 0)],
           ['+ תוספות מאושרות', m0(s.contract.sale + s.approved.sale), cls(prof(s.contract) + prof(s.approved)), pct((s.contract.sale + s.approved.sale) ? (prof(s.contract) + prof(s.approved)) / (s.contract.sale + s.approved.sale) * 100 : 0)],
           ['+ לא מאושרות (בסיכון)', m0(s.contract.sale + s.approved.sale + s.atRisk.sale), cls(prof(s.contract) + prof(s.approved) + prof(s.atRisk)), (() => { const sl = s.contract.sale + s.approved.sale + s.atRisk.sale; return pct(sl ? (prof(s.contract) + prof(s.approved) + prof(s.atRisk)) / sl * 100 : 0); })()]])}</div>
-        <div><h3>החודש</h3>${T([['נושא'], ['₪', 1]], [
+        <div><h3>החודש</h3>${T([['נושא'], ['סכום', 1]], [
           [`חשבונות שהוגשו (${billsMonth.map(r => r.bill.number).join(', ') || 'אין'})`, m0(sum(billsMonth, r => r.curSub))],
           ['תקבולים מהקבלן הראשי (כולל מע"מ)', m0(paidMonth)], ['עלות עבודה מהיומן', m0(labMonth)], ['הוצאות (לפי תאריך מסמך)', m0(expMonth)],
           [`לגבייה כעת${c.overdue.length ? ` · <span class="neg">${c.overdue.length} באיחור</span>` : ''}`, m0(c.outstanding)],
           ['תזרים נטו צפוי ב-3 החודשים הקרובים', cls(sum(pcf.months, m => m.net))]])}</div></div>
-      <h3>סעיפים בחריגה (5 הגדולים)</h3>${T([['סעיף'], ['תמחיר ₪', 1], ['צפי ₪', 1], ['חריגה', 1], ['ביצוע / הוצאה', 1]],
+      <h3>סעיפים בחריגה (5 הגדולים)</h3>${T([['סעיף'], ['תמחיר', 1], ['צפי', 1], ['חריגה', 1], ['ביצוע / הוצאה', 1]],
         top.map(r => [`<b>${esc(r.item.code || '')}</b> ${esc(r.item.description || '')}`, m0(r.c.planned), m0(r.c.forecast), pct(r.c.overrun, { sign: true }), `${pct(r.c.progress, { d: 0 })} / ${pct(r.c.spentPct, { d: 0 })}`]), null, 'אין סעיפים בחריגה')}
       ${q.length || risk.length ? `<h3>לטיפול</h3><ul class="small">${q.slice(0, 4).map(x => `<li>מכסה: ${esc(x.item.code || '')} ${esc(x.line?.description || x.item.description || '')}: ${esc(x.msgs[0] || '')}</li>`).join('')}${risk.map(g => `<li>תוספת ${esc(g.vo.number)} ${esc(g.vo.title)}: ${VO_STATUS[g.vo.status]}, ${money(g.requested)} בסיכון${g.vo.has_written_order ? '' : ', אין הוראה בכתב'}</li>`).join('')}</ul>` : ''}
     </section>`));

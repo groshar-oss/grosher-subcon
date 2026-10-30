@@ -6,6 +6,8 @@ import { n, VO_STATUS, VO_APPROVED, VO_AT_RISK, EXPENSE_KINDS, EXPENSE_STATUS, i
 import { tabBoq } from './boq.js';
 import { findVendor, vendorStatus, DOC_TYPES } from '../docs.js';
 import { attachBtn, wireAttach } from '../files.js';
+import { has as hasMod } from '../modules.js';
+import { fixedCostsCard } from './fixedcosts.js';
 
 const SOURCES = { change_order: 'הוראת שינוי', supervisor: 'הוראת מפקח', main_request: 'בקשת הקבלן הראשי', daywork: 'עבודת רג\'י' };
 const statusChip = s => `<span class="chip ${VO_APPROVED.includes(s) ? 'green' : VO_AT_RISK.includes(s) ? 'red' : s === 'rejected' ? '' : 'blue'}">${VO_STATUS[s]}</span>`;
@@ -119,6 +121,7 @@ export function tabExpenses(P) {
   $('#fk', el).onchange = e => { F.kind = e.target.value; draw(); };
   $('#fs', el).onchange = e => { F.status = e.target.value; draw(); };
   $('#add', el)?.addEventListener('click', () => expenseDialog(P));
+  if (hasMod(P.project, 'fixed')) el.prepend(fixedCostsCard(P));
   return el;
 }
 

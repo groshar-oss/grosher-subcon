@@ -6,6 +6,7 @@ import { n } from '../calc.js';
 import { STATUS, CONTRACT, projData, summarize, rowAttr, modeLine } from './common.js';
 import { mcForm } from './clients.js';
 import { isDev, PROJECT_TYPES, devSummary } from '../dev.js';
+import { modulesFieldset, readModules, syncModulesType, mods, moduleTags } from '../modules.js';
 
 export function projectForm(p = {}, mcs = [], { isNew = false } = {}) {
   const ov = p.overhead_pct ?? settings().overhead_pct;
@@ -22,13 +23,15 @@ export function projectForm(p = {}, mcs = [], { isNew = false } = {}) {
   ${field('עיכבון %', 'retention_pct', p.retention_pct ?? 5, { type: 'number' })}${field('תקרת עיכבון ₪', 'retention_cap', p.retention_cap, { type: 'number' })}
   ${field('ביטוח %', 'insurance_pct', p.insurance_pct ?? 0, { type: 'number' })}${field('הוצאות משותפות %', 'shared_pct', p.shared_pct ?? 0, { type: 'number' })}
   ${field('ניכוי מס במקור %', 'tax_pct', p.tax_pct ?? 0, { type: 'number' })}</div></div>
-  <label class="chk"><input type="checkbox" name="indexation" ${p.indexation ? 'checked' : ''}> חוזה צמוד למדד תשומות הבנייה</label>
-  ${field('מדד בסיס', 'base_index', p.base_index, { type: 'number' })}
+  ${modulesFieldset(p, { isNew })}
+  <div class="idxonly" ${(isNew ? false : mods(p).index) ? '' : 'hidden'}><div class="grid g2">${field('מדד בסיס של הפרויקט (מדד תשומות הבנייה)', 'base_index', p.base_index, { type: 'number', attrs: 'step="any" dir="ltr"' })}<p class="small mut" style="align-self:end">החוזה צמוד למדד. המדד של כל חודש מוזן פעם אחת לכל הפרויקטים, ב"הגדרות לקוח ומשתמשים".</p></div></div>
+  <div class="devonly" ${dev ? '' : 'hidden'}><h3 style="margin:10px 0 6px">אישור הוראות שינוי</h3><p class="small mut" style="margin:0 0 6px">היזם שמאשר בחתימה. הבקשה לאישור נשלחת למייל הזה, עם קישור לחתימה.</p>
+  <div class="grid g2">${field('שם המאשר מטעם היזם', 'approver_name', p.approver_name || '')}${field('מייל לאישורים', 'approver_email', p.approver_email || '', { attrs: 'dir="ltr" inputmode="email"' })}</div></div>
   <h3 style="margin:10px 0 6px">נמענים להתרעות בפרויקט</h3><p class="small mut" style="margin:0 0 6px">לכפתורי הוואטסאפ והמייל ליד כל התרעה. ריק = הנמענים בהגדרות הלקוח.</p>
   <div class="grid g3">${field('איש קשר אצל הלקוח', 'notify_name', p.notify_name || '')}${field('נייד לוואטסאפ', 'notify_phone', p.notify_phone || '', { attrs: 'dir="ltr" inputmode="tel"' })}${field('מיילים (מופרדים בפסיק)', 'notify_emails', p.notify_emails || '', { attrs: 'dir="ltr"' })}</div>`;
 }
 
-export async function projectRow(v, mcs) {
+export async function projectRow(v, mcs, type = null) {
   let mcId = v.main_contractor_id;
   if (mcId === '__new') {
     const m = await modal({ title: 'קבלן ראשי חדש', body: mcForm(), validate: d => !d.name.trim() && 'חסר שם' });
@@ -39,20 +42,31 @@ export async function projectRow(v, mcs) {
     name: v.name.trim(), main_contractor_id: nullIfEmpty(mcId), address: v.address, owner_name: v.owner_name,
     start_date: nullIfEmpty(v.start_date), end_date: nullIfEmpty(v.end_date), contract_type: v.contract_type, status: v.status,
     pay_terms_days: Math.round(n(v.pay_terms_days)), overhead_pct: n(v.overhead_pct), retention_pct: n(v.retention_pct), retention_cap: numOrNull(v.retention_cap),
-    insurance_pct: n(v.insurance_pct), shared_pct: n(v.shared_pct), tax_pct: n(v.tax_pct), indexation: !!v.indexation, base_index: numOrNull(v.base_index),
+    insurance_pct: n(v.insurance_pct), shared_pct: n(v.shared_pct), tax_pct: n(v.tax_pct), base_index: numOrNull(v.base_index),
     notify_name: v.notify_name?.trim() || null, notify_phone: v.notify_phone?.trim() || null, notify_emails: v.notify_emails?.trim() || null
   };
+  if ('approver_email' in v) { row.approver_name = v.approver_name?.trim() || null; row.approver_email = v.approver_email?.trim() || null; }
   if (v.project_type) row.project_type = v.project_type;
+  const t = v.project_type || type || 'sub';
+  if (Object.keys(v).some(k => k.startsWith('mod_'))) { row.modules = readModules(v, t); row.indexation = !!row.modules.index; }
   return row;
 }
 
 // בחירת סוג פרויקט: שדות של קבלן משנה מוסתרים בפרויקט יזם
 export function wireProjectType(el) {
   const sync = () => { const t = $('[name=project_type]:checked', el)?.value; if (!t) return; const dev = t === 'dev';
-    $$('.subonly', el).forEach(x => x.hidden = dev);
+    $$('.subonly', el).forEach(x => x.hidden = dev); $$('.devonly', el).forEach(x => x.hidden = !dev);
     const hint = $('#ptyhint', el); if (hint) hint.textContent = dev ? 'פרויקט יזם: תקציב לפי פרקים וסעיפים, התקשרויות עם קבלנים, ספקים ויועצים, חשבונות שלהם ותקבולים.' : 'פרויקט קבלן משנה: כתב כמויות מול הקבלן הראשי, תמחיר, עובדים, רכש וחשבונות.';
     const own = $('[name=owner_name]', el)?.closest('.fld')?.querySelector('span'); if (own) own.textContent = dev ? 'יזם / בעלים' : 'מזמין / יזם'; };
-  $$('[name=project_type]', el).forEach(r => r.onchange = sync); sync();
+  $$('[name=project_type]', el).forEach(r => r.onchange = () => { sync(); syncModulesType(el, $('[name=project_type]:checked', el).value); }); sync();
+  wireModules(el);
+}
+// מודול הצמדה: שדה מדד הבסיס מופיע רק כשהמודול דלוק
+export function wireModules(el) {
+  const idx = $('[name=mod_index]', el), box = $('.idxonly', el);
+  const upd = () => { if (box) box.hidden = !idx?.checked; };
+  if (idx) idx.addEventListener('change', upd); upd();
+  $$('.modrow input', el).forEach(i => i.addEventListener('change', () => { i.closest('.modrow').dataset.touched = '1'; }));
 }
 
 export async function newProject(mcs) {
@@ -66,7 +80,7 @@ export async function newProject(mcs) {
 }
 
 export async function viewProjects(arg) {
-  if (!S.tenantId) return h('<div class="empty">בחרי לקוח</div>');
+  if (!S.tenantId) return h('<div class="empty">בחר לקוח</div>');
   const data = await loadTenantData();
   const mcName = id => data.mcs.find(m => m.id === id)?.name || '';
   const el = h(`<div><div class="top"><div><h1>פרויקטים</h1><div class="sub">${data.projects.length} פרויקטים${data.projects.some(p => !isDev(p)) ? ' · ' + modeLine() : ''}</div></div>
@@ -83,8 +97,8 @@ export async function viewProjects(arg) {
   }
   const subs = data.projects.filter(p => !isDev(p)), devs = data.projects.filter(isDev);
   const rows = subs.map(p => ({ p, s: summarize(projData(data, p.id)) }));
-  body.innerHTML = (subs.length ? `${devs.length ? '<h2>פרויקטים של קבלן משנה</h2>' : ''}<div class="tw"><table><thead><tr><th>פרויקט</th><th class="hide-m">קבלן ראשי</th><th class="hide-m">סטטוס</th><th class="n">מכירה</th><th class="n">צפי עלות</th><th class="n">רווח צפוי</th><th class="n">%</th><th class="n hide-m">ביצוע</th><th class="n">חריגה</th></tr></thead><tbody>
-  ${rows.map(({ p, s }) => { const t = s.total, a = rowAttr(t.overrun); return `<tr class="click ${a.cls}"${a.style} data-p="${p.id}"><td><b>${esc(p.name)}</b><div class="small mut">${CONTRACT[p.contract_type]} · ${fmtDate(p.start_date)}</div></td><td class="hide-m">${esc(mcName(p.main_contractor_id))}</td><td class="hide-m">${STATUS[p.status]}</td>
+  body.innerHTML = (subs.length ? `${devs.length ? '<h2>פרויקטים של קבלן משנה</h2>' : ''}<div class="tw"><table><thead><tr><th>פרויקט</th><th class="hide-m">קבלן ראשי</th><th class="hide-m">סטטוס</th><th class="n">מכירה</th><th class="n">צפי עלות</th><th class="n">רווח צפוי</th><th class="n">% רווח</th><th class="n hide-m">ביצוע</th><th class="n">חריגה</th></tr></thead><tbody>
+  ${rows.map(({ p, s }) => { const t = s.total, a = rowAttr(t.overrun); return `<tr class="click ${a.cls}"${a.style} data-p="${p.id}"><td><b>${esc(p.name)}</b> ${moduleTags(p)}<div class="small mut">${CONTRACT[p.contract_type]} · ${fmtDate(p.start_date)}</div></td><td class="hide-m">${esc(mcName(p.main_contractor_id))}</td><td class="hide-m">${STATUS[p.status]}</td>
     <td class="n">${money(t.sale)}</td><td class="n">${money(t.forecast)}</td><td class="n">${money(t.profit)}</td><td class="n">${pct(t.profitPct)}</td><td class="n hide-m">${pct(t.progress, { d: 0 })}</td><td class="n">${pct(t.overrun, { sign: true })}${a.crit ? '<span class="crit">קריטי</span>' : ''}</td></tr>`; }).join('')}
   </tbody></table></div>` : '') + (devs.length ? devTable(data, devs, !!subs.length) : '');
   $$('[data-p]', body).forEach(r => r.onclick = () => location.hash = `#/project/${r.dataset.p}/control`);
@@ -92,9 +106,9 @@ export async function viewProjects(arg) {
 }
 
 function devTable(data, devs, titled) {
-  const rows = devs.map(p => { const pd = projData(data, p.id); return { p, s: devSummary({ project: p, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses }) }; });
-  return `${titled ? '<h2 style="margin-top:18px">פרויקטי יזם</h2>' : ''}<div class="tw"><table><thead><tr><th>פרויקט</th><th class="hide-m">יזם / בעלים</th><th class="hide-m">סטטוס</th><th class="n">תקציב</th><th class="n hide-m">התקשרויות</th><th class="n">צפי לסיום</th><th class="n hide-m">שולם</th><th class="n">סטייה</th></tr></thead><tbody>
-  ${rows.map(({ p, s }) => { const t = s.total, a = rowAttr(t.dev); return `<tr class="click ${a.cls}"${a.style} data-p="${p.id}"><td><b>${esc(p.name)}</b><div class="small mut">${PROJECT_TYPES.dev}${s.baselineAt ? ' · בסיס נעול' : ''}</div></td><td class="hide-m">${esc(p.owner_name || '')}</td><td class="hide-m">${STATUS[p.status]}</td>
+  const rows = devs.map(p => { const pd = projData(data, p.id); return { p, s: devSummary({ project: p, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses, fixedCosts: pd.fixedCosts }) }; });
+  return `${titled ? '<h2 style="margin-top:18px">פרויקטי יזם</h2>' : ''}<div class="tw"><table><thead><tr><th>פרויקט</th><th class="hide-m">יזם / בעלים</th><th class="hide-m">סטטוס</th><th class="n">תקציב</th><th class="n hide-m">התקשרויות</th><th class="n">צפי לסיום</th><th class="n hide-m">שולם</th><th class="n">סטייה מהתקציב</th></tr></thead><tbody>
+  ${rows.map(({ p, s }) => { const t = s.total, a = rowAttr(t.dev); return `<tr class="click ${a.cls}"${a.style} data-p="${p.id}"><td><b>${esc(p.name)}</b> ${moduleTags(p)}<div class="small mut">${PROJECT_TYPES.dev}${s.baselineAt ? ' · בסיס נעול' : ''}</div></td><td class="hide-m">${esc(p.owner_name || '')}</td><td class="hide-m">${STATUS[p.status]}</td>
     <td class="n">${money(t.budget)}</td><td class="n hide-m">${money(t.committed + t.outside)}</td><td class="n">${money(t.forecast)}</td><td class="n hide-m">${money(t.paid)}</td><td class="n">${pct(t.dev, { sign: true })}${a.crit ? '<span class="crit">קריטי</span>' : ''}</td></tr>`; }).join('')}
   </tbody></table></div>`;
 }

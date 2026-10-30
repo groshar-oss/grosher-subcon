@@ -4,6 +4,7 @@
 // מע"מ מוצג בנפרד: נגבה מהקבלן הראשי, שולם לספקים, והתשלום (או ההחזר) לרשות בחודש שאחרי.
 import { n, lineCost } from './calc.js';
 import { dueDate } from './bills.js';
+import { has, indexRate, fixedMonths } from './modules.js';
 
 const DEF = { cash_opening: 0, cash_asof: '', cash_min: 0, supplier_terms_days: 60, vat_pct: 18 };
 export const mkey = d => String(d).slice(0, 7);
@@ -13,15 +14,18 @@ export const HE_MONTHS = ['ינו', 'פבר', 'מרץ', 'אפר', 'מאי', 'י�
 export const monthLabel = m => `${HE_MONTHS[+m.slice(5, 7) - 1]} ${m.slice(2, 4)}`;
 
 export const CF_ROWS = {
-  in_paid: 'תקבולים מהקבלן הראשי', in_billed: 'חשבונות שהוגשו (יתרה לגבייה)', in_future: 'חשבונות עתידיים (לפי יתרת המכירה)', in_retention: 'שחרור עיכבון',
-  out_paid: 'הוצאות ששולמו', out_open: 'חשבוניות ספקים פתוחות', out_po: 'הזמנות רכש פתוחות', out_labor: 'שכר עובדים (מהיומן)', out_future: 'יתרת עלויות לפי צפי'
+  in_paid: 'תקבולים מהקבלן הראשי', in_billed: 'חשבונות שהוגשו (יתרה לגבייה)', in_future: 'חשבונות עתידיים (לפי יתרת המכירה)', in_retention: 'שחרור עיכבון', in_index: 'הפרש הצמדה צפוי',
+  out_paid: 'הוצאות ששולמו', out_open: 'חשבוניות ספקים פתוחות', out_po: 'הזמנות רכש פתוחות', out_labor: 'שכר עובדים (מהיומן)', out_future: 'יתרת עלויות לפי צפי', out_fixed: 'עלויות חודשיות קבועות'
 };
-export const CF_IN = ['in_paid', 'in_billed', 'in_future', 'in_retention'];
-export const CF_OUT = ['out_paid', 'out_open', 'out_po', 'out_labor', 'out_future'];
+export const CF_IN = ['in_paid', 'in_billed', 'in_future', 'in_index', 'in_retention'];
+// שורות של מודולים: מוצגות רק כשיש בהן סכום
+export const OPT_ROWS = ['in_index', 'out_index', 'out_fixed'];
+export const usedRows = (keys, view) => keys.filter(k => !OPT_ROWS.includes(k) || view.some(m => m.rows[k]));
+export const CF_OUT = ['out_paid', 'out_open', 'out_po', 'out_labor', 'out_fixed', 'out_future'];
 
 /**
  * projects: [{ project, summary, pd, costs }] (summary מ-summarize: billing, rows, total; pd: expenses, pos, poLines, entries)
- * opts: { settings, today: 'YYYY-MM-DD', back: 3, ahead: 12, delay: 0 (חודשי עיכוב בתשלומי הקבלן הראשי) }
+ * opts: { settings, today: 'YYYY-MM-DD', back: 3, ahead: 12, delay: 0 (חודשי עיכוב בתשלומי הקבלן הראשי), indexSeries: [] }
  */
 export function cashflow(projects, opts = {}) {
   const s = { ...DEF, ...(opts.settings || {}) };
@@ -67,10 +71,13 @@ export function cashflow(projects, opts = {}) {
     const ded = (n(P.retention_pct) + n(P.insurance_pct) + n(P.shared_pct)) / 100;
     const endM = P.end_date && mkey(P.end_date) > cur ? mkey(P.end_date) : addMonths(cur, 2);
     const workMonths = []; for (let m = cur; m <= endM; m = addMonths(m, 1)) workMonths.push(m);
+    const idxRate = has(P, 'index') ? indexRate(P.base_index, opts.indexSeries || pd.indexSeries || [], cur) : 0;
     if (remaining > 1 && P.status !== 'closed') for (const wm of workMonths) {
       const amt = remaining / workMonths.length;
       const due = mkey(dueDate(addMonths(wm, 1) + '-05', terms));
       put(addMonths(due, delay), 'in_future', amt * (1 - ded), true, `חשבון עתידי על ${monthLabel(wm)}`, P.id);
+      // הצמדה: לפי המדד האחרון שפורסם מול מדד הבסיס. לא מנחשים מדד עתידי
+      if (idxRate) put(addMonths(due, delay), 'in_index', amt * (1 - ded) * idxRate, true, `הצמדה ${(idxRate * 100).toFixed(1)}% על חשבון ${monthLabel(wm)}`, P.id);
     }
     // שחרור עיכבון: אחרי סוף הפרויקט + תנאי התשלום
     const retTotal = Math.max(0, billing.retentionTotal - n(P.retention_released)) + remaining * n(P.retention_pct) / 100;
@@ -101,6 +108,10 @@ export function cashflow(projects, opts = {}) {
     // יתרת עלויות לפי צפי: צפי לסיום − בפועל − התקשרויות, מתחלק עד סוף הפרויקט ומשולם חודש אחרי. מע"מ רק על החלק שאינו עבודה.
     const rowsInView = S.rows.filter(r => !r.item.variation_id || ['approved', 'partial'].includes(r.vo?.status));
     const rest = rowsInView.reduce((a, r) => a + Math.max(0, r.c.forecast - r.c.actual - (r.c.commit || 0)), 0);
+    // עלויות חודשיות קבועות: מהחודש הנוכחי עד סוף התקופה, משולמות לפי תנאי הספק. עלות שמשויכת לסעיף נספרת שם כהתקשרות, ולכן לא נכנסת שוב ליתרת הצפי
+    if (has(P, 'fixed')) for (const fc of pd.fixedCosts || []) {
+      for (const fm of fixedMonths(fc, cur)) put(mkey(dueDate(fm + '-01', supTerms)), 'out_fixed', n(fc.amount), fc.vat !== false, `${fc.name}${fc.supplier_name ? ' · ' + fc.supplier_name : ''} (${monthLabel(fm)})`, P.id);
+    }
     const lines = pd.lines || [];
     const laborShare = (() => { const t = lines.reduce((a, l) => a + lineCost(l), 0); const lab = lines.filter(l => ['labor', 'piece'].includes(l.kind)).reduce((a, l) => a + lineCost(l), 0); return t ? lab / t : 0.4; })();
     if (rest > 1 && P.status !== 'closed') for (const wm of workMonths) {
@@ -134,4 +145,41 @@ export function cashflow(projects, opts = {}) {
   for (const B of out) B.below = B.cum < n(s.cash_min);
   const lowest = out.reduce((a, b) => (b.cum < a.cum ? b : a), out[0]);
   return { months: out, cur, asof, opening: M[cur].open, lowest, belowMonths: out.filter(b => b.below && !b.past), settings: s };
+}
+
+// ---- תצוגה לפי תקופה: שבוע / חודש / רבעון / שנה ----
+export const PERIODS = { week: 'שבוע', month: 'חודש', quarter: 'רבעון', year: 'שנה' };
+const SUMS = ['vatIn', 'vatOut', 'schedIn', 'schedOut', 'vatPay', 'inPre', 'outPre', 'inTotal', 'outTotal', 'net', 'actualIn', 'actualOut'];
+const pad2 = x => String(x).padStart(2, '0');
+/**
+ * מקבץ את החודשים של התזרים לתקופות. שבוע: סכום החודש מתחלק לפי ימים (הצפי הוא חודשי), שבוע מתחיל ביום ראשון.
+ * מחזיר עמודות באותו מבנה כמו חודש, עם label, ו-m כמפתח התקופה.
+ */
+export function groupPeriods(view, mode = 'month', cur = '') {
+  if (!view.length || mode === 'month' || !PERIODS[mode]) return view.map(b => ({ ...b, label: monthLabel(b.m), cur: b.m === cur }));
+  const P = new Map();
+  const keyOf = (y, mo, d) => {
+    if (mode === 'year') return [String(y), String(y)];
+    if (mode === 'quarter') { const q = Math.floor((mo - 1) / 3) + 1; return [`${y}-Q${q}`, `רבעון ${q}/${String(y).slice(2)}`]; }
+    const dt = new Date(Date.UTC(y, mo - 1, d)); dt.setUTCDate(dt.getUTCDate() - dt.getUTCDay());
+    const k = dt.toISOString().slice(0, 10); return [k, `שבוע ${pad2(dt.getUTCDate())}/${pad2(dt.getUTCMonth() + 1)}`];
+  };
+  for (const b of view) {
+    const [y, mo] = b.m.split('-').map(Number), days = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    const share = {};
+    for (let d = 1; d <= days; d++) { const [k, label] = keyOf(y, mo, d); (share[k] ||= { label, f: 0 }).f += 1 / days; }
+    for (const [k, { label, f }] of Object.entries(share)) {
+      let p = P.get(k);
+      if (!p) { p = { m: k, label, months: [], past: true, cur: false, below: false, rows: Object.fromEntries(Object.keys(b.rows).map(r => [r, 0])), items: [], open: null }; for (const s of SUMS) if (b[s] != null) p[s] = 0; P.set(k, p); }
+      p.months.push(b.m); p.past = p.past && b.past; p.cur = p.cur || b.m === cur; p.below = p.below || b.below;
+      if (p.open == null) p.open = b.open;
+      for (const r of Object.keys(b.rows)) p.rows[r] += b.rows[r] * f;
+      for (const s of SUMS) if (b[s] != null) p[s] = (p[s] || 0) + b[s] * f;
+      for (const it of b.items) p.items.push({ ...it, pre: it.pre != null ? it.pre * f : undefined, v: it.v != null ? it.v * f : undefined, amt: it.amt != null ? it.amt * f : undefined, label: f < 0.999 ? `${it.label} · ${Math.round(f * 100)}% מ${monthLabel(b.m)}` : it.label });
+    }
+  }
+  const out = [...P.values()];
+  let c = out[0].open;
+  for (const p of out) { p.open = c; c += p.net; p.cum = c; p.outOverIn = !p.past && p.outTotal > p.inTotal + 1; }
+  return out;
 }

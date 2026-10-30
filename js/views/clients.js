@@ -4,6 +4,7 @@ import { db } from '../db.js';
 import { S, can, reloadTenants, render, roleName, logChange } from '../app.js';
 import { n } from '../calc.js';
 import { store } from '../util.js';
+import { has } from '../modules.js';
 
 const tenantForm = (t = {}) => `<div class="grid g2">
   ${field('שם החברה', 'name', t.name, { req: true })}${field('ח"פ', 'company_no', t.company_no)}
@@ -35,7 +36,13 @@ export async function viewClient(id) {
   if (S.tenantId !== id) { S.tenantId = id; store('subcon-tenant', id); await reloadTenants(); }
   if (!can.edit()) return h('<div class="empty">אין הרשאה</div>');
   const st = { employer_factor: 1.3, crit_pct: 15, vat_pct: 18, overhead_pct: 0, work_days_month: 22, day_hours: 9, quota_warn_pct: 80, quota_gap_pct: 10, cash_opening: 0, cash_min: 0, supplier_terms_days: 60, ...(t.settings || {}) };
-  const [members, mcs, projects] = await Promise.all([db.rpc('tenant_members', { t: id }), db.select('main_contractors', { eq: { tenant_id: id }, order: 'name' }), db.select('projects', { eq: { tenant_id: id }, order: 'name' })]);
+  const [members, mcs, projects, series] = await Promise.all([db.rpc('tenant_members', { t: id }), db.select('main_contractors', { eq: { tenant_id: id }, order: 'name' }), db.select('projects', { eq: { tenant_id: id }, order: 'name' }),
+    db.select('index_series', { eq: { tenant_id: id }, order: 'month' }).catch(() => [])]);
+  // כרטיס המדד מופיע רק כשיש פרויקט עם מודול הצמדה, או שכבר הוזנו מדדים
+  const idxProjects = projects.filter(p => has(p, 'index'));
+  const showIdx = idxProjects.length || series.length;
+  const ser = [...series].sort((a, b) => b.month.localeCompare(a.month));
+  const mLabel = m => `${['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'][+m.slice(5, 7) - 1]} ${m.slice(0, 4)}`;
   const pname = pid => projects.find(p => p.id === pid)?.name || '';
   const el = h(`<div><div class="top"><div><h1>${esc(t.name)}</h1><div class="sub">הגדרות לקוח, משתמשים וקבלנים ראשיים</div></div></div>
   <div class="cols even">
@@ -62,11 +69,19 @@ export async function viewClient(id) {
       <p class="small mut">צבעי חריגה: עד 3% צהוב, 3%-5% כתום, 5%-10% אדום, מעל 10% אדום שמתכהה. מעל הסף הקריטי השורה מסומנת "קריטי".</p>
       <button class="btn">שמירת הגדרות</button></form></div>
   </div>
+  ${showIdx ? `<div class="card" id="idxcard"><h2>מדד תשומות הבנייה <button class="btn small" id="addix">+ מדד חודשי</button></h2>
+    <p class="small mut">מדד אחד לכל חודש, משותף לכל הפרויקטים הצמודים (${idxProjects.map(p => esc(p.name)).join(', ') || 'אין כרגע'}). הלמ"ס מפרסמת את המדד בסביבות ה-15 לחודש שאחרי. המערכת לוקחת את המדד האחרון שהוזן: ממלאת אותו בחשבון חדש ומחשבת לפיו את הפרש ההצמדה בתזרים. הפרש הצמדה לא נספר כחריגה.</p>
+    <div class="tw"><table><thead><tr><th>חודש המדד</th><th class="n">ערך</th><th class="n">שינוי מהחודש הקודם</th><th>הערה</th><th></th></tr></thead><tbody>
+    ${ser.map((x, i) => { const prev = ser[i + 1]; const ch = prev ? (x.value / prev.value - 1) * 100 : null;
+      return `<tr><td>${mLabel(x.month)}${i === 0 ? ' <span class="chip green">אחרון</span>' : ''}</td><td class="n">${Number(x.value).toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+        <td class="n ${ch > 0 ? 'neg' : ''}">${ch == null ? '' : `<span dir="ltr">${ch >= 0 ? '+' : '−'}${Math.abs(ch).toFixed(2)}%</span>`}</td><td class="wrap">${esc(x.note || '')}</td>
+        <td><button class="btn small ghost" data-ix="${x.id}">עריכה</button></td></tr>`; }).join('') || '<tr><td colspan="5" class="empty">עוד לא הוזן מדד. מוסיפים את המדד האחרון שפורסם.</td></tr>'}
+    </tbody></table></div></div>` : ''}
   <div class="card"><h2>משתמשים <button class="btn small" id="addm">+ הוספת משתמש</button></h2>
     <p class="small mut">המשתמש נרשם קודם בעצמו במסך הכניסה, ואז מוסיפים אותו כאן לפי האימייל. מנהל עבודה רואה רק את הפרויקטים שמסומנים לו, ובלי מחירים, רווח ושכר.</p>
     <div class="tw"><table><thead><tr><th>אימייל</th><th>תפקיד</th><th>פרויקטים (למנהל עבודה)</th><th></th></tr></thead><tbody>
     ${members.map(m => `<tr><td dir="ltr" style="text-align:right">${esc(m.email)}</td><td>${roleName(m.role)}</td><td class="wrap">${m.role === 'foreman' ? esc((m.project_ids || []).map(pname).join(', ') || 'אין') : '<span class="mut">כולם</span>'}</td>
-      <td><button class="btn small ghost" data-em="${esc(m.email)}" data-role="${m.role}" data-pids="${(m.project_ids || []).join(',')}">עריכה</button> <button class="btn small ghost" data-rm="${m.id}">הסרה</button></td></tr>`).join('') || '<tr><td colspan="4" class="empty">אין משתמשים מלבד מנהלת השירות</td></tr>'}
+      <td><button class="btn small ghost" data-em="${esc(m.email)}" data-role="${m.role}" data-pids="${(m.project_ids || []).join(',')}">עריכה</button> <button class="btn small ghost" data-rm="${m.id}">הסרה</button></td></tr>`).join('') || '<tr><td colspan="4" class="empty">אין משתמשים מלבד מנהל השירות</td></tr>'}
     </tbody></table></div></div>
   <div class="card"><h2>קבלנים ראשיים <button class="btn small" id="addmc">+ קבלן ראשי</button></h2>
     <div class="tw"><table><thead><tr><th>שם</th><th>ח"פ</th><th>איש קשר</th><th>טלפון</th><th class="n">תנאי תשלום</th><th></th></tr></thead><tbody>
@@ -89,6 +104,21 @@ export async function viewClient(id) {
     for (const k of Object.keys(ns)) if (String(ns[k]) !== String(st[k])) await logChange({ entity: 'tenant', entity_id: id, label: 'הגדרות לקוח', field: k, old_value: st[k], new_value: ns[k] });
     await reloadTenants(); toast('ההגדרות נשמרו'); render();
   };
+  const ixDlg = async (x = {}) => {
+    const last = ser[0];
+    const nextM = last ? (() => { const [y, m] = last.month.split('-').map(Number); return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`; })() : new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 7);
+    const v = await modal({ title: x.id ? 'עריכת מדד' : 'מדד חודשי חדש', ok: 'שמירה', danger: false,
+      body: `<div class="grid g2">${field('חודש המדד', 'month', x.month || nextM, { type: 'month', req: true })}${field('ערך המדד', 'value', x.value ?? '', { type: 'number', req: true, attrs: 'step="0.01" inputmode="decimal"' })}</div>
+        ${field('הערה', 'note', x.note || '', { hint: 'למשל: מדד ידוע, או מקור' })}${x.id ? '<label class="chk"><input type="checkbox" name="del"> מחיקת המדד הזה</label>' : ''}`,
+      validate: d => (!/^\d{4}-\d{2}$/.test(d.month) && 'חסר חודש') || (!d.del && !(n(d.value) > 0) && 'ערך המדד חייב להיות גדול מ-0') || (!x.id && series.some(s => s.month === d.month) && 'למדד של החודש הזה כבר יש ערך. עורכים את השורה הקיימת') });
+    if (!v) return;
+    if (v.del) { await db.remove('index_series', x.id); await logChange({ entity: 'tenant', entity_id: id, label: 'מדד תשומות הבנייה', field: x.month, old_value: x.value, new_value: 'נמחק' }); }
+    else if (x.id) { await db.update('index_series', x.id, { month: v.month, value: n(v.value), note: v.note || null }); if (n(v.value) !== Number(x.value)) await logChange({ entity: 'tenant', entity_id: id, label: 'מדד תשומות הבנייה', field: v.month, old_value: x.value, new_value: n(v.value) }); }
+    else await db.insert('index_series', { tenant_id: id, month: v.month, value: n(v.value), note: v.note || null });
+    toast('המדד נשמר'); render();
+  };
+  $('#addix', el)?.addEventListener('click', () => ixDlg());
+  $$('[data-ix]', el).forEach(b => b.onclick = () => ixDlg(series.find(x => x.id === b.dataset.ix)));
   const memberDlg = async (m = {}) => {
     const pids = (m.pids || '').split(',').filter(Boolean);
     const v = await modal({ title: m.email ? 'עריכת משתמש' : 'הוספת משתמש', body: `
@@ -99,7 +129,7 @@ export async function viewClient(id) {
     if (!v) return;
     const chosen = projects.filter(p => v['p_' + p.id]).map(p => p.id);
     const r = await db.rpc('add_member', { t: id, member_email: v.email.trim(), member_role: v.role, member_projects: v.role === 'foreman' ? chosen : [] });
-    if (r === 'not_registered') return toast('המשתמש עוד לא נרשם. בקשי ממנו להירשם במסך הכניסה ואז להוסיף שוב.', 'bad');
+    if (r === 'not_registered') return toast('המשתמש עוד לא נרשם. בקש ממנו להירשם במסך הכניסה ואז להוסיף שוב.', 'bad');
     toast('המשתמש נשמר'); render();
   };
   $('#addm', el).onclick = () => memberDlg();
@@ -115,7 +145,7 @@ export async function viewClient(id) {
   $('#addmc', el).onclick = () => mcDlg();
   $$('[data-mc]', el).forEach(b => b.onclick = () => mcDlg(mcs.find(m => m.id === b.dataset.mc)));
   $('#del', el)?.addEventListener('click', async () => {
-    const v = await modal({ title: 'מחיקת לקוח', body: `<p>כדי לאשר, כתבי את שם הלקוח: <b>${esc(t.name)}</b></p>${field('שם הלקוח', 'confirm', '')}`, ok: 'מחיקה לצמיתות', danger: true, validate: d => d.confirm.trim() !== t.name.trim() && 'השם לא תואם' });
+    const v = await modal({ title: 'מחיקת לקוח', body: `<p>כדי לאשר, כתוב את שם הלקוח: <b>${esc(t.name)}</b></p>${field('שם הלקוח', 'confirm', '')}`, ok: 'מחיקה לצמיתות', danger: true, validate: d => d.confirm.trim() !== t.name.trim() && 'השם לא תואם' });
     if (!v) return;
     await db.remove('tenants', id); await reloadTenants(); toast('הלקוח נמחק'); location.hash = '#/clients';
   });

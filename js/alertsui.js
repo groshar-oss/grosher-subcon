@@ -2,7 +2,8 @@
 // כל מה שיוצא ללקוח יוצא בלי קישור למערכת: הלקוח מקבל את התוצר, לא את המערכת.
 import { db } from './db.js';
 import { S, tenant, settings, logChange } from './app.js';
-import { esc, modal, field, area, select, toast } from './util.js';
+import { esc, modal, field, area, select, toast, WA_ICON, MAIL_ICON } from './util.js';
+import { composeMail } from './mailui.js';
 import { actKey, recipients } from './alerts.js';
 import { gReady, gEnabled, gmailSend } from './google.js';
 
@@ -21,6 +22,10 @@ const DECISIONS = {
   co_over_billed: 'לעצור את החיוב העודף בחשבון הקבלן',
   co_needs_analysis: 'לאשר את ניתוח המחיר, או לבקש הצעות נוספות',
   co_no_doc: 'להשיג אישור חתום ולצרף אותו',
+  co_signoff_wait: 'לשלוח ליזם תזכורת לחתום על הוראת השינוי',
+  co_signoff_expired: 'לשלוח ליזם קישור חדש לאישור',
+  co_signoff_rejected: 'לסגור את הוראת השינוי כנדחתה, או לתקן ולשלוח שוב לאישור',
+  co_changed_after_signoff: 'לשלוח את הוראת השינוי המעודכנת לאישור היזם מחדש',
   cbill_open: 'לבדוק את החשבון מול החוזה והמדידה ולהמליץ על סכום',
   cbill_recommended: 'לאשר את התשלום המומלץ',
   cash_out_over_in: 'להקדים גבייה מרוכשים או משיכה מהבנק, או לדחות תשלומים',
@@ -57,7 +62,7 @@ export function actionRow(a, st, i, { canEdit = true } = {}) {
   return `<div class="act actx ${s === 'handled' ? 'dim' : ''}" data-ai="${i}"><span class="dot" style="background:${a.color}"></span>
     <a href="${a.href}" class="atxt"><b>${esc(a.title)}</b><small>${esc(a.sub)}</small><small class="dec">החלטה נדרשת: ${esc(st?.decision || defaultDecision(a))}</small></a>
     <div class="aside"><span class="amt">${a.amt || ''}</span><div class="abtn">${s !== 'open' ? `<span class="chip ${s === 'handled' ? 'green' : 'blue'}">${ALERT_STATUS[s]}</span>` : ''}
-      <button type="button" class="btn small ghost" data-wa="${i}" title="שליחה בוואטסאפ" aria-label="שליחה בוואטסאפ">💬</button><button type="button" class="btn small ghost" data-ml="${i}" title="שליחה במייל" aria-label="שליחה במייל">✉</button>${canEdit ? `<button type="button" class="btn small ghost" data-ed="${i}" title="החלטה ומצב" aria-label="החלטה ומצב">✎</button>` : ''}</div></div></div>`;
+      <button type="button" class="btn small ghost" data-wa="${i}" title="שליחה בוואטסאפ" aria-label="שליחה בוואטסאפ">${WA_ICON}</button><button type="button" class="btn small ghost" data-ml="${i}" title="שליחה במייל" aria-label="שליחה במייל">${MAIL_ICON}</button>${canEdit ? `<button type="button" class="btn small ghost" data-ed="${i}" title="החלטה ומצב" aria-label="החלטה ומצב">✎</button>` : ''}</div></div></div>`;
 }
 
 export async function saveState(a, patch, states) {
@@ -80,15 +85,24 @@ export async function editAlert(a, states) {
   return saved;
 }
 
-// שליחה מיידית: פותח וואטסאפ / מייל עם הנוסח, ומסמן "בטיפול" אם היה פתוח
+// שליחה מיידית: וואטסאפ נפתח עם הנוסח; מייל נשלח ישירות מה-Gmail המחובר (חלון עם נמענים ונוסח לעריכה). מסמן "בטיפול" אם היה פתוח
 export async function sendOne(a, how, states, projects) {
   const st = states.get(actKey(a)), tg = targetsFor(a, projects);
   const text = alertText(a, st);
-  const url = how === 'wa' ? waLink(tg.phone, text) : mailLink(tg.emails, `${clean(a.title)} · ${tg.project?.name || tenant()?.name || ''}`, text);
-  window.__LAST_SEND__ = { how, url, text }; // לבדיקות
-  if (how === 'wa') window.open(url, '_blank', 'noopener'); else location.href = url;
+  const subject = `${clean(a.title)} · ${tg.project?.name || tenant()?.name || ''}`;
+  if (how === 'wa') {
+    const url = waLink(tg.phone, text);
+    window.__LAST_SEND__ = { how, url, text }; // לבדיקות
+    window.open(url, '_blank', 'noopener');
+  } else {
+    window.__LAST_SEND__ = { how, to: tg.emails, subject, text };
+    const r = await composeMail({ title: 'שליחת התרעה במייל', to: tg.emails, subject, text, note: tg.emails.length ? '' : 'אין נמענים שמורים לפרויקט. מוסיפים בהגדרות הפרויקט או הלקוח, או כותבים כאן.' });
+    if (!r) return false;
+    tg.emails = r.to;
+  }
   if (!st || st.status === 'open') await saveState(a, { status: 'in_progress', decision: st?.decision || defaultDecision(a) }, states).catch(() => {});
   await logChange({ project_id: projectIdOf(a), entity: 'alert', label: clean(a.title), field: how === 'wa' ? 'נשלח בוואטסאפ' : 'נשלח במייל', new_value: how === 'wa' ? (tg.name || tg.phone || 'בחירת איש קשר') : tg.emails.join(', ') }).catch(() => {});
+  return true;
 }
 
 // ===== סיכום תקופתי =====

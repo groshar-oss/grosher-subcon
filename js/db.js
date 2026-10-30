@@ -9,7 +9,7 @@ export const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-x
 
 const TABLES = ['tenants', 'memberships', 'main_contractors', 'projects', 'variations', 'boq_items', 'cost_lines', 'expenses', 'change_log', 'members_demo',
   'workers', 'work_days', 'work_entries', 'work_qty', 'purchase_orders', 'po_lines', 'bills', 'bill_lines', 'bill_fines', 'bill_payments',
-  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'alert_state'];
+  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'alert_state', 'co_signoffs', 'index_series', 'fixed_costs'];
 
 function match(row, q = {}) {
   for (const [k, v] of Object.entries(q.eq || {})) if (String(row[k] ?? '') !== String(v ?? '')) return false;
@@ -40,6 +40,8 @@ class LocalDB {
     for (const t of TABLES) this.data.tables[t] ||= [];
     this.data.role ||= 'admin';
     this.user = { id: 'demo-user', email: 'demo@grosher.local', name: 'מצב הדגמה' };
+    // לשונית אחרת שינתה את הנתונים (למשל דף החתימה של היזם): טוענים מחדש כדי לא לדרוס
+    if (!this._sync) { this._sync = true; addEventListener('storage', e => { if (e.key === LOCAL_KEY && e.newValue) { try { const d = JSON.parse(e.newValue); if (d?.tables) this.data = d; } catch {} } }); }
     return this.user;
   }
   reset() { this.data = { tables: demoData(uuid), role: 'admin' }; this.save(); }
@@ -82,8 +84,8 @@ class LocalDB {
     const T = this.data.tables;
     T[table] = T[table].filter(r => !ids.includes(r.id));
     const deps = {
-      tenants: [['files', 'tenant_id'], ['alert_log', 'tenant_id'], ['alert_state', 'tenant_id'], ['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
-      projects: [['variations', 'project_id'], ['boq_items', 'project_id'], ['cost_lines', 'project_id'], ['expenses', 'project_id'], ['change_log', 'project_id'],
+      tenants: [['index_series', 'tenant_id'], ['files', 'tenant_id'], ['alert_log', 'tenant_id'], ['alert_state', 'tenant_id'], ['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
+      projects: [['fixed_costs', 'project_id'], ['variations', 'project_id'], ['boq_items', 'project_id'], ['cost_lines', 'project_id'], ['expenses', 'project_id'], ['change_log', 'project_id'],
         ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id'], ['contracts', 'project_id'], ['change_orders', 'project_id'], ['cbills', 'project_id'], ['dev_income', 'project_id'], ['alert_state', 'project_id']],
       contracts: [['contract_lines', 'contract_id'], ['cbills', 'contract_id']],
       change_orders: [['co_lines', 'co_id']],
@@ -103,7 +105,7 @@ class LocalDB {
     if (table === 'contracts') { nullify('expenses', 'contract_id'); nullify('guarantees', 'contract_id'); nullify('change_orders', 'contract_id'); }
     if (table === 'contract_lines') nullify('co_lines', 'contract_line_id');
     if (table === 'cbills') nullify('expenses', 'cbill_id');
-    if (table === 'boq_items') ['expenses', 'work_entries', 'po_lines', 'contract_lines', 'change_orders'].forEach(t => nullify(t, 'boq_item_id'));
+    if (table === 'boq_items') ['expenses', 'work_entries', 'po_lines', 'contract_lines', 'change_orders', 'fixed_costs'].forEach(t => nullify(t, 'boq_item_id'));
     if (table === 'variations') ['expenses', 'work_entries', 'po_lines'].forEach(t => nullify(t, 'variation_id'));
     if (table === 'cost_lines') ['expenses', 'work_entries', 'po_lines'].forEach(t => nullify(t, 'cost_line_id'));
     if (table === 'purchase_orders') nullify('expenses', 'po_id');
@@ -135,6 +137,30 @@ class LocalDB {
     }
     if (name === 'field_workers') return orderRows(T.workers.filter(w => w.tenant_id === args.t).map(({ id, name, pay_type, trade, active }) => ({ id, name, pay_type, trade, active })), ['name']);
     if (name === 'field_boq') return orderRows(T.boq_items.filter(b => b.project_id === args.p).map(({ id, chapter, code, description, unit, variation_id }) => ({ id, chapter, code, description, unit, variation_id })), ['sort', 'code']);
+    // דף החתימה של היזם (במצב הדגמה: אותו דפדפן)
+    if (name === 'co_signoff_get') {
+      const x = T.co_signoffs.find(r => r.token === args.t); if (!x) return null;
+      return { status: x.status === 'pending' && new Date(x.expires_at) < new Date() ? 'expired' : x.status, expires_at: x.expires_at, sent_at: x.sent_at, sent_name: x.sent_name, snapshot: x.snapshot, signer_name: x.signer_name, signed_at: x.signed_at, signer_note: x.signer_note };
+    }
+    if (name === 'co_signoff_submit') {
+      const x = T.co_signoffs.find(r => r.token === args.t);
+      if (!x) throw new Error('הקישור לא נמצא');
+      if (x.status !== 'pending') throw new Error('הבקשה כבר טופלה');
+      if (new Date(x.expires_at) < new Date()) throw new Error('תוקף הקישור פג. צריך לבקש קישור חדש');
+      if (!['approved', 'rejected'].includes(args.decision)) throw new Error('החלטה לא תקינה');
+      if (!String(args.signer || '').trim()) throw new Error('חסר שם החותם');
+      if (args.decision === 'approved' && !String(args.sig || '').startsWith('data:image/png;base64,')) throw new Error('חסרה חתימה');
+      const now = new Date(), nm = String(args.signer).trim(), note = String(args.note || '').trim() || null;
+      Object.assign(x, { status: args.decision, signer_name: nm, signature: args.sig || null, signed_at: now.toISOString(), signer_note: note, signer_agent: String(args.agent || '').slice(0, 300) });
+      const co = T.change_orders.find(c => c.id === x.co_id);
+      if (co && args.decision === 'approved' && co.stage !== 'rejected') Object.assign(co, { stage: ['request', 'pricing', 'dev_approval'].includes(co.stage) ? 'approved' : co.stage, approved_date: now.toISOString().slice(0, 10), approved_by: nm, approval_ref: 'חתימה אלקטרונית ' + now.toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) });
+      if (co && ['request', 'pricing', 'dev_approval'].includes(co.stage)) {
+        if (args.decision === 'approved') Object.assign(co, { stage: 'approved', approved_date: now.toISOString().slice(0, 10), approved_by: nm, approval_ref: 'חתימה אלקטרונית ' + now.toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) });
+        else Object.assign(co, { stage: 'rejected', decision_note: note || co.decision_note });
+      }
+      T.change_log.push({ id: uuid(), tenant_id: x.tenant_id, project_id: x.project_id, entity: 'change_order', entity_id: x.co_id, label: `${x.snapshot?.co?.number || ''} ${x.snapshot?.co?.title || ''}`.trim(), field: 'אישור יזם', old_value: 'ממתין לאישור יזם', new_value: args.decision === 'approved' ? 'אושר בחתימה' : 'נדחה', reason: note, user_name: nm + ' (דף חתימה)', at: now.toISOString() });
+      this.save(); return { status: args.decision, signed_at: now.toISOString() };
+    }
     throw new Error('פעולה לא מוכרת: ' + name);
   }
   async signOut() {}

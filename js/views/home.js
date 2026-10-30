@@ -1,6 +1,8 @@
 // מסך בית: מה דורש טיפול, לכל הפרויקטים של הלקוח
 const n0 = v => Number(v) || 0;
-import { h, esc, money, pct, $, $$, plainMoney, toast, modal } from '../util.js';
+import { guarVisible } from '../modules.js';
+import { h, esc, money, pct, $, $$, plainMoney, toast, modal, WA_ICON, MAIL_ICON } from '../util.js';
+import { composeMail } from '../mailui.js';
 import { S, can, loadTenantData, modeSwitch, tenant, render, settings } from '../app.js';
 import { portfolio, VO_AT_RISK, VO_STATUS } from '../calc.js';
 import { projData, summarize, level, levelColor, levelBg, STATUS, CONTRACT, modeLine } from './common.js';
@@ -25,7 +27,7 @@ export async function viewHome() {
   const live = all.filter(p => !isDev(p)), devLive = all.filter(isDev);
   const mcName = id => data.mcs.find(m => m.id === id)?.name || '';
   const sums = live.map(p => ({ p, s: summarize(projData(data, p.id)) }));
-  const devSums = devLive.map(p => { const pd = projData(data, p.id); return { p, s: devSummary({ project: p, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses, cos: pd.cos, coLines: pd.coLines, cbills: pd.cbills, cbLines: pd.cbLines, vatPct: settings().vat_pct }) }; });
+  const devSums = devLive.map(p => { const pd = projData(data, p.id); return { p, s: devSummary({ project: p, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses, cos: pd.cos, signoffs: pd.signoffs, fixedCosts: pd.fixedCosts, coLines: pd.coLines, cbills: pd.cbills, cbLines: pd.cbLines, vatPct: settings().vat_pct }) }; });
   const T = portfolio(sums.map(x => x.s));
   const riskTotal = sums.reduce((a, x) => a + x.s.riskAmount, 0);
   const actions = buildActions(data, sums, devSums);
@@ -109,7 +111,7 @@ export async function viewHome() {
 }
 
 // משקל להתרעות של מסלול השינויים והחשבונות (מה שדורש פעולה עולה למעלה)
-const DEV_W = { co_exec_unapproved: 92, co_over_billed: 90, cbill_recommended: 66, cbill_open: 62, co_not_billed: 56, co_needs_analysis: 50, co_no_doc: 44 };
+const DEV_W = { co_changed_after_signoff: 93, co_exec_unapproved: 92, co_signoff_rejected: 88, co_signoff_expired: 58, co_signoff_wait: 54, co_over_billed: 90, cbill_recommended: 66, cbill_open: 62, co_not_billed: 56, co_needs_analysis: 50, co_no_doc: 44 };
 export function buildActions(data, sums, devSums = []) {
   const out = [];
   for (const { p, s } of devSums) {
@@ -156,7 +158,7 @@ export function buildActions(data, sums, devSums = []) {
     if (noCost.length) out.push({ w: 30, color: '#f2c400', title: `${noCost.length} סעיפים בלי תמחיר`, sub: p.name, amt: money(noCost.reduce((a, r) => a + r.c.sale, 0)), href: `#/project/${p.id}/costing` });
     if (!s.rows.length) out.push({ w: 35, color: '#f2c400', title: 'אין כתב כמויות', sub: p.name, amt: '', href: `#/project/${p.id}/boq` });
     const noProg = s.rows.filter(r => r.c.actual > 0 && r.c.progress === 0);
-    if (noProg.length) out.push({ w: 28, color: '#f2c400', title: `${noProg.length} סעיפים עם הוצאות בלי אחוז ביצוע`, sub: `${p.name} · עדכני אחוז ביצוע כדי שהצפי יהיה נכון`, amt: '', href: `#/project/${p.id}/control` });
+    if (noProg.length) out.push({ w: 28, color: '#f2c400', title: `${noProg.length} סעיפים עם הוצאות בלי אחוז ביצוע`, sub: `${p.name} · עדכן אחוז ביצוע כדי שהצפי יהיה נכון`, amt: '', href: `#/project/${p.id}/control` });
     if (s.unallocated) out.push({ w: 25, color: '#f2c400', title: 'הוצאות שלא שויכו', sub: p.name, amt: money(s.unallocated), href: `#/project/${p.id}/expenses` });
   }
   // שלב 7: מסמכים, ערבויות וסגירה
@@ -170,7 +172,7 @@ export function buildActions(data, sums, devSums = []) {
   }
   const own = docStatus((data.documents || []).filter(d => !d.vendor_id), OWN_REQUIRED, today);
   if (own.expired.length || own.soon.length) out.push({ w: own.expired.length ? 75 : 50, color: own.expired.length ? 'var(--ri)' : '#ff9f43', title: own.expired.length ? 'מסמך שלנו מול הקבלן הראשי פג תוקף' : 'מסמך שלנו מול הקבלן הראשי יפוג בקרוב', sub: [...own.expired, ...own.soon].map(d => `${DOC_TYPES[d.doc_type]} עד ${d.expiry.split('-').reverse().join('.')}`).join(' · '), amt: '', href: '#/vendors/own' });
-  for (const g of (data.guarantees || [])) { const s = guaranteeState(g, today); if (s === 'expired' || s === 'soon') out.push({ w: s === 'expired' ? 72 : 56, color: s === 'expired' ? 'var(--ri)' : '#ff9f43', title: `ערבות ${GUAR_KINDS[g.kind]} ${s === 'expired' ? 'פגה' : `פגה בעוד ${daysLeft(g.expiry, today)} ימים`}`, sub: `${data.projects.find(p => p.id === g.project_id)?.name || ''} · ${g.bank || ''} ${g.number || ''} · להאריך או לבקש החזרה`, amt: money(g.amount), href: '#/vendors/guarantees' }); }
+  for (const g of (data.guarantees || []).filter(guarVisible(data))) { const s = guaranteeState(g, today); if (s === 'expired' || s === 'soon') out.push({ w: s === 'expired' ? 72 : 56, color: s === 'expired' ? 'var(--ri)' : '#ff9f43', title: `ערבות ${GUAR_KINDS[g.kind]} ${s === 'expired' ? 'פגה' : `פגה בעוד ${daysLeft(g.expiry, today)} ימים`}`, sub: `${data.projects.find(p => p.id === g.project_id)?.name || ''} · ${g.bank || ''} ${g.number || ''} · להאריך או לבקש החזרה`, amt: money(g.amount), href: '#/vendors/guarantees' }); }
   for (const { p, s } of sums) if (p.status === 'closing' || (p.end_date && p.end_date < today)) {
     const fb = finalBill(p, s.billing.retentionTotal);
     if (!data.bills.some(b => b.project_id === p.id && b.is_final)) out.push({ w: 46, color: '#2f5bea', title: fb.ready ? 'אפשר להגיש חשבון סופי' : 'לקראת חשבון סופי', sub: `${p.name} · ${fb.ready ? `עיכבון לשחרור ${plainMoney(fb.toRelease)}` : 'חסר: ' + fb.missing.join(', ')}`, amt: '', href: `#/project/${p.id}/bills` });
@@ -195,10 +197,10 @@ async function digestDialog(actions, states, data) {
   const tg = targetsFor({ pid: one.length === 1 ? one[0].id : null }, data.projects);
   await modal({ title: `סיכום ${freq === 'daily' ? 'יומי' : 'שבועי'} ללקוח`, wide: true, ok: null, cancel: 'סגירה', body: `<p class="small mut">${list.length} נושאים פתוחים ובטיפול. מה שסומן "טופל" לא נכלל. הסיכום יוצא בלי קישור למערכת.${st.digest && st.digest !== 'off' ? ` נשלח אוטומטית ${st.digest === 'daily' ? 'כל יום' : 'פעם בשבוע'} ל: ${esc(recipients().join(', ') || 'אין נמענים')} (כש-Google מחובר).` : ' שליחה אוטומטית כבויה (בהגדרות הלקוח).'}</p>
     <div class="dgv">${digestHtml(list, name, freq)}</div>
-    <div class="actions" style="margin-top:10px"><button type="button" class="btn small" id="dcopy">העתקת הטקסט</button><a class="btn small ghost" id="dwa" target="_blank" rel="noopener" href="${esc(waLink(tg.phone, text))}">💬 וואטסאפ</a><a class="btn small ghost" id="dml" href="${esc(mailLink(tg.emails, `סיכום ${freq === 'daily' ? 'יומי' : 'שבועי'} · ${name}`, text))}">✉ מייל</a><button type="button" class="btn small ghost" id="dgm">שליחה מ-Gmail</button></div>`,
+    <div class="actions" style="margin-top:10px"><button type="button" class="btn small" id="dcopy">העתקת הטקסט</button><a class="btn small ghost" id="dwa" target="_blank" rel="noopener" href="${esc(waLink(tg.phone, text))}">${WA_ICON} וואטסאפ</a><button type="button" class="btn small ghost" id="dml">${MAIL_ICON} שליחה במייל</button></div>`,
     onMount: el => {
       $('#dcopy', el).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('הטקסט הועתק'); } catch { toast('לא הצלחתי להעתיק', 'bad'); } };
-      $('#dgm', el).onclick = async () => { try { if (!gEnabled() || !gReady()) await gConnect(); const r = await maybeSendDigest(actions, states, { force: true }); toast(r.sent ? `הסיכום נשלח ל-${r.to.join(', ')}` : r.skipped === 'no_recipients' ? 'אין נמענים. מוסיפים בהגדרות הלקוח' : 'אין מה לשלוח'); } catch (e) { toast(e.message, 'bad'); } };
+      $('#dml', el).onclick = () => composeMail({ title: 'שליחת הסיכום במייל', to: tg.emails.length ? tg.emails : recipients(), subject: `גרושר · סיכום ${freq === 'daily' ? 'יומי' : 'שבועי'} · ${name}`, text: 'מצורף סיכום הנושאים הפתוחים.', html: digestHtml(list, name, freq) });
     } });
 }
 

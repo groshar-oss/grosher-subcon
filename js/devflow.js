@@ -1,10 +1,12 @@
 // פרויקט יזם: הוראות שינוי (6 שלבים) וחשבונות קבלנים (בדיקה והמלצה לתשלום). פונקציות טהורות.
 import { n } from './calc.js';
 
-export const CO_STEPS = ['request', 'pricing', 'approved', 'executed', 'billed', 'paid'];
-export const CO_STAGES = { request: 'בקשה', pricing: 'בדיקה ותמחור', approved: 'אושר בכתב', executed: 'בוצע ונמדד', billed: 'נכלל בחשבון', paid: 'שולם', rejected: 'נדחה' };
+export const CO_STEPS = ['request', 'pricing', 'dev_approval', 'approved', 'executed', 'billed', 'paid'];
+export const CO_STAGES = { request: 'בקשה', pricing: 'בדיקה ותמחור', dev_approval: 'ממתין לאישור יזם', approved: 'אושר בכתב', executed: 'בוצע ונמדד', billed: 'נכלל בחשבון', paid: 'שולם', rejected: 'נדחה' };
 // שלבים שהמשתמש קובע. "נכלל בחשבון" ו"שולם" נקבעים לבד לפי חשבונות הקבלן
-export const CO_MANUAL = ['request', 'pricing', 'approved', 'executed', 'rejected'];
+export const CO_MANUAL = ['request', 'pricing', 'dev_approval', 'approved', 'executed', 'rejected'];
+export const SIGNOFF_STATUS = { pending: 'ממתין לחתימה', approved: 'אושר בחתימה', rejected: 'נדחה ע"י היזם', expired: 'פג תוקף הקישור', cancelled: 'בוטל' };
+export const SIGNOFF_REMIND_DAYS = 3;
 export const CO_INITIATORS = { developer: 'היזם', architect: 'אדריכל / מתכנן', consultant: 'יועץ', contractor: 'קבלן', authority: 'רשות', buyer: 'רוכש / דייר', other: 'אחר' };
 export const CBILL_STATUS = { received: 'התקבל', checked: 'נבדק', recommended: 'הומלץ לתשלום', approved: 'אושר ע"י היזם', paid: 'שולם' };
 export const CBILL_STEPS = ['received', 'checked', 'recommended', 'approved', 'paid'];
@@ -32,6 +34,37 @@ export function coTotals(co, coLines) {
   const withSale = ls.filter(l => has(l.price_sale));
   const gapSale = withSale.length ? withSale.reduce((a, l) => a + n(l.qty) * (n(l.price_sale) - n(coPrice(l))), 0) : null;
   return { lines: ls, requested, approved: approvedAmt, sale, contract, analysis: ls.some(needsAnalysis), gapSale };
+}
+
+/** רווח על השינוי: ההפרש בין מחיר החוזה למחיר שהקבלן מבקש (רק בשורות שיש בהן שניהם). אחוז = מתוך הסכום לפי מחיר החוזה */
+export function coProfit(lines) {
+  const ls = lines.filter(l => has(l.price_contract) && has(l.price_requested));
+  const base = ls.reduce((a, l) => a + n(l.qty) * n(l.price_contract), 0);
+  const profit = ls.reduce((a, l) => a + n(l.qty) * (n(l.price_contract) - n(l.price_requested)), 0);
+  return { profit: ls.length ? profit : null, base, pct: ls.length && base ? profit / base * 100 : null };
+}
+export const lineProfit = l => has(l.price_contract) && has(l.price_requested) ? { amt: n(l.qty) * (n(l.price_contract) - n(l.price_requested)), pct: n(l.price_contract) ? (n(l.price_contract) - n(l.price_requested)) / n(l.price_contract) * 100 : null } : null;
+
+/** צילום הוראת השינוי לחתימה: מה שהיזם רואה ומאשר. נשמר כמו שהוא, כדי שאפשר יהיה לזהות שינוי אחרי האישור */
+export function coSnapshot({ co, totals, project, tenantName, sender, contract }) {
+  const pr = coProfit(totals.lines);
+  return { v: 1, tenant: tenantName || '', project: project?.name || '', address: project?.address || '', sender: sender || '',
+    co: { number: co.number || '', title: co.title, reason: co.reason || '', vendor: co.vendor_name || contract?.vendor_name || '', contract: contract?.title || '', initiator: co.initiator, initiator_name: co.initiator_name || '', schedule_days: n(co.schedule_days), request_date: co.request_date || null, decision_note: co.decision_note || '', price_analysis: co.price_analysis || '' },
+    lines: totals.lines.map(l => ({ description: l.description, unit: l.unit || '', qty: n(l.qty), price_sale: has(l.price_sale) ? n(l.price_sale) : null, price_contract: has(l.price_contract) ? n(l.price_contract) : null,
+      price_requested: has(l.price_requested) ? n(l.price_requested) : null, price_approved: coPrice(l), amount: coPrice(l) == null ? null : n(l.qty) * coPrice(l) })),
+    totals: { requested: totals.requested, approved: totals.approved, contract: totals.contract, sale: totals.sale, profit: pr.profit, profitPct: pr.pct } };
+}
+const sig = (lines, approved) => Math.round(approved) + '|' + lines.map(l => `${String(l.description || '').trim()}~${n(l.qty)}~${coPrice(l) ?? ''}`).join('#');
+/** מצב אישור היזם להוראת שינוי: הבקשה האחרונה, כמה ימים ממתינה, והאם שונתה אחרי שאושרה */
+export function signoffOf(co, totals, signoffs = [], today = null) {
+  const list = signoffs.filter(s => s.co_id === co.id).sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at)));
+  const last = list[list.length - 1]; if (!last) return null;
+  const now = today ? new Date(today + 'T12:00:00') : new Date();
+  const status = last.status === 'pending' && new Date(last.expires_at) < now ? 'expired' : last.status;
+  const waited = Math.max(0, Math.floor((now - new Date(last.sent_at)) / 864e5));
+  const signedOk = list.filter(s => s.status === 'approved').pop();
+  const changed = !!signedOk && sig(totals.lines, totals.approved) !== sig(signedOk.snapshot?.lines || [], signedOk.snapshot?.totals?.approved || 0);
+  return { last, status, waited, signed: signedOk || null, changed, count: list.length };
 }
 
 // ===== חשבונות קבלנים =====
@@ -144,13 +177,13 @@ export function coStage(co, totals, billing) {
 }
 
 /** כל המצב של הוראות השינוי והחשבונות בפרויקט */
-export function devFlow({ contracts = [], cLines = [], cos = [], coLines = [], cbills = [], cbLines = [], vatPct = 18 }) {
+export function devFlow({ contracts = [], cLines = [], cos = [], coLines = [], cbills = [], cbLines = [], vatPct = 18, signoffs = [], today = null }) {
   const byContract = {}; const results = [];
   for (const c of contracts) { const r = contractBills({ contract: c, cLines, cos, coLines, bills: cbills, bLines: cbLines, vatPct }); byContract[c.id] = r; results.push(...r.bills); }
   const coRows = cos.map(co => {
     const totals = coTotals(co, coLines);
     const billing = coBilling(co, coLines, results.filter(R => R.contract.id === co.contract_id));
-    return { co, ...totals, billing, stage: coStage(co, totals, billing), isApproved: coApproved(co) };
+    return { co, ...totals, billing, stage: coStage(co, totals, billing), isApproved: coApproved(co), signoff: signoffOf(co, totals, signoffs, today) };
   });
   return { byContract, results, byBill: Object.fromEntries(results.map(R => [R.bill.id, R])), cos: coRows };
 }
@@ -165,6 +198,11 @@ export function flowAlerts(flow, { today, filesFor = null } = {}) {
     if (x.isApproved && !x.billing.firstBill && !x.billing.anyBill && today && days(today, co.approved_date) > NOT_BILLED_DAYS) out.push({ type: 'co_not_billed', co, title: `שינוי מאושר שלא נכלל בחשבון ${NOT_BILLED_DAYS}+ יום: ${lbl}`, detail: `אושר ב-${co.approved_date} · ${co.vendor_name || ''}`, amount: x.approved });
     if (x.billing.over) out.push({ type: 'co_over_billed', crit: true, co, title: `הוראת שינוי חויבה מעבר למאושר: ${lbl}`, detail: 'ייתכן חיוב כפול. לבדוק בחשבון הקבלן', amount: null });
     if (['request', 'pricing'].includes(co.stage) && x.analysis && !String(co.price_analysis || '').trim()) out.push({ type: 'co_needs_analysis', co, title: `נדרש ניתוח מחיר: ${lbl}`, detail: 'יש שורה בלי מחיר בחוזה ובלי מחיר בכתב הכמויות', amount: x.requested });
+    const so = x.signoff;
+    if (so && so.status === 'pending' && so.waited >= SIGNOFF_REMIND_DAYS) out.push({ type: 'co_signoff_wait', co, title: `ממתין לאישור היזם ${so.waited} ימים: ${lbl}`, detail: `נשלח ל-${so.last.sent_to || ''} · אפשר לשלוח תזכורת מתוך הוראת השינוי`, amount: x.approved || x.requested });
+    if (so && so.status === 'expired' && co.stage === 'dev_approval') out.push({ type: 'co_signoff_expired', co, title: `פג תוקף קישור האישור: ${lbl}`, detail: 'היזם לא חתם. שולחים קישור חדש מתוך הוראת השינוי', amount: x.approved || x.requested });
+    if (so && so.status === 'rejected' && co.stage !== 'rejected') out.push({ type: 'co_signoff_rejected', crit: true, co, title: `היזם דחה את הוראת השינוי: ${lbl}`, detail: so.last.signer_note || 'בלי הערה', amount: x.requested });
+    if (so && so.changed && x.isApproved) out.push({ type: 'co_changed_after_signoff', crit: true, co, title: `הוראת שינוי שונתה אחרי אישור היזם: ${lbl}`, detail: `אושר בחתימה ${Math.round(so.signed.snapshot?.totals?.approved || 0).toLocaleString('en-US')} ₪, עכשיו ${Math.round(x.approved).toLocaleString('en-US')} ₪. צריך אישור מחדש`, amount: x.approved });
     if (x.isApproved && !String(co.approval_ref || '').trim() && filesFor && !filesFor(co.id).length) out.push({ type: 'co_no_doc', co, title: `אין אישור חתום מצורף: ${lbl}`, detail: 'מצרפים את האישור בכתב (📎) או רושמים אסמכתא', amount: null });
   }
   for (const R of flow.results) {

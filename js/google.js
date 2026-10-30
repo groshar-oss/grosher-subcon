@@ -82,8 +82,25 @@ export async function driveUpload(blob, { name, folder, fileId, description } = 
 
 // מייל HTML מה-Gmail של המשתמשת המחוברת
 const b64 = s => btoa(unescape(encodeURIComponent(s)));
-export async function gmailSend({ to, subject, html }) {
-  const mime = [`To: ${[].concat(to).join(', ')}`, `Subject: =?UTF-8?B?${b64(subject)}?=`, 'MIME-Version: 1.0', 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', b64(html)].join('\r\n');
+const wrap76 = s => s.replace(/.{76}/g, '$&\r\n');
+export async function gmailSend({ to, cc = [], subject, html, attachments = [] }) {
+  const head = [`To: ${[].concat(to).join(', ')}`, ...([].concat(cc).length ? [`Cc: ${[].concat(cc).join(', ')}`] : []), `Subject: =?UTF-8?B?${b64(subject)}?=`, 'MIME-Version: 1.0'];
+  let mime;
+  if (!attachments.length) mime = [...head, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrap76(b64(html))].join('\r\n');
+  else {
+    // קבצים מצורפים (למשל PDF של הוראת שינוי): multipart/mixed
+    const bnd = 'grosher' + Math.random().toString(36).slice(2);
+    const parts = [`--${bnd}`, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrap76(b64(html))];
+    for (const a of attachments) {
+      const data = await blobB64(a.blob);
+      parts.push(`--${bnd}`, `Content-Type: ${a.type || a.blob.type || 'application/octet-stream'}; name="=?UTF-8?B?${b64(a.name)}?="`, 'Content-Transfer-Encoding: base64',
+        `Content-Disposition: attachment; filename="=?UTF-8?B?${b64(a.name)}?="`, '', wrap76(data));
+    }
+    parts.push(`--${bnd}--`);
+    mime = [...head, `Content-Type: multipart/mixed; boundary="${bnd}"`, '', ...parts].join('\r\n');
+  }
   const raw = b64(mime).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  window.__LAST_GMAIL__ = { to: [].concat(to), cc: [].concat(cc), subject, html, attachments: attachments.map(a => ({ name: a.name, size: a.blob.size })) }; // לבדיקות
   return gfetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw }) });
 }
+const blobB64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });

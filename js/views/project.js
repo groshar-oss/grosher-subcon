@@ -4,7 +4,8 @@ import { db } from '../db.js';
 import { S, can, loadTenantData, modeSwitch, render, logChange, settings, projectTabs } from '../app.js';
 import { n, COST_KINDS, VO_STATUS, PROFIT_MODES, itemPlanned, lineCost, EXPENSE_KINDS } from '../calc.js';
 import { STATUS, CONTRACT, projData, summarize, rowAttr, legend, modeLine } from './common.js';
-import { projectForm, projectRow } from './projects.js';
+import { projectForm, projectRow, wireModules } from './projects.js';
+import { mods, MODULES } from '../modules.js';
 import { tabBoq, tabCosting } from './boq.js';
 import { tabVo, tabExpenses } from './vo_exp.js';
 import { dayView, tabWorkLog, fieldProject } from './worklog.js';
@@ -47,13 +48,13 @@ export async function viewProject(id, tab, extra) {
   if (tab === 'bill') return billView(P, extra);
   const mc = data.mcs.find(m => m.id === project.main_contractor_id);
   const qc = quotaCounts(P.summary.quotas || []);
-  const tabs = projectTabs();
+  const tabs = projectTabs(project);
   const el = h(`<div>${projTop(P, `${esc(mc?.name || 'ללא קבלן ראשי')} · ${CONTRACT[project.contract_type]} · שוטף+${project.pay_terms_days} · ${STATUS[project.status]}${project.address ? ' · ' + esc(project.address) : ''}`)}
     <nav class="tabs ptabs">${tabs.map(([k, l]) => `<a href="#/project/${id}/${k}" class="${k === tab ? 'on' : ''}">${l}${k === 'quota' && qc.over + qc.warn ? ` <span class="badge ${qc.over ? 'red' : 'amber'}">${qc.over + qc.warn}</span>` : ''}</a>`).join('')}</nav><div id="tab"></div></div>`);
   el.dataset.qover = qc.over; el.dataset.qwarn = qc.warn;
   wirePsel(el, tab);
   const body = $('#tab', el);
-  const fn = { control: tabControl, boq: tabBoq, costing: tabCosting, quota: tabQuota, vo: tabVo, worklog: tabWorkLog, purchase: tabPurchase, expenses: tabExpenses, bills: tabBills, cashflow: tabCashflow, docs: P => viewInbox(P.id, P), log: tabLog, settings: tabSettings }[tab] || tabControl;
+  const fn = { control: tabControl, boq: tabBoq, costing: tabCosting, quota: tabQuota, vo: tabVo, worklog: tabWorkLog, purchase: tabPurchase, expenses: tabExpenses, bills: tabBills, cashflow: tabCashflow, docs: P => viewInbox(P.id, P), log: tabLog, settings: tabSettings }[tabs.some(t => t[0] === tab) ? tab : 'control'] || tabControl;
   body.appendChild(await fn(P));
   return el;
 }
@@ -126,7 +127,7 @@ function tabControl(P) {
   $('#ctl', el).innerHTML = html;
 
   const split = [['חוזה', s.contract], ['הוראות שינוי מאושרות', s.approved], ['הוראות שינוי שטרם אושרו', s.atRisk]];
-  $('#split', el).innerHTML = `<thead><tr><th></th><th class="n">מכירה</th><th class="n">צפי עלות</th><th class="n">רווח</th><th class="n">%</th><th>בתצוגה</th></tr></thead><tbody>
+  $('#split', el).innerHTML = `<thead><tr><th></th><th class="n">מכירה</th><th class="n">צפי עלות</th><th class="n">רווח</th><th class="n">% רווח</th><th>בתצוגה</th></tr></thead><tbody>
     ${split.map(([l, a], i) => { const inc = i === 0 || (i === 1 && S.mode !== 'contract') || (i === 2 && S.mode === 'all'); return `<tr class="${inc ? '' : 'dim'}"><td>${l}</td><td class="n">${money(a.sale)}</td><td class="n">${money(a.forecast)}</td><td class="n">${money(a.sale - a.forecast)}</td><td class="n">${pct(a.sale ? (a.sale - a.forecast) / a.sale * 100 : 0)}</td><td>${inc ? '✓' : '—'}</td></tr>`; }).join('')}
     <tr class="tot"><td>סה"כ בתצוגה</td><td class="n">${money(t.sale)}</td><td class="n">${money(t.forecast)}</td><td class="n">${money(t.profit)}</td><td class="n">${pct(t.profitPct)}</td><td></td></tr></tbody>`;
 
@@ -191,16 +192,18 @@ async function tabLog(P) {
 function tabSettings(P) {
   const el = h(`<div><div class="card"><form id="pf">${projectForm(P.project, P.mcs)}<button class="btn">שמירה</button></form></div>
     <div class="card"><h2>מחיקת פרויקט</h2><p class="small mut">מוחקת את הפרויקט עם כתב הכמויות, התמחיר, הוראות השינוי וההוצאות. אי אפשר לשחזר.</p><button class="btn danger" id="del">מחיקת הפרויקט</button></div></div>`);
+  wireModules(el);
   $('#pf', el).onsubmit = async e => {
     e.preventDefault();
     const f = e.target; const v = {}; for (const x of f.elements) if (x.name) v[x.name] = x.type === 'checkbox' ? x.checked : x.value;
     if (!v.name.trim()) return toast('חסר שם', 'bad');
-    const row = await projectRow(v, P.mcs);
-    for (const [k, nv] of Object.entries(row)) { const ov = P.project[k]; if (String(ov ?? '') !== String(nv ?? '')) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'הגדרות פרויקט', field: k, old_value: ov, new_value: nv }); }
+    const row = await projectRow(v, P.mcs, P.project.project_type === 'dev' ? 'dev' : 'sub');
+    if (row.modules) { const before = mods(P.project); for (const [k, on] of Object.entries(row.modules)) if (!!before[k] !== on) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'מודולים בפרויקט', field: MODULES[k].label, old_value: before[k] ? 'דלוק' : 'כבוי', new_value: on ? 'דלוק' : 'כבוי' }); }
+    for (const [k, nv] of Object.entries(row)) { if (k === 'modules') continue; const ov = P.project[k]; if (String(ov ?? '') !== String(nv ?? '')) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'הגדרות פרויקט', field: k, old_value: ov, new_value: nv }); }
     await db.update('projects', P.id, row); toast('נשמר'); render();
   };
   $('#del', el).onclick = async () => {
-    const v = await modal({ title: 'מחיקת פרויקט', body: `<p>כדי לאשר, כתבי את שם הפרויקט: <b>${esc(P.project.name)}</b></p>${field('שם הפרויקט', 'c', '')}`, ok: 'מחיקה לצמיתות', danger: true, validate: d => d.c.trim() !== P.project.name.trim() && 'השם לא תואם' });
+    const v = await modal({ title: 'מחיקת פרויקט', body: `<p>כדי לאשר, כתוב את שם הפרויקט: <b>${esc(P.project.name)}</b></p>${field('שם הפרויקט', 'c', '')}`, ok: 'מחיקה לצמיתות', danger: true, validate: d => d.c.trim() !== P.project.name.trim() && 'השם לא תואם' });
     if (!v) return;
     await db.remove('projects', P.id); toast('הפרויקט נמחק'); location.hash = '#/projects';
   };
