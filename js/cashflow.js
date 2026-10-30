@@ -19,7 +19,7 @@ export const CF_ROWS = {
 };
 export const CF_IN = ['in_paid', 'in_billed', 'in_future', 'in_index', 'in_retention'];
 // שורות של מודולים: מוצגות רק כשיש בהן סכום
-export const OPT_ROWS = ['in_index', 'out_index', 'out_fixed'];
+export const OPT_ROWS = ['in_index', 'out_index', 'out_fixed', 'in_forecast'];
 export const usedRows = (keys, view) => keys.filter(k => !OPT_ROWS.includes(k) || view.some(m => m.rows[k]));
 export const CF_OUT = ['out_paid', 'out_open', 'out_po', 'out_labor', 'out_fixed', 'out_future'];
 

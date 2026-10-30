@@ -4,7 +4,7 @@ import { composeMail } from '../mailui.js';
 import { h, esc, $, $$, modal, field, select, area, toast, money, fmtDate, nullIfEmpty, confirmBox, WA_ICON } from '../util.js';
 import { phoneIntl } from '../alertsui.js';
 import { db } from '../db.js';
-import { S, can, render, loadTenantData, logChange } from '../app.js';
+import { S, can, render, loadTenantData, logChange, reloadTenants } from '../app.js';
 import { n } from '../calc.js';
 import { VENDOR_KINDS, DOC_TYPES, REQUIRED, OWN_REQUIRED, GUAR_KINDS, expiryState, daysLeft, docStatus, vendorStatus, guaranteeState, parseContacts, isDup } from '../docs.js';
 import { readWorkbook, loadXLSX } from '../import.js';
@@ -224,5 +224,27 @@ async function contactDialog(c) {
   if (!d) return;
   const row = { name: d.name.trim(), company: d.company || null, role: d.role || null, phone: d.phone || null, phone2: d.phone2 || null, email: d.email || null, notes: d.notes || null };
   if (c) await db.update('contacts', c.id, row); else await db.insert('contacts', { tenant_id: S.tenantId, ...row });
+  if (c) await syncAlertContact(c, row);
   toast('נשמר'); render();
+}
+
+// איש קשר שהשתנה בספר הטלפונים: אם הוא רשום כנמען להתרעות בפרויקט או בכרטיס הלקוח, מעדכנים גם שם
+const digits = v => String(v || '').replace(/\D/g, '').replace(/^972/, '0');
+async function syncAlertContact(c, row) {
+  const phoneChanged = digits(c.phone) !== digits(row.phone), mailChanged = String(c.email || '').trim().toLowerCase() !== String(row.email || '').trim().toLowerCase(), nameChanged = (c.name || '') !== row.name;
+  if (!phoneChanged && !mailChanged && !nameChanged) return;
+  const isOld = (name, phone, mails) => (c.phone && digits(phone) === digits(c.phone)) || (c.email && String(mails || '').toLowerCase().includes(String(c.email).toLowerCase())) || (c.name && (name || '').trim() === c.name.trim());
+  const projects = (await db.select('projects', { eq: { tenant_id: S.tenantId } })).filter(p => isOld(p.notify_name, p.notify_phone, p.notify_emails));
+  const t = S.tenants.find(x => x.id === S.tenantId), inTenant = t && isOld(t.contact_name, t.phone, t.email);
+  if (!projects.length && !inTenant) return;
+  const where = [...projects.map(p => p.name), inTenant ? 'כרטיס הלקוח' : ''].filter(Boolean).join(', ');
+  if (!(await confirmBox('לעדכן גם בהתרעות?', `${c.name} רשום כנמען להתרעות בוואטסאפ ובמייל ב: ${where}. לעדכן שם ל${row.phone ? ' ' + row.phone : ''}${row.email ? ' ' + row.email : ''}? אחרת ההתרעות ימשיכו לצאת לפרטים הישנים.`, 'כן, לעדכן'))) return;
+  for (const p of projects) {
+    const mails = String(p.notify_emails || '').split(/[\s,;]+/).filter(Boolean).map(m => c.email && m.toLowerCase() === c.email.toLowerCase() ? row.email || '' : m).filter(Boolean);
+    if (row.email && !mails.some(m => m.toLowerCase() === row.email.toLowerCase())) mails.push(row.email);
+    await db.update('projects', p.id, { notify_name: row.name, notify_phone: row.phone || p.notify_phone, notify_emails: mails.join(', ') || null });
+  }
+  if (inTenant) { await db.update('tenants', t.id, { contact_name: row.name, phone: row.phone || t.phone, email: row.email || t.email }); }
+  S.projList = null;
+  await reloadTenants();
 }

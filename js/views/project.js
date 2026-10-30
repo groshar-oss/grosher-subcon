@@ -19,6 +19,7 @@ import { isDev, PROJECT_TYPES, party } from '../dev.js';
 import { devControl, devContracts } from './dev.js';
 import { devCos, devCbills, cbillView, cbillSheet } from './devflow.js';
 import { devCashTab } from './devcash.js';
+import { salesTab, bankTab } from './sales.js';
 
 
 // ראש דף הפרויקט: שם, החלפת פרויקט, כל הפרויקטים ופרויקט חדש. הלשוניות מתחת (לא בתפריט הצד)
@@ -68,7 +69,7 @@ async function devProject(P, tab, extra) {
     <nav class="tabs ptabs">${tabs.map(([k, l]) => `<a href="#/project/${P.id}/${k}" class="${k === tab || (tab === 'cbill' && k === 'cbills') ? 'on' : ''}">${l}</a>`).join('')}</nav><div id="tab"></div></div>`);
   wirePsel(el, tab);
   if (tab === 'cbill') { $('#tab', el).appendChild(await cbillView(P, extra)); return el; }
-  const fn = { control: devControl, boq: P => tabBoq(P, null, { dev: true }), contracts: devContracts, cos: devCos, cbills: devCbills, cashflow: devCashTab, expenses: tabExpenses, docs: P => viewInbox(P.id, P), log: tabLog, settings: tabSettings }[tab] || devControl;
+  const fn = { control: devControl, boq: P => tabBoq(P, null, { dev: true }), contracts: devContracts, cos: devCos, cbills: devCbills, sales: salesTab, bank: bankTab, cashflow: devCashTab, expenses: tabExpenses, docs: P => viewInbox(P.id, P), log: tabLog, settings: tabSettings }[tabs.some(t => t[0] === tab) ? tab : 'control'] || devControl;
   $('#tab', el).appendChild(await fn(P));
   return el;
 }

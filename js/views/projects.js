@@ -30,7 +30,7 @@ export function projectForm(p = {}, mcs = [], { isNew = false } = {}) {
   ${spreadBlock(p, { isNew, on: !isNew && mods(p).spread })}
   <div class="devonly" ${dev ? '' : 'hidden'}><h3 style="margin:10px 0 6px">אישור הוראות שינוי</h3><p class="small mut" style="margin:0 0 6px">היזם שמאשר בחתימה. הבקשה לאישור נשלחת למייל הזה, עם קישור לחתימה.</p>
   <div class="grid g2">${field('שם המאשר מטעם היזם', 'approver_name', p.approver_name || '')}${field('מייל לאישורים', 'approver_email', p.approver_email || '', { attrs: 'dir="ltr" inputmode="email"' })}</div></div>
-  <h3 style="margin:10px 0 6px">נמענים להתרעות בפרויקט</h3><p class="small mut" style="margin:0 0 6px">לכפתורי הוואטסאפ והמייל ליד כל התרעה. ריק = הנמענים בהגדרות הלקוח.</p>
+  <h3 style="margin:10px 0 6px">נמענים להתרעות בפרויקט</h3><p class="small mut" style="margin:0 0 6px">לכפתורי הוואטסאפ והמייל ליד כל התרעה. אם מלא, גובר על איש הקשר בכרטיס הלקוח. ריק = איש הקשר והטלפון מכרטיס הלקוח.</p>
   <div class="grid g3">${field('איש קשר אצל הלקוח', 'notify_name', p.notify_name || '')}${field('נייד לוואטסאפ', 'notify_phone', p.notify_phone || '', { attrs: 'dir="ltr" inputmode="tel"' })}${field('מיילים (מופרדים בפסיק)', 'notify_emails', p.notify_emails || '', { attrs: 'dir="ltr"' })}</div>`;
 }
 
@@ -68,6 +68,19 @@ export function wireProjectType(el) {
     const own = $('[name=owner_name]', el)?.closest('.fld')?.querySelector('span'); if (own) own.textContent = dev ? 'יזם / בעלים' : exec ? 'בעל הנכס (אם שונה מהמזמין)' : 'מזמין / יזם'; };
   $$('[name=project_type]', el).forEach(r => r.onchange = () => { sync(); syncModulesType(el, typeNow()); }); sync();
   wireModules(el);
+  wireNotifyPicker(el);
+}
+// נמען להתרעות: בחירה מספר הטלפונים ממלאת נייד ומייל
+async function wireNotifyPicker(el) {
+  const nm = $('[name=notify_name]', el); if (!nm || !S.tenantId) return;
+  const list = await db.select('contacts', { eq: { tenant_id: S.tenantId }, order: 'name' }).catch(() => []);
+  if (!list.length) return;
+  const id = 'ctl' + Math.random().toString(36).slice(2, 7);
+  nm.setAttribute('list', id); nm.setAttribute('placeholder', 'הקלדה לבחירה מספר הטלפונים');
+  nm.insertAdjacentHTML('afterend', `<datalist id="${id}">${list.map(c => `<option value="${esc(c.name)}">${esc([c.company, c.phone].filter(Boolean).join(' · '))}</option>`).join('')}</datalist>`);
+  const pick = () => { const c = list.find(x => x.name === nm.value.trim()); if (!c) return;
+    if (c.phone) $('[name=notify_phone]', el).value = c.phone; if (c.email) $('[name=notify_emails]', el).value = c.email; };
+  nm.addEventListener('change', pick); nm.addEventListener('input', pick);
 }
 // מודול הצמדה: שדה מדד הבסיס מופיע רק כשהמודול דלוק
 export function wireModules(el) {

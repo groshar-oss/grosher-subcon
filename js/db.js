@@ -9,7 +9,7 @@ export const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-x
 
 const TABLES = ['tenants', 'memberships', 'main_contractors', 'projects', 'variations', 'boq_items', 'cost_lines', 'expenses', 'change_log', 'members_demo',
   'workers', 'work_days', 'work_entries', 'work_qty', 'purchase_orders', 'po_lines', 'bills', 'bill_lines', 'bill_fines', 'bill_payments',
-  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'alert_state', 'co_signoffs', 'index_series', 'fixed_costs'];
+  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'alert_state', 'co_signoffs', 'index_series', 'fixed_costs', 'member_invites', 'dev_units'];
 
 function match(row, q = {}) {
   for (const [k, v] of Object.entries(q.eq || {})) if (String(row[k] ?? '') !== String(v ?? '')) return false;
@@ -84,9 +84,9 @@ class LocalDB {
     const T = this.data.tables;
     T[table] = T[table].filter(r => !ids.includes(r.id));
     const deps = {
-      tenants: [['index_series', 'tenant_id'], ['files', 'tenant_id'], ['alert_log', 'tenant_id'], ['alert_state', 'tenant_id'], ['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
+      tenants: [['member_invites', 'tenant_id'], ['index_series', 'tenant_id'], ['files', 'tenant_id'], ['alert_log', 'tenant_id'], ['alert_state', 'tenant_id'], ['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
       projects: [['fixed_costs', 'project_id'], ['variations', 'project_id'], ['boq_items', 'project_id'], ['cost_lines', 'project_id'], ['expenses', 'project_id'], ['change_log', 'project_id'],
-        ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id'], ['contracts', 'project_id'], ['change_orders', 'project_id'], ['cbills', 'project_id'], ['dev_income', 'project_id'], ['alert_state', 'project_id']],
+        ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id'], ['contracts', 'project_id'], ['change_orders', 'project_id'], ['cbills', 'project_id'], ['dev_income', 'project_id'], ['dev_units', 'project_id'], ['alert_state', 'project_id']],
       contracts: [['contract_lines', 'contract_id'], ['cbills', 'contract_id']],
       change_orders: [['co_lines', 'co_id']],
       co_lines: [['cbill_lines', 'co_line_id']],
@@ -109,12 +109,22 @@ class LocalDB {
     if (table === 'variations') ['expenses', 'work_entries', 'po_lines'].forEach(t => nullify(t, 'variation_id'));
     if (table === 'cost_lines') ['expenses', 'work_entries', 'po_lines'].forEach(t => nullify(t, 'cost_line_id'));
     if (table === 'purchase_orders') nullify('expenses', 'po_id');
+    if (table === 'dev_units') nullify('dev_income', 'unit_id');
   }
   async rpc(name, args) {
     const T = this.data.tables;
     if (name === 'tenant_members') return T.members_demo.filter(m => m.tenant_id === args.t);
     if (name === 'add_member') {
       const ex = T.members_demo.find(m => m.tenant_id === args.t && m.email === args.member_email);
+      // בדמו: מי שלא ברשימת המשתמשים "עוד לא נרשם", ולכן נשמרת הזמנה (כמו במערכת האמיתית)
+      const known = new Set([...T.members_demo.map(m => m.email), 'demo@grosher.local']);
+      if (!ex && !known.has(args.member_email)) {
+        T.member_invites ||= [];
+        const iv = T.member_invites.find(i => i.tenant_id === args.t && i.email === args.member_email);
+        const row = { role: args.member_role, project_ids: args.member_projects || [] };
+        if (iv) Object.assign(iv, row); else T.member_invites.push({ id: uuid(), tenant_id: args.t, email: args.member_email, ...row, created_at: new Date().toISOString(), accepted_at: null });
+        this.save(); return 'invited';
+      }
       if (ex) Object.assign(ex, { role: args.member_role, project_ids: args.member_projects || [] });
       else T.members_demo.push({ id: uuid(), tenant_id: args.t, email: args.member_email, role: args.member_role, project_ids: args.member_projects || [] });
       this.save(); return 'ok';
@@ -214,6 +224,8 @@ class CloudDB {
   }
   async signOut() { await this.sb.auth.signOut(); this.user = null; }
   async context() {
+    // הזמנות שמחכות לאימייל הזה: מצטרפים אוטומטית ללקוח עם התפקיד שנבחר
+    try { await this.sb.rpc('accept_invites'); } catch { /* לפני הרצת schema.sql של חבילה 20 */ }
     const isAdmin = !!(await this.rpc('claim_service_admin', {}));
     const memberships = await this.select('memberships', { eq: { user_id: this.user.id } });
     return { isAdmin, memberships };

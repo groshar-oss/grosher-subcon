@@ -2,14 +2,15 @@
 import { n } from './calc.js';
 import { mkey, addMonths, monthLabel } from './cashflow.js';
 import { COMMITTED } from './dev.js';
+import { forecastSales, salesConf } from './sales.js';
 import { has, indexRate, fixedMonths, spreadWeights, spreadEnd } from './modules.js';
 
 export const INCOME_SOURCES = { buyer: 'רוכשים', bank: 'בנק מלווה', equity: 'הון עצמי', other: 'אחר' };
 export const DCF_ROWS = {
-  in_buyer: 'תקבולים מרוכשים', in_bank: 'משיכות מהבנק המלווה', in_equity: 'הון עצמי', in_other: 'הכנסות אחרות',
+  in_buyer: 'תקבולים מרוכשים', in_forecast: 'מכירות צפויות (לפי קצב)', in_bank: 'משיכות מהבנק המלווה', in_equity: 'הון עצמי', in_other: 'הכנסות אחרות',
   out_paid: 'תשלומים ששולמו', out_open: 'חשבונות שאושרו ועוד לא שולמו', out_contract: 'יתרת התקשרויות (לפי לו"ז)', out_index: 'הפרש הצמדה צפוי', out_fixed: 'עלויות חודשיות קבועות', out_rest: 'יתרת תקציב שטרם נסגרה', out_delay: 'עלות עיכוב בלו"ז'
 };
-export const DCF_IN = ['in_buyer', 'in_bank', 'in_equity', 'in_other'];
+export const DCF_IN = ['in_buyer', 'in_forecast', 'in_bank', 'in_equity', 'in_other'];
 export const DCF_OUT = ['out_paid', 'out_open', 'out_contract', 'out_index', 'out_fixed', 'out_rest', 'out_delay'];
 const termsMonths = d => Math.max(0, Math.ceil(n(d) / 30));
 
@@ -58,6 +59,9 @@ export function devCashflow(projects, opts = {}) {
       if (!late && sched && ['buyer', 'bank'].includes(i.source)) m = addMonths(m, sched);
       put(addMonths(notPast(m), incDelay), key, n(i.amount), label + (late ? ' (באיחור)' : ''), P.id, late);
     }
+    // מכירות צפויות לדירות שעוד לא נמכרו, לפי קצב המכירות ולוח התשלומים
+    if (has(P, 'sales') && salesConf(P).forecast !== false) for (const f of forecastSales(P, pd.units || [], cur)) {
+      put(addMonths(addMonths(f.month, sched), incDelay), 'in_forecast', f.amount, f.label, P.id); incomeTotal += f.amount; }
     // --- הוצאות ---
     const cById = Object.fromEntries((pd.contracts || []).map(c => [c.id, c]));
     const termsOf = e => cById[e.contract_id]?.pay_terms_days ?? st.supplier_terms_days;

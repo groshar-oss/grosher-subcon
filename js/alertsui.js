@@ -59,8 +59,11 @@ export const mailLink = (to, subject, body) => `mailto:${to.map(encodeURICompone
 // נמענים: של הפרויקט, ואם אין, של הלקוח
 export function targetsFor(a, projects) {
   const p = (projects || []).find(x => x.id === projectIdOf(a));
-  const emails = emailsOf(p?.notify_emails);
-  return { project: p || null, phone: p?.notify_phone || '', name: p?.notify_name || '', emails: emails.length ? emails : recipients() };
+  const emails = emailsOf(p?.notify_emails), t = tenant() || {};
+  // לפי הסדר: איש הקשר של הפרויקט, ואם אין, איש הקשר בכרטיס הלקוח
+  const own = !!p?.notify_phone;
+  return { project: p || null, phone: own ? p.notify_phone : t.phone || '', name: own ? p.notify_name || '' : p?.notify_name || t.contact_name || '',
+    emails: emails.length ? emails : recipients().length ? recipients() : emailsOf(t.email) };
 }
 
 // שורת התרעה עם מצב, החלטה וכפתורים

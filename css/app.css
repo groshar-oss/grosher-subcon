@@ -365,3 +365,9 @@ fieldset.mods legend{padding:0 6px}
 .spbars i{display:block;width:100%;background:var(--acc);opacity:.75;border-radius:3px 3px 0 0}
 .spbars span{position:absolute;top:62px;font-size:9px;color:var(--mut);white-space:nowrap}
 .spreadonly input[type=month]{padding:6px}
+
+/* חבילה 20: פס התקדמות (תנאי ליווי) ועורך לוח תשלומים */
+.pbar{height:10px;border-radius:6px;background:var(--line,#e3e8f2);overflow:hidden;margin:6px 0 2px}
+.pbar i{display:block;height:100%;background:#f0a020;border-radius:6px}
+.pbar i.ok{background:#1f9d6a}
+.plt input{width:100%;box-sizing:border-box}

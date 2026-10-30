@@ -5,6 +5,8 @@ import { S, can, reloadTenants, render, roleName, logChange } from '../app.js';
 import { n } from '../calc.js';
 import { store } from '../util.js';
 import { has } from '../modules.js';
+import { composeMail, googleConfigured } from '../mailui.js';
+import { waLink, mailLink } from '../alertsui.js';
 
 const tenantForm = (t = {}) => `<div class="grid g2">
   ${field('שם החברה', 'name', t.name, { req: true })}${field('ח"פ', 'company_no', t.company_no)}
@@ -38,6 +40,7 @@ export async function viewClient(id) {
   const st = { employer_factor: 1.3, crit_pct: 15, vat_pct: 18, overhead_pct: 0, work_days_month: 22, day_hours: 9, quota_warn_pct: 80, quota_gap_pct: 10, cash_opening: 0, cash_min: 0, supplier_terms_days: 60, ...(t.settings || {}) };
   const [members, mcs, projects, series] = await Promise.all([db.rpc('tenant_members', { t: id }), db.select('main_contractors', { eq: { tenant_id: id }, order: 'name' }), db.select('projects', { eq: { tenant_id: id }, order: 'name' }),
     db.select('index_series', { eq: { tenant_id: id }, order: 'month' }).catch(() => [])]);
+  const invites = (await db.select('member_invites', { eq: { tenant_id: id } }).catch(() => [])).filter(i => !i.accepted_at);
   // כרטיס המדד מופיע רק כשיש פרויקט עם מודול הצמדה, או שכבר הוזנו מדדים
   const idxProjects = projects.filter(p => has(p, 'index'));
   const showIdx = idxProjects.length || series.length;
@@ -77,11 +80,14 @@ export async function viewClient(id) {
         <td class="n ${ch > 0 ? 'neg' : ''}">${ch == null ? '' : `<span dir="ltr">${ch >= 0 ? '+' : '−'}${Math.abs(ch).toFixed(2)}%</span>`}</td><td class="wrap">${esc(x.note || '')}</td>
         <td><button class="btn small ghost" data-ix="${x.id}">עריכה</button></td></tr>`; }).join('') || '<tr><td colspan="5" class="empty">עוד לא הוזן מדד. מוסיפים את המדד האחרון שפורסם.</td></tr>'}
     </tbody></table></div></div>` : ''}
-  <div class="card"><h2>משתמשים <button class="btn small" id="addm">+ הוספת משתמש</button></h2>
-    <p class="small mut">המשתמש נרשם קודם בעצמו במסך הכניסה, ואז מוסיפים אותו כאן לפי האימייל. מנהל עבודה רואה רק את הפרויקטים שמסומנים לו, ובלי מחירים, רווח ושכר.</p>
+  <div class="card"><h2>משתמשים <button class="btn small" id="addm">+ הזמנת משתמש</button></h2>
+    <p class="small mut">כותבים אימייל ובוחרים תפקיד. מי שעוד לא רשום מקבל מייל עם קישור להרשמה, ואחרי שנרשם הוא מצטרף לבד עם התפקיד שנבחר. מנהל עבודה רואה רק את הפרויקטים שמסומנים לו, ובלי מחירים, רווח ושכר.</p>
     <div class="tw"><table><thead><tr><th>אימייל</th><th>תפקיד</th><th>פרויקטים (למנהל עבודה)</th><th></th></tr></thead><tbody>
     ${members.map(m => `<tr><td dir="ltr" style="text-align:right">${esc(m.email)}</td><td>${roleName(m.role)}</td><td class="wrap">${m.role === 'foreman' ? esc((m.project_ids || []).map(pname).join(', ') || 'אין') : '<span class="mut">כולם</span>'}</td>
-      <td><button class="btn small ghost" data-em="${esc(m.email)}" data-role="${m.role}" data-pids="${(m.project_ids || []).join(',')}">עריכה</button> <button class="btn small ghost" data-rm="${m.id}">הסרה</button></td></tr>`).join('') || '<tr><td colspan="4" class="empty">אין משתמשים מלבד מנהל השירות</td></tr>'}
+      <td><button class="btn small ghost" data-em="${esc(m.email)}" data-role="${m.role}" data-pids="${(m.project_ids || []).join(',')}">עריכה</button> <button class="btn small ghost" data-rm="${m.id}">הסרה</button></td></tr>`).join('')}
+    ${invites.map(i => `<tr class="mut"><td dir="ltr" style="text-align:right">${esc(i.email)}</td><td>${roleName(i.role)} <span class="chip blue">הוזמן, ממתין להרשמה</span></td><td class="wrap">${i.role === 'foreman' ? esc((i.project_ids || []).map(pname).join(', ') || 'אין') : '<span class="mut">כולם</span>'}</td>
+      <td class="nw"><button class="btn small ghost" data-resend="${i.id}">שליחה שוב</button> <button class="btn small ghost" data-uninv="${i.id}">ביטול</button></td></tr>`).join('')}
+    ${!members.length && !invites.length ? '<tr><td colspan="4" class="empty">אין משתמשים מלבד מנהל השירות</td></tr>' : ''}
     </tbody></table></div></div>
   <div class="card"><h2>קבלנים ראשיים ומזמינים <button class="btn small" id="addmc">+ קבלן ראשי / מזמין</button></h2>
     <p class="small mut">בפרויקט קבלן משנה זה הקבלן הראשי. בפרויקט ביצוע זה המזמין.</p>
@@ -94,7 +100,15 @@ export async function viewClient(id) {
   $('#tf', el).onsubmit = async e => {
     e.preventDefault(); const v = Object.fromEntries(new FormData(e.target));
     if (!v.name.trim()) return toast('חסר שם', 'bad');
-    await db.update('tenants', id, v); await reloadTenants(); toast('נשמר'); render();
+    await db.update('tenants', id, v);
+    // איש הקשר השתנה: פרויקטים שרשום בהם איש קשר משלהם ממשיכים לשלוח אליו. מציעים להחליף גם שם
+    const changed = ['contact_name', 'phone', 'email'].some(k => String(v[k] ?? '').trim() !== String(t[k] ?? '').trim());
+    const own = changed ? projects.filter(p => p.notify_phone || p.notify_emails || p.notify_name) : [];
+    if (own.length && await confirmBox('לעדכן גם בפרויקטים?', `בפרויקטים ${own.map(p => p.name).join(', ')} רשום איש קשר משלהם להתרעות בוואטסאפ ובמייל (${own.map(p => [p.notify_name, p.notify_phone].filter(Boolean).join(' ')).filter(Boolean).join(', ')}). ההתרעות שם עדיין נשלחות אליו. להחליף גם שם ל${v.contact_name || 'איש הקשר החדש'}${v.phone ? ' ' + v.phone : ''}?`, 'כן, לעדכן בפרויקטים')) {
+      for (const p of own) await db.update('projects', p.id, { notify_name: v.contact_name?.trim() || null, notify_phone: v.phone?.trim() || null, notify_emails: v.email?.trim() || null });
+      S.projList = null;
+    }
+    await reloadTenants(); toast('נשמר'); render();
   };
   $('#sf', el).onsubmit = async e => {
     e.preventDefault(); const v = Object.fromEntries(new FormData(e.target));
@@ -122,7 +136,7 @@ export async function viewClient(id) {
   $$('[data-ix]', el).forEach(b => b.onclick = () => ixDlg(series.find(x => x.id === b.dataset.ix)));
   const memberDlg = async (m = {}) => {
     const pids = (m.pids || '').split(',').filter(Boolean);
-    const v = await modal({ title: m.email ? 'עריכת משתמש' : 'הוספת משתמש', body: `
+    const v = await modal({ title: m.email ? 'עריכת משתמש' : 'הזמנת משתמש', body: `
       ${field('אימייל', 'email', m.email || '', { type: 'email', req: true, attrs: `dir="ltr" ${m.email ? 'readonly' : ''}` })}
       ${select('תפקיד', 'role', { owner: 'בעלים', foreman: 'מנהל עבודה', accountant: 'הנהלת חשבונות', viewer: 'צפייה בלבד' }, m.role || 'owner')}
       <div class="fld"><span>פרויקטים למנהל עבודה</span>${projects.map(p => `<label class="chk"><input type="checkbox" name="p_${p.id}" ${pids.includes(p.id) ? 'checked' : ''}> ${esc(p.name)}</label>`).join('') || '<span class="mut small">אין פרויקטים</span>'}</div>`,
@@ -130,9 +144,38 @@ export async function viewClient(id) {
     if (!v) return;
     const chosen = projects.filter(p => v['p_' + p.id]).map(p => p.id);
     const r = await db.rpc('add_member', { t: id, member_email: v.email.trim(), member_role: v.role, member_projects: v.role === 'foreman' ? chosen : [] });
-    if (r === 'not_registered') return toast('המשתמש עוד לא נרשם. בקש ממנו להירשם במסך הכניסה ואז להוסיף שוב.', 'bad');
+    if (r === 'not_registered') return toast('המשתמש עוד לא נרשם. צריך להריץ את schema.sql של חבילה 20 כדי לשלוח הזמנה.', 'bad');
+    if (r === 'invited') { await sendInvite(v.email.trim(), v.role); return render(); }
     toast('המשתמש נשמר'); render();
   };
+  // מייל הזמנה מה-Gmail של מי שמחובר, עם קישור שממלא את האימייל במסך הכניסה
+  const sendInvite = async (email, role) => {
+    const link = `${location.origin}${location.pathname}?invite=${encodeURIComponent(email)}`;
+    const text = `שלום,\n\nהוזמנת למערכת "גרושר · בקרת עלויות ותזרים" של ${t.name}, בתפקיד ${roleName(role)}.\n\nלהצטרפות:\n1. לפתוח את הקישור: ${link}\n2. לבחור סיסמה וללחוץ "הרשמה".\n3. לאשר את המייל שיגיע לתיבה שלך.\n4. להיכנס עם האימייל והסיסמה. הגישה ללקוח נפתחת לבד.\n\nבברכה,\n${S.user?.email || ''}\nגרושר פרויקטים בע"מ`;
+    window.__LAST_INVITE__ = { email, link, text }; // לבדיקות
+    const subject = `הזמנה למערכת גרושר · ${t.name}`;
+    // חלון אחד עם כמה דרכים לשלוח: Gmail ישיר (אם מחובר), וואטסאפ, תוכנת המייל, או העתקת הקישור
+    let how = null;
+    await modal({ title: 'שליחת הזמנה', ok: null, cancel: 'סגירה', body: `<p class="small">ההזמנה ל-<b dir="ltr">${esc(email)}</b> נשמרה. ברגע שיירשם עם האימייל הזה הוא ייכנס לבד ללקוח, בתפקיד ${esc(roleName(role))}.</p>
+      <p class="small mut">נשאר לשלוח לו את הקישור. בוחרים איך:</p>
+      <div class="actions" style="flex-wrap:wrap;gap:8px">
+        ${googleConfigured() ? '<button type="button" class="btn" data-how="gmail">✉ שליחה מה-Gmail</button>' : ''}
+        <a class="btn ghost" id="invwa" target="_blank" rel="noopener" href="${esc(waLink('', text))}">וואטסאפ</a>
+        <a class="btn ghost" id="invml" href="${esc(mailLink([email], subject, text))}">תוכנת המייל</a>
+        <button type="button" class="btn ghost" data-how="copy">העתקת הקישור</button></div>
+      <label class="fld" style="margin-top:10px"><span>הקישור</span><input readonly dir="ltr" value="${esc(link)}" id="invlink"></label>`,
+      onMount: (d, close) => {
+        d.querySelectorAll('[data-how]').forEach(b => b.onclick = async () => {
+          if (b.dataset.how === 'copy') { try { await navigator.clipboard.writeText(link); } catch { d.querySelector('#invlink').select(); } toast('הקישור הועתק'); how = 'copy'; return; }
+          how = 'gmail'; close(null);
+        });
+        ['#invwa', '#invml'].forEach(s => d.querySelector(s)?.addEventListener('click', () => { how = 'link'; }));
+      } });
+    if (how === 'gmail') { const ok = await composeMail({ title: 'שליחת הזמנה', to: [email], subject, text }); toast(ok ? 'ההזמנה נשלחה' : 'ההזמנה נשמרה בלי מייל'); }
+  };
+  $$('[data-resend]', el).forEach(b => b.onclick = () => { const i = invites.find(x => x.id === b.dataset.resend); sendInvite(i.email, i.role); });
+  $$('[data-uninv]', el).forEach(b => b.onclick = async () => { const i = invites.find(x => x.id === b.dataset.uninv);
+    if (await confirmBox('ביטול הזמנה', `${i.email} לא יצטרף ללקוח גם אם יירשם.`, 'ביטול ההזמנה', true)) { await db.remove('member_invites', i.id); toast('ההזמנה בוטלה'); render(); } });
   $('#addm', el).onclick = () => memberDlg();
   $$('[data-em]', el).forEach(b => b.onclick = () => memberDlg({ email: b.dataset.em, role: b.dataset.role, pids: b.dataset.pids }));
   $$('[data-rm]', el).forEach(b => b.onclick = async () => { if (await confirmBox('הסרת משתמש', 'המשתמש לא יוכל לראות יותר את נתוני הלקוח.', 'הסרה', true)) { await db.rpc('remove_member', { id: b.dataset.rm }); render(); } });

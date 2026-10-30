@@ -76,8 +76,8 @@ export async function loadTenantData(tenantId = S.tenantId) {
     db.select('contracts', { ...q, order: 'created_at' }), db.select('contract_lines', { ...q, order: 'sort' }),
     db.select('change_orders', { ...q, order: 'created_at' }), db.select('co_lines', { ...q, order: 'sort' }), db.select('cbills', { ...q, order: 'number' }), db.select('cbill_lines', q)]);
   const [income, alertStates, signoffs] = await Promise.all([db.select('dev_income', { ...q, order: 'due_date' }), db.select('alert_state', q), db.select('co_signoffs', { ...q, order: 'sent_at' }).catch(() => [])]);
-  const [indexSeries, fixedCosts] = await Promise.all([db.select('index_series', { ...q, order: 'month' }).catch(() => []), db.select('fixed_costs', { ...q, order: 'from_month' }).catch(() => [])]);
-  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines, income, alertStates, signoffs, indexSeries, fixedCosts };
+  const [indexSeries, fixedCosts, units] = await Promise.all([db.select('index_series', { ...q, order: 'month' }).catch(() => []), db.select('fixed_costs', { ...q, order: 'from_month' }).catch(() => []), db.select('dev_units', { ...q, order: ['sort', 'name'] }).catch(() => [])]);
+  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines, income, alertStates, signoffs, indexSeries, fixedCosts, units };
 }
 
 export async function logChange(e) {
@@ -110,10 +110,10 @@ const NAV_ADMIN = () => [
 
 // לשוניות הפרויקט: שורת לשוניות בראש דף הפרויקט (במחשב ובטלפון)
 // פרויקט יזם: תקציב, התקשרויות, הוצאות ותשלומים
-const PROJECT_TABS_DEV = [['control', 'בקרה תקציבית', '◔'], ['boq', 'תקציב', '☰'], ['contracts', 'התקשרויות', '✍'], ['cos', 'הוראות שינוי', '±'], ['cbills', 'חשבונות קבלנים', '₪'], ['cashflow', 'הכנסות ותזרים', '≋'], ['expenses', 'הוצאות ותשלומים', '−'], ['docs', 'מסמכים', '⇪'], ['log', 'יומן שינויים', '↺'], ['settings', 'הגדרות פרויקט', '⚙']];
+const PROJECT_TABS_DEV = [['control', 'בקרה תקציבית', '◔'], ['boq', 'תקציב', '☰'], ['contracts', 'התקשרויות', '✍'], ['cos', 'הוראות שינוי', '±'], ['cbills', 'חשבונות קבלנים', '₪'], ['sales', 'מכירות', '⌂'], ['bank', 'ליווי בנקאי', '⛁'], ['cashflow', 'הכנסות ותזרים', '≋'], ['expenses', 'הוצאות ותשלומים', '−'], ['docs', 'מסמכים', '⇪'], ['log', 'יומן שינויים', '↺'], ['settings', 'הגדרות פרויקט', '⚙']];
 const PROJECT_TABS = [['control', 'בקרה ורווחיות', '◔'], ['boq', 'כתב כמויות', '☰'], ['costing', 'תמחיר', '∑'], ['quota', 'מכסות', '◫'], ['vo', 'הוראות שינוי', '±'], ['worklog', 'יומן עבודה', '✎'], ['purchase', 'רכש', '⛟'], ['expenses', 'הוצאות', '−'], ['bills', 'חשבונות', '₪'], ['cashflow', 'תזרים', '≋'], ['docs', 'מסמכים', '⇪'], ['log', 'יומן שינויים', '↺'], ['settings', 'הגדרות פרויקט', '⚙']];
 // לשונית של מודול כבוי לא מוצגת (worklog = עובדים ויומן, purchase = רכש)
-const TAB_MODULE = { worklog: 'workers', purchase: 'purchase' };
+const TAB_MODULE = { worklog: 'workers', purchase: 'purchase', sales: 'sales', bank: 'bank' };
 export const projectTabs = (pr = null) => !can.prices() ? [['control', 'יומן עבודה', '✎']] : (pr?.project_type === 'dev' ? PROJECT_TABS_DEV : PROJECT_TABS).filter(([k]) => (!TAB_MODULE[k] || !pr || mods(pr)[TAB_MODULE[k]]) && (!['costing', 'quota'].includes(k) || can.costing()) && (k !== 'log' || can.edit()) && (k !== 'docs' || can.expense()) && (k !== 'settings' || can.edit()));
 // הפרויקט הפתוח נשמר לכל לקוח, גם אחרי רענון
 const PKEY = () => 'subcon-proj-' + (S.tenantId || '');
@@ -222,9 +222,12 @@ export async function render() {
 
 function renderLogin() {
   const root = $('#root');
+  // קישור הזמנה: ...?invite=email ממלא את האימייל ומסביר מה לעשות
+  const invited = (new URLSearchParams(location.search).get('invite') || '').trim();
   const el = h(`<div class="login"><div class="box">
     <div class="logo"><img src="icons/logo-neg.png" alt=""><div><b>גרושר פרויקטים</b><div class="mut small">בקרת עלויות ותזרים</div></div></div>
-    <form id="lf">${field('אימייל', 'email', '', { type: 'email', req: true, attrs: 'autocomplete="username" dir="ltr"' })}
+    ${invited ? `<div class="note small" style="margin-bottom:10px"><b>הוזמנת למערכת.</b> בפעם הראשונה: לבחור סיסמה וללחוץ "הרשמה", ואז לאשר את המייל שיגיע. אחרי הכניסה תראה את הלקוח שהזמין אותך.</div>` : ''}
+    <form id="lf">${field('אימייל', 'email', invited, { type: 'email', req: true, attrs: 'autocomplete="username" dir="ltr"' })}
     ${field('סיסמה', 'password', '', { type: 'password', req: true, attrs: 'autocomplete="current-password" dir="ltr"' })}
     <div class="err" id="lerr" hidden></div>
     <div class="actions"><button class="btn" type="submit">כניסה</button><button class="btn ghost" type="button" id="signup">הרשמה</button><button class="btn link" type="button" id="forgot">שכחתי סיסמה</button></div></form></div></div>`);
