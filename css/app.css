@@ -267,7 +267,6 @@ tr.dim>td{opacity:.55}
 .nadm summary{cursor:pointer;font-size:11px;color:#7f90c4;padding:8px 12px;list-style:none}
 .nadm summary::-webkit-details-marker{display:none}
 .nadm summary::before{content:'▸ '}.nadm[open] summary::before{content:'▾ '}
-@media (min-width:761px){.ptabs{display:none}}
 /* יישור טבלאות: מספרים בעמודה אחידה, כותרות מספרים נשברות לשתי שורות במקום למתוח את הטבלה, ושם בעמודה הראשונה לא נשבר לשורות רבות */
 th{vertical-align:bottom}
 td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -314,3 +313,27 @@ tr.grp td{background:var(--sec);color:var(--secink);font-weight:600}
 .tabs .tsep{align-self:center;color:var(--mut);padding:0 6px}
 .repnote{margin:-6px 0 12px}
 @media print{.repnote{margin:0 0 6px}tr.al-r td,tr.al-y td{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+/* חבילה 16: חיווי Google בתפריט, לשוניות הפרויקט בתוך הדף */
+.gpill{display:flex;align-items:center;gap:9px;width:100%;text-align:start;background:var(--navy2);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:8px 10px;margin:0 0 10px;color:#fff;cursor:pointer;font:inherit}
+.gpill:hover{border-color:rgba(255,255,255,.3)}
+.gpill i,.gdot{width:10px;height:10px;border-radius:50%;flex:0 0 10px;background:#8a93ad;box-shadow:0 0 0 3px rgba(138,147,173,.25)}
+.gpill.on i,.gdot.on{background:#2ecc71;box-shadow:0 0 0 3px rgba(46,204,113,.25)}
+.gpill.warn i,.gdot.warn{background:#ffb020;box-shadow:0 0 0 3px rgba(255,176,32,.25)}
+.gpill.off i,.gdot.off{background:#ff5d5d;box-shadow:0 0 0 3px rgba(255,93,93,.25)}
+.gpill.busy i,.gdot.busy{background:#5b8cff;animation:gpulse 1s infinite}
+@keyframes gpulse{50%{opacity:.35}}
+.gpill span{display:flex;flex-direction:column;min-width:0}.gpill b{font-size:13px}.gpill small{font-size:11px;color:#9fb0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mobile-top #gdotb{display:flex;align-items:center;justify-content:center;width:32px;height:32px}
+.ptabs{flex-wrap:wrap;margin-bottom:14px}
+.phead .psw{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);white-space:nowrap}
+.phead .psw select{max-width:240px;font-weight:600}
+.tsel{margin-bottom:12px}
+body.pdfing .rpage,body.pdfing #rep{background:#fff;color:#16213e}
+@media (max-width:760px){.phead .psw{width:100%}.phead .psw select{flex:1;max-width:none}}
+@media print{.gpill{display:none}}
+body.pdfing #rep *,body.pdfing .rpage *{letter-spacing:.2px!important}
+body.pdfing #rep,body.pdfing .rpage{width:1030px;max-width:1030px}
+body.pdfing #rep th,body.pdfing #rep td,body.pdfing .rpage th,body.pdfing .rpage td{padding:4px 5px!important;font-size:10.5px!important}
+body.pdfing #rep .tw tbody td:first-child,body.pdfing .rpage .tw tbody td:first-child{min-width:0!important}
+body.pdfing th.n{min-width:0!important}
+body.pdfing #rep .tw,body.pdfing .rpage .tw{overflow:visible}

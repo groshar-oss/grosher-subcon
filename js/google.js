@@ -8,7 +8,7 @@ const K = 'subcon-google';
 const SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send';
 const DAPI = 'https://www.googleapis.com/drive/v3/', DUP = 'https://www.googleapis.com/upload/drive/v3/', FOLDER = 'application/vnd.google-apps.folder';
 
-export const gconf = () => ({ clientId: CONFIG.googleClientId || '', rootName: 'גרושר - קבלני משנה', enabled: false, folders: {}, lastSync: 0, lastErr: '', ...(store(K) || {}) });
+export const gconf = () => ({ clientId: CONFIG.googleClientId || '', rootName: 'גרושר - בקרת עלויות ותזרים', enabled: false, folders: {}, lastSync: 0, lastErr: '', ...(store(K) || {}) });
 const save = c => store(K, c);
 export function setGconf(patch) { const c = { ...gconf(), ...patch }; save(c); return c; }
 

@@ -20,6 +20,17 @@ import { devCos, devCbills, cbillView, cbillSheet } from './devflow.js';
 import { devCashTab } from './devcash.js';
 
 
+// ראש דף הפרויקט: שם, החלפת פרויקט, כל הפרויקטים ופרויקט חדש. הלשוניות מתחת (לא בתפריט הצד)
+function projTop(P, sub) {
+  const list = P.data.projects.filter(p => p.status !== 'closed' || p.id === P.id);
+  return `<div class="top phead"><div><h1>${esc(P.project.name)}</h1><div class="sub">${sub}</div></div>
+    <div class="actions"><label class="psw"><span>מעבר לפרויקט</span><select id="psel" aria-label="מעבר לפרויקט אחר">${list.map(p => `<option value="${p.id}" ${p.id === P.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+      <a class="btn ghost small" href="#/projects">כל הפרויקטים</a>${can.edit() ? '<a class="btn small" href="#/projects/new">+ פרויקט חדש</a>' : ''}</div></div>`;
+}
+function wirePsel(el, tab) {
+  $('#psel', el)?.addEventListener('change', e => { const t = ['day', 'bill', 'cbill', 'cbillpdf'].includes(tab) ? 'control' : tab; location.hash = `#/project/${e.target.value}/${t}`; });
+}
+
 export async function viewProject(id, tab, extra) {
   const data = await loadTenantData();
   const project = data.projects.find(p => p.id === id);
@@ -37,11 +48,10 @@ export async function viewProject(id, tab, extra) {
   const mc = data.mcs.find(m => m.id === project.main_contractor_id);
   const qc = quotaCounts(P.summary.quotas || []);
   const tabs = projectTabs();
-  const el = h(`<div><div class="top"><div><h1>${esc(project.name)}</h1>
-    <div class="sub">${esc(mc?.name || 'ללא קבלן ראשי')} · ${CONTRACT[project.contract_type]} · שוטף+${project.pay_terms_days} · ${STATUS[project.status]}${project.address ? ' · ' + esc(project.address) : ''}</div></div>
-    <div class="actions"><a class="btn ghost small" href="#/projects">כל הפרויקטים</a></div></div>
+  const el = h(`<div>${projTop(P, `${esc(mc?.name || 'ללא קבלן ראשי')} · ${CONTRACT[project.contract_type]} · שוטף+${project.pay_terms_days} · ${STATUS[project.status]}${project.address ? ' · ' + esc(project.address) : ''}`)}
     <nav class="tabs ptabs">${tabs.map(([k, l]) => `<a href="#/project/${id}/${k}" class="${k === tab ? 'on' : ''}">${l}${k === 'quota' && qc.over + qc.warn ? ` <span class="badge ${qc.over ? 'red' : 'amber'}">${qc.over + qc.warn}</span>` : ''}</a>`).join('')}</nav><div id="tab"></div></div>`);
   el.dataset.qover = qc.over; el.dataset.qwarn = qc.warn;
+  wirePsel(el, tab);
   const body = $('#tab', el);
   const fn = { control: tabControl, boq: tabBoq, costing: tabCosting, quota: tabQuota, vo: tabVo, worklog: tabWorkLog, purchase: tabPurchase, expenses: tabExpenses, bills: tabBills, cashflow: tabCashflow, docs: P => viewInbox(P.id, P), log: tabLog, settings: tabSettings }[tab] || tabControl;
   body.appendChild(await fn(P));
@@ -53,10 +63,9 @@ async function devProject(P, tab, extra) {
   if (tab === 'cbillpdf') return cbillSheet(P, extra);
   const tabs = projectTabs(P.project);
   const p = P.project;
-  const el = h(`<div><div class="top"><div><h1>${esc(p.name)}</h1>
-    <div class="sub">${PROJECT_TYPES.dev}${p.owner_name ? ' · ' + esc(p.owner_name) : ''} · ${STATUS[p.status]}${p.address ? ' · ' + esc(p.address) : ''}</div></div>
-    <div class="actions"><a class="btn ghost small" href="#/projects">כל הפרויקטים</a></div></div>
+  const el = h(`<div>${projTop(P, `${PROJECT_TYPES.dev}${p.owner_name ? ' · ' + esc(p.owner_name) : ''} · ${STATUS[p.status]}${p.address ? ' · ' + esc(p.address) : ''}`)}
     <nav class="tabs ptabs">${tabs.map(([k, l]) => `<a href="#/project/${P.id}/${k}" class="${k === tab || (tab === 'cbill' && k === 'cbills') ? 'on' : ''}">${l}</a>`).join('')}</nav><div id="tab"></div></div>`);
+  wirePsel(el, tab);
   if (tab === 'cbill') { $('#tab', el).appendChild(await cbillView(P, extra)); return el; }
   const fn = { control: devControl, boq: P => tabBoq(P, null, { dev: true }), contracts: devContracts, cos: devCos, cbills: devCbills, cashflow: devCashTab, expenses: tabExpenses, docs: P => viewInbox(P.id, P), log: tabLog, settings: tabSettings }[tab] || devControl;
   $('#tab', el).appendChild(await fn(P));

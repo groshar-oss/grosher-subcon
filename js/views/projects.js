@@ -65,7 +65,7 @@ export async function newProject(mcs) {
   location.hash = `#/project/${p.id}/boq`;
 }
 
-export async function viewProjects() {
+export async function viewProjects(arg) {
   if (!S.tenantId) return h('<div class="empty">בחרי לקוח</div>');
   const data = await loadTenantData();
   const mcName = id => data.mcs.find(m => m.id === id)?.name || '';
@@ -73,6 +73,8 @@ export async function viewProjects() {
     <div class="actions" id="ab">${can.edit() ? '<button class="btn" id="add">+ פרויקט חדש</button>' : ''}</div></div><div id="body"></div></div>`);
   if (can.prices() && data.projects.some(p => !isDev(p))) $('#ab', el).prepend(modeSwitch());
   $('#add', el)?.addEventListener('click', () => newProject(data.mcs));
+  // #/projects/new (מהכפתור "+ פרויקט חדש" בדף הבית ובראש הפרויקט): פותח את החלון מיד
+  if (arg === 'new' && can.edit()) el.addEventListener('mounted', () => { history.replaceState(null, '', '#/projects'); newProject(data.mcs); });
   const body = $('#body', el);
   if (!data.projects.length) { body.innerHTML = '<div class="card empty">אין פרויקטים עדיין</div>'; return el; }
   if (!can.prices()) {

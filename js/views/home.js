@@ -37,7 +37,7 @@ export async function viewHome() {
 
   const el = h(`<div>
     <div class="top"><div><h1>מה דורש טיפול</h1><div class="sub">${esc(tenant()?.name || '')} · ${all.length} פרויקטים פעילים · סכומים לפני מע"מ</div></div>
-      <div class="actions" id="modeBox"></div></div>
+      <div class="actions" id="modeBox">${can.edit() ? '<a class="btn small" href="#/projects/new" id="hnew">+ פרויקט חדש</a>' : ''}</div></div>
     ${onlyDev ? `<div class="kpis">
       <div class="kpi"><div class="l">תקציב מאושר</div><div class="v">${money(DT.budget)}</div><div class="n">${devSums.length} פרויקטים</div></div>
       <div class="kpi"><div class="l">צפי עלות לסיום</div><div class="v">${money(DT.forecast)}</div><div class="n">${pct(DT.budget ? (DT.forecast - DT.budget) / DT.budget * 100 : 0, { sign: true })} מול התקציב</div></div>

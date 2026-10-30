@@ -9,6 +9,16 @@ import { cashflow, monthLabel, mkey, addMonths } from '../cashflow.js';
 import { projData, summarize, STATUS } from './common.js';
 import { loadXLSX } from '../import.js';
 import { viewDevReports, reportNav } from './devreports.js';
+import { savePdfToDrive } from '../drivesync.js';
+import { toast } from '../util.js';
+
+// שמירת הדוח כ-PDF בתיקיית הדוחות של הפרויקט בדרייב
+export async function pdfToDrive(node, title, project) {
+  const b = document.getElementById('gdrive'); if (b) { b.disabled = true; b.textContent = 'שומר...'; }
+  try { await savePdfToDrive(node, title, project); toast(`נשמר בדרייב: ${project ? project.name : 'דוחות הלקוח'} / דוחות`); }
+  catch (e) { toast(e.message, 'bad'); }
+  finally { if (b) { b.disabled = false; b.textContent = 'שמירה לדרייב'; } }
+}
 
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const m0 = v => money(v, { sym: false });
@@ -61,7 +71,7 @@ export async function viewReports(kind = 'profit') {
       ${usesPeriod ? `<label class="small mut">מחודש <input type="month" id="from" value="${o.from}"></label><label class="small mut">עד <input type="month" id="to" value="${o.to}"></label>` : ''}
       ${kind === 'client' ? `<label class="small mut">חודש הדוח <input type="month" id="month" value="${o.month}"></label>` : ''}
       <span id="mode"></span>
-      <button class="btn ghost small" id="print">הדפסה / PDF</button><button class="btn ghost small" id="xl">ייצוא לאקסל</button></div>
+      <button class="btn ghost small" id="print">הדפסה / PDF</button><button class="btn ghost small" id="xl">ייצוא לאקסל</button><button class="btn ghost small" id="gdrive" title="שומר את הדוח כ-PDF בתיקיית הדוחות של הפרויקט בדרייב">שמירה לדרייב</button></div>
     <div id="rep"></div></div>`);
   const rerender = () => viewReports(kind).then(v => el.replaceWith(v));
   $('#pid', el).onchange = e => { setOpt({ pid: e.target.value }); rerender(); };
@@ -74,6 +84,7 @@ export async function viewReports(kind = 'profit') {
   $('#rep', el).append(h(`<div class="rephead"><img src="icons/icon-192.png" alt=""><div><b>${esc(title)}</b><span>${esc(tenant()?.name || '')} · ${esc(scope || '')}${usesPeriod ? ' · ' + periodText(o) : ''}${['profit', 'client'].includes(kind) ? ' · ' + esc(PROFIT_MODES[S.mode]) : ''} · הופק ${fmtDate(todayStr())}</span></div></div>`), body);
   $('#print', el).onclick = () => window.print();
   $('#xl', el).onclick = () => exportTables($('#rep', el), `${title} - ${scope}`);
+  $('#gdrive', el).onclick = () => pdfToDrive($('#rep', el), title, o.pid ? data.projects.find(p => p.id === o.pid) : null);
   return el;
 }
 
@@ -256,4 +267,13 @@ function repClient({ data, sums, o }) {
     </section>`));
   }
   return el;
+}
+
+/** הדוחות של פרויקט קבלן משנה אחד, לשמירה בדרייב (תקופה: מתחילת השנה, דוח ללקוח: החודש הקודם) */
+export function subReportNodes(data, pid) {
+  const p = data.projects.find(x => x.id === pid); if (!p) return [];
+  const pd = projData(data, pid); const sums = [{ p, pd, s: summarize(pd) }];
+  const o = { ...opt(), pid, by: 'worker' };
+  const fns = { profit: repProfit, labor: repLabor, expenses: repExpenses, vo: repVo, retention: repRetention, client: repClient };
+  return REPORTS.filter(r => r[2]()).map(([kind, title]) => { try { return { kind, title, node: fns[kind]({ data, sums, o, rerender: () => {} }) }; } catch (e) { console.warn('report', kind, e); return null; } }).filter(Boolean);
 }

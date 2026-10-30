@@ -1,6 +1,6 @@
 // Service worker: שומר את קבצי המערכת כדי שתיפתח גם בלי קליטה. נתונים תמיד מהרשת.
-const V = 'subcon-v18';
-const FILES = ['./', 'index.html', 'css/app.css?v=10', 'js/app.js', 'manifest.json', 'icons/icon-192.png', 'icons/logo-neg.png'];
+const V = 'subcon-v19';
+const FILES = ['./', 'index.html', 'css/app.css?v=11', 'js/app.js', 'manifest.json', 'icons/icon-192.png', 'icons/logo-neg.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {

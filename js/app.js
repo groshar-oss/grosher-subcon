@@ -17,6 +17,7 @@ import { flushOutbox } from './views/worklog.js';
 import { viewInbox } from './views/inbox.js';
 import { viewPayables } from './views/payables.js';
 import { helpBtn, guidePage, HELP } from './guide.js';
+import { pillHtml, wirePill, pillState, maybeAutoSync } from './drivesync.js';
 const HELP_KEYS = Object.keys(HELP);
 
 export const S = { user: null, ctx: null, tenants: [], tenantId: null, role: null, mode: 'approved' };
@@ -105,7 +106,7 @@ const NAV_ADMIN = () => [
   ['#/settings', '☼', 'תצוגה ומצב', true]
 ].filter(x => x[3]);
 
-// לשוניות הפרויקט (בתפריט הצד במחשב, ובפס למעלה בטלפון)
+// לשוניות הפרויקט: שורת לשוניות בראש דף הפרויקט (במחשב ובטלפון)
 // פרויקט יזם: תקציב, התקשרויות, הוצאות ותשלומים
 const PROJECT_TABS_DEV = [['control', 'בקרה תקציבית', '◔'], ['boq', 'תקציב', '☰'], ['contracts', 'התקשרויות', '✍'], ['cos', 'הוראות שינוי', '±'], ['cbills', 'חשבונות קבלנים', '₪'], ['cashflow', 'הכנסות ותזרים', '≋'], ['expenses', 'הוצאות ותשלומים', '−'], ['docs', 'מסמכים', '⇪'], ['log', 'יומן שינויים', '↺'], ['settings', 'הגדרות פרויקט', '⚙']];
 const PROJECT_TABS = [['control', 'בקרה ורווחיות', '◔'], ['boq', 'כתב כמויות', '☰'], ['costing', 'תמחיר', '∑'], ['quota', 'מכסות', '◫'], ['vo', 'הוראות שינוי', '±'], ['worklog', 'יומן עבודה', '✎'], ['purchase', 'רכש', '⛟'], ['expenses', 'הוצאות', '−'], ['bills', 'חשבונות', '₪'], ['cashflow', 'תזרים', '≋'], ['docs', 'מסמכים', '⇪'], ['log', 'יומן שינויים', '↺'], ['settings', 'הגדרות פרויקט', '⚙']];
@@ -119,20 +120,8 @@ async function projList() {
   return S.projList.list;
 }
 
-const isOn = (href, hash) => hash === href || (href !== '#/' && hash.startsWith(href + '/')) || (href !== '#/' && hash === href);
+const isOn = (href, hash) => hash === href || (href !== '#/' && hash.startsWith(href + '/')) || (href !== '#/' && hash === href) || (href === '#/projects' && hash.startsWith('#/project/'));
 const navLinks = (items, hash) => items.map(([href, ico, label]) => `<a href="${href}" class="${isOn(href, hash) ? 'on' : ''}"><span class="ico">${ico}</span>${label}</a>`).join('');
-function projectSection(hash, content) {
-  const pid = openProjectId(), list = S.projList?.t === S.tenantId ? S.projList.list : [];
-  const pr = list.find(p => p.id === pid); if (!pr) return '';
-  const [, route, a, b] = hash.split('/');
-  const here = route === 'project' && a === pid;
-  const cur = !here ? '' : !b ? 'control' : b === 'day' ? 'worklog' : b === 'bill' ? 'bills' : ['cbill', 'cbillpdf'].includes(b) ? 'cbills' : b;
-  const qo = +(content?.dataset?.qover || 0), qw = +(content?.dataset?.qwarn || 0);
-  return `<div class="nsec">פרויקט</div>
-    <div class="pbox"><select id="psel" aria-label="החלפת פרויקט">${list.map(p => `<option value="${p.id}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select><button type="button" id="pclose" title="סגירת הפרויקט" aria-label="סגירת הפרויקט">✕</button></div>
-    <nav class="nav pnav">${projectTabs(pr).map(([k, l, ico]) => `<a href="#/project/${pid}/${k}" class="${here && cur === k ? 'on' : ''}"><span class="ico">${ico}</span>${l}${k === 'quota' && here && qo + qw ? ` <span class="badge ${qo ? 'red' : 'amber'}">${qo + qw}</span>` : ''}</a>`).join('')}</nav>`;
-}
-
 function shell(content, title) {
   const t = tenant();
   const tenantBox = S.tenants.length > 1 || can.admin()
@@ -140,13 +129,12 @@ function shell(content, title) {
     : `<div class="tsel"><span>לקוח</span><b>${esc(t?.name || '')}</b></div>`;
   const hash = location.hash || '#/';
   const root = h(`<div class="app">
-    <div class="mobile-top"><button id="mnav" aria-label="תפריט">☰</button><b>${esc(title || CONFIG.appName)}</b><span></span></div>
+    <div class="mobile-top"><button id="mnav" aria-label="תפריט">☰</button><b>${esc(title || CONFIG.appName)}</b><a href="#" id="gdotb" aria-label="${esc(pillState().t)}" title="${esc(pillState().t)}"><i id="gdot" class="gdot ${pillState().st}"></i></a></div>
     <aside class="side" id="side">
       <div class="brand"><img src="icons/logo-neg.png" alt=""><div><b>גרושר פרויקטים</b><span>בקרת עלויות ותזרים</span></div></div>
+      ${pillHtml()}
       ${tenantBox}
-      <div class="nsec">כללי</div>
       <nav class="nav">${navLinks(NAV(), hash)}</nav>
-      ${projectSection(hash, content)}
       <details class="nadm" ${NAV_ADMIN().some(([href]) => isOn(href, hash)) ? 'open' : ''}><summary>ניהול</summary><nav class="nav">${navLinks(NAV_ADMIN(), hash)}</nav></details>
       <div class="side-foot">${esc(S.user?.email || '')}<br>${esc(roleName(S.role))}${isCloud() ? ' · <button id="logout">יציאה</button>' : ''}</div>
     </aside>
@@ -165,9 +153,8 @@ function wireShell() {
   $('#mnav')?.addEventListener('click', () => $('#side').classList.toggle('open'));
   $$('#side a').forEach(a => a.addEventListener('click', () => $('#side').classList.remove('open')));
   $('#tsel')?.addEventListener('change', e => { S.tenantId = e.target.value; store('subcon-tenant', S.tenantId); refreshRole(); location.hash = '#/'; render(); });
-  $('#psel')?.addEventListener('change', e => { const [, route, a, b] = (location.hash || '#/').split('/'); const tab = route === 'project' && b && !['day', 'bill', 'cbill', 'cbillpdf'].includes(b) ? b : 'control';
-    setOpenProject(e.target.value); location.hash = `#/project/${e.target.value}/${tab}`; });
-  $('#pclose')?.addEventListener('click', () => { const here = (location.hash || '').startsWith('#/project/'); setOpenProject(null); if (here) location.hash = '#/projects'; else render(); });
+  wirePill();
+  $('#gdotb')?.addEventListener('click', e => { e.preventDefault(); $('#side').classList.add('open'); });
   $('#logout')?.addEventListener('click', async () => { await db.signOut(); location.reload(); });
   $('#demoRole')?.addEventListener('change', async e => { db.setRole(e.target.value); await boot(); });
   $('#demoReset')?.addEventListener('click', async () => {
@@ -196,7 +183,7 @@ export async function render() {
   let view, title;
   try {
     if (!route) { view = await viewHome(); title = 'מה דורש טיפול'; }
-    else if (route === 'projects') { view = await viewProjects(); title = 'פרויקטים'; }
+    else if (route === 'projects') { view = await viewProjects(a); title = 'פרויקטים'; }
     else if (route === 'project') { view = await viewProject(a, b || 'control', c); title = b === 'day' ? 'יומן עבודה' : b === 'bill' ? 'חשבון חלקי' : b === 'cbill' ? 'חשבון קבלן' : b === 'cbillpdf' ? 'בדיקת חשבון והמלצה לתשלום' : 'פרויקט'; }
     else if (route === 'inbox') { view = await viewInbox(); title = 'תיבת מסמכים'; }
     else if (route === 'payables') { view = await viewPayables(a || 'open'); title = 'תשלומים לספקים'; }
@@ -226,6 +213,7 @@ export async function render() {
   wireShell();
   view.dispatchEvent(new Event('mounted'));
   document.querySelector('.ptabs a.on')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  maybeAutoSync();
 }
 
 function renderLogin() {

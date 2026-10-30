@@ -86,7 +86,7 @@ export async function attachDialog(files, { table, id, projectId, docType, label
 }
 
 // ===== גוגל דרייב =====
-// מבנה: גרושר - קבלני משנה / <לקוח> / <פרויקט או כללי> / <סוג מסמך> / קובץ
+// מבנה: <שורש> / <לקוח> / <פרויקט או כללי> / מסמכים / <סוג מסמך> / קובץ (נתונים ודוחות לכל פרויקט: drivesync.js)
 async function projName(id) {
   if (!id) return 'כללי';
   const [p] = await db.select('projects', { eq: { id } });
@@ -94,7 +94,7 @@ async function projName(id) {
 }
 export async function mirror(row) {
   if (!gEnabled() || !gReady() || row.drive_id) return false;
-  const folder = await folderPath([tenant()?.name || 'לקוח', await projName(row.project_id), INTAKE_TYPES[row.doc_type]?.folder || 'מסמכים']);
+  const folder = await folderPath([tenant()?.name || 'לקוח', await projName(row.project_id), 'מסמכים', INTAKE_TYPES[row.doc_type]?.folder || 'כללי']);
   const b = await fileBlob(row);
   const r = await driveUpload(b, { name: row.name, folder, description: `${INTAKE_TYPES[row.doc_type]?.label || 'מסמך'} · הועלה ${new Date(row.created_at || Date.now()).toLocaleDateString('he-IL')}` });
   await db.update('files', row.id, { drive_id: r.id });
@@ -113,7 +113,8 @@ export async function syncDrive(data, { backup = true } = {}) {
 }
 
 const TABLE_NAMES = { projects: 'פרויקטים', mcs: 'קבלנים ראשיים', items: 'כתב כמויות', lines: 'תמחיר', vos: 'הוראות שינוי', expenses: 'הוצאות', workers: 'עובדים', entries: 'יומן עבודה', days: 'ימי עבודה',
-  wqty: 'כמויות מהשטח', pos: 'הזמנות רכש', poLines: 'שורות הזמנה', bills: 'חשבונות', billLines: 'שורות חשבון', fines: 'קנסות', payments: 'תשלומים', vendors: 'ספקים', documents: 'מסמכי ספקים', guarantees: 'ערבויות' };
+  wqty: 'כמויות מהשטח', pos: 'הזמנות רכש', poLines: 'שורות הזמנה', bills: 'חשבונות', billLines: 'שורות חשבון', fines: 'קנסות', payments: 'תשלומים', vendors: 'ספקים', documents: 'מסמכי ספקים', guarantees: 'ערבויות',
+  contracts: 'התקשרויות', cLines: 'שורות התקשרות', cos: 'הוראות שינוי יזם', coLines: 'שורות הוראות שינוי', cbills: 'חשבונות קבלנים', cbLines: 'שורות חשבונות קבלנים', income: 'הכנסות יזם', alertStates: 'מצב התרעות' };
 export async function backupToDrive(data, files) {
   const XLSX = window.XLSX || (await import('./import.js').then(m => m.loadXLSX()));
   const wb = XLSX.utils.book_new();
@@ -128,11 +129,11 @@ export async function backupToDrive(data, files) {
   const key = 'backup-' + S.tenantId;
   const c = (await import('./google.js')).gconf();
   try {
-    const r = await driveUpload(blob, { name: 'גיבוי נתונים.xlsx', folder, fileId: c.folders?.[key] });
+    const r = await driveUpload(blob, { name: 'גיבוי נתונים - כל הלקוח.xlsx', folder, fileId: c.folders?.[key] });
     setGconf({ folders: { ...(await import('./google.js')).gconf().folders, [key]: r.id } });
   } catch (e) {
     if (c.folders?.[key] && /404/.test(e.message)) { // הקובץ נמחק מהדרייב: יוצרים חדש
-      const r = await driveUpload(blob, { name: 'גיבוי נתונים.xlsx', folder });
+      const r = await driveUpload(blob, { name: 'גיבוי נתונים - כל הלקוח.xlsx', folder });
       setGconf({ folders: { ...(await import('./google.js')).gconf().folders, [key]: r.id } });
     } else throw e;
   }

@@ -6,7 +6,8 @@ import { n, EXPENSE_KINDS, VO_STATUS } from '../calc.js';
 import { DOC_TYPES, GUAR_KINDS } from '../docs.js';
 import { PAY_TYPES } from '../quota.js';
 import { INTAKE_TYPES, buildContext, buildPrompt, extractJson, normalize, fillMatches, checks, fileKind } from '../intake.js';
-import { uploadFile, openFile, fileBlob, FILE_STATUS, syncDrive } from '../files.js';
+import { uploadFile, openFile, fileBlob, FILE_STATUS } from '../files.js';
+import { syncAll } from '../drivesync.js';
 import { gconf, gReady, gEnabled, gConnect } from '../google.js';
 import { loadXLSX, bestSheet } from '../import.js';
 
@@ -93,8 +94,7 @@ export async function viewInbox(projectId = null, P = null) {
     try {
       if (!gReady()) await gConnect();
       $('#gst', el).textContent = 'מסנכרן...';
-      const r = await syncDrive(data);
-      toast(`הדרייב עודכן: ${r.n} קבצים חדשים וגיבוי נתונים${r.fail ? ` · ${r.fail} נכשלו` : ''}`, r.fail ? 'warn' : 'ok'); render();
+      await syncAll(); render();
     } catch (e) { toast(e.message, 'bad'); render(); }
   };
   return el;

@@ -355,7 +355,7 @@ export function cbillSheet(P, billId) {
   const rows = R.rows.filter(r => r.cumSub > 0 || r.prev > 0);
   const el = h(`<div>
     <div class="top no-print"><div><h1>בדיקת חשבון והמלצה לתשלום</h1><div class="sub">הדפסה ← שמירה כ-PDF</div></div>
-      <div class="actions"><button class="btn small" id="print">הדפסה / PDF</button><a class="btn ghost small" href="#/project/${P.id}/cbill/${billId}">חזרה לחשבון</a></div></div>
+      <div class="actions"><button class="btn small" id="print">הדפסה / PDF</button><button class="btn ghost small" id="gdrive">שמירה לדרייב</button><a class="btn ghost small" href="#/project/${P.id}/cbill/${billId}">חזרה לחשבון</a></div></div>
     <div class="rpage">
       <div class="rephead"><img src="icons/icon-192.png" alt=""><div><b>בדיקת חשבון והמלצה לתשלום</b><span>${esc(tenant()?.name || '')} · ${esc(P.project.name)} · הופק ${fmtDate(todayStr())}</span></div></div>
       <table class="sumt"><tr><td>קבלן / ספק</td><td><b>${esc(C.vendor_name || '')}</b></td><td>התקשרות</td><td>${esc(C.number || '')} ${esc(C.title)}</td></tr>
@@ -377,5 +377,6 @@ export function cbillSheet(P, billId) {
       <table class="sumt sig" style="margin-top:24px"><tr><td>נבדק ע"י: ${esc(b.checked_by || '______________')}</td><td>תאריך: ______________</td><td>חתימה: ______________</td></tr><tr><td>אושר לתשלום ע"י היזם: ______________</td><td>תאריך: ______________</td><td>חתימה: ______________</td></tr></table>
     </div></div>`);
   $('#print', el).onclick = () => window.print();
+  $('#gdrive', el).onclick = () => import('./reports.js').then(m => m.pdfToDrive($('.rpage', el), `בדיקת חשבון ${b.number} - ${C.vendor_name || ''}`, P.project));
   return el;
 }

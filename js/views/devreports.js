@@ -10,7 +10,7 @@ import { VENDOR_KINDS, DOC_TYPES, REQUIRED, vendorStatus, findVendor, guaranteeS
 import { ALERT_STATUS, defaultDecision, stateMap } from '../alertsui.js';
 import { projData } from './common.js';
 import { buildActions } from './home.js';
-import { T, exportTables, REPORTS } from './reports.js';
+import { T, exportTables, REPORTS, pdfToDrive } from './reports.js';
 
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const m0 = v => money(v, { sym: false });
@@ -69,7 +69,7 @@ export async function viewDevReports(kind) {
       ${kind === 'd-budget' ? `<label class="chk small"><input type="checkbox" id="items" ${o.items ? 'checked' : ''}> פירוט לפי סעיף</label>` : ''}
       ${kind === 'd-cash' ? `<label class="small mut">טבלה חודשית ל-<select id="hz">${[3, 6, 12].map(k => `<option value="${k}" ${+o.h === k ? 'selected' : ''}>${k} חודשים</option>`).join('')}</select></label>` : ''}
       ${kind === 'd-alerts' ? `<label class="chk small"><input type="checkbox" id="handled" ${o.handled ? 'checked' : ''}> כולל מה שטופל</label>` : ''}
-      <button class="btn ghost small" id="print">הדפסה / PDF</button><button class="btn ghost small" id="xl">ייצוא לאקסל</button></div>
+      <button class="btn ghost small" id="print">הדפסה / PDF</button><button class="btn ghost small" id="xl">ייצוא לאקסל</button><button class="btn ghost small" id="gdrive" title="שומר את הדוח כ-PDF בתיקיית הדוחות של הפרויקט בדרייב">שמירה לדרייב</button></div>
     <div id="rep"></div></div>`);
   const rerender = () => viewDevReports(kind).then(v => el.replaceWith(v));
   $('#pid', el).onchange = e => { setOpt({ pid: e.target.value }); rerender(); };
@@ -81,6 +81,7 @@ export async function viewDevReports(kind) {
   $('#rep', el).append(h(`<div class="rephead"><img src="icons/icon-192.png" alt=""><div><b>${esc(title)}</b><span>${esc(tenant()?.name || '')} · ${esc(scope || '')} · הופק ${fmtDate(todayStr())}</span></div></div>`), h(`<p class="small mut repnote">${NOTE[kind]}</p>`), body);
   $('#print', el).onclick = () => window.print();
   $('#xl', el).onclick = () => exportTables($('#rep', el), `${title} - ${scope}`);
+  $('#gdrive', el).onclick = () => pdfToDrive($('#rep', el), title, o.pid ? devs.find(p => p.id === o.pid) : null);
   return el;
 }
 
@@ -267,4 +268,15 @@ function repAlerts({ data, sums, o, multi }) {
   return h(`<div class="card" data-sheet="התרעות חריגה"><div class="small mut" style="margin:-4px 0 8px">${list.length} התרעות${o.handled ? '' : ' פתוחות ובטיפול'} · ${red} בחומרה גבוהה</div>
     ${T([['חומרה'], ['נושא'], ['סכום', 1], ['החלטה נדרשת'], ['מצב'], ['עודכן']], rows, null, 'אין התרעות פתוחות')}
     <p class="small mut">ההחלטה הנדרשת והמצב נקבעים בדף "מה דורש טיפול" (כפתור ✎). משם גם שולחים כל התרעה בוואטסאפ או במייל.</p></div>`);
+}
+
+/** הדוחות של פרויקט יזם אחד, לשמירה בדרייב */
+export function devReportNodes(data, pid) {
+  if (!can.prices()) return [];
+  const p = data.projects.find(x => x.id === pid); if (!p) return [];
+  const pd = projData(data, pid), vat = settings().vat_pct;
+  const sums = [{ p, pd, s: devSummary({ project: p, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses, cos: pd.cos, coLines: pd.coLines, cbills: pd.cbills, cbLines: pd.cbLines, vatPct: vat }) }];
+  const o = { pid, h: 12, items: true, handled: false };
+  const fns = { 'd-budget': repBudget, 'd-cash': repCash, 'd-cos': repCos, 'd-cbills': repCbills, 'd-vendors': repVendors, 'd-docs': repDocs, 'd-group': repGroup, 'd-alerts': repAlerts };
+  return DEV_REPORTS.filter(([k]) => k !== 'd-group').map(([kind, title]) => { try { return { kind, title, node: fns[kind]({ data, sums, o, multi: false }) }; } catch (e) { console.warn('report', kind, e); return null; } }).filter(Boolean);
 }

@@ -47,7 +47,7 @@ function googleCard() {
 function wireGoogle(el) {
   const f = $('#gf', el); if (!f) return;
   f.onsubmit = e => { e.preventDefault(); const v = Object.fromEntries(new FormData(f)); const prev = gconf();
-    setGconf({ clientId: v.clientId.trim(), rootName: v.rootName.trim() || 'גרושר - קבלני משנה', folders: v.rootName.trim() !== prev.rootName ? {} : prev.folders }); toast('נשמר'); render(); };
+    setGconf({ clientId: v.clientId.trim(), rootName: v.rootName.trim() || 'גרושר - בקרת עלויות ותזרים', folders: v.rootName.trim() !== prev.rootName ? {} : prev.folders }); toast('נשמר'); render(); };
   $('#gcon', el)?.addEventListener('click', async () => {
     const v = Object.fromEntries(new FormData(f)); if (v.clientId.trim()) setGconf({ clientId: v.clientId.trim() });
     try { await gConnect(); toast('מחובר ל-Google'); render(); } catch (e) { toast(e.message, 'bad'); }
