@@ -8,13 +8,14 @@ import { store } from '../util.js';
 import { has } from '../modules.js';
 import { loadTemplates, templatesCard, wireTemplatesCard } from './templates.js';
 import { closedThrough, nextToClose, todayStr } from '../monthclose.js';
+import { contactPicker, wireContactPickers, loadContacts, cardFields, ensureLinksLocal } from '../contacts.js';
 import { composeMail, googleConfigured } from '../mailui.js';
 import { waLink, mailLink } from '../alertsui.js';
 
-const tenantForm = (t = {}) => `<div class="grid g2">
+const tenantForm = (t = {}, contacts = null) => `<div class="grid g2">
   ${field('שם החברה', 'name', t.name, { req: true })}${field('ח"פ', 'company_no', t.company_no)}
-  ${field('מקצועות', 'trades', t.trades, { hint: 'למשל: גבס, תקרות, בידוד' })}${field('איש קשר', 'contact_name', t.contact_name)}
-  ${field('טלפון', 'phone', t.phone, { type: 'tel', attrs: 'dir="ltr"' })}${field('אימייל', 'email', t.email, { type: 'email', attrs: 'dir="ltr"' })}</div>`;
+  ${field('מקצועות', 'trades', t.trades, { hint: 'למשל: גבס, תקרות, בידוד' })}${contacts ? contactPicker('איש קשר', 'contact_id', contacts.find(c => c.id === t.contact_id)) : field('איש קשר', 'contact_name', t.contact_name)}
+  ${contacts ? '' : `${field('טלפון', 'phone', t.phone, { type: 'tel', attrs: 'dir="ltr"' })}${field('אימייל', 'email', t.email, { type: 'email', attrs: 'dir="ltr"' })}`}</div>`;
 
 export async function viewClients() {
   if (!can.admin()) return h('<div class="empty">אין הרשאה</div>');
@@ -29,6 +30,7 @@ export async function viewClients() {
     const v = await modal({ title: 'לקוח חדש', body: tenantForm(), validate: d => !d.name.trim() && 'חסר שם' });
     if (!v) return;
     const [t] = await db.insert('tenants', { ...v, settings: { employer_factor: 1.3, crit_pct: 15, vat_pct: 18, overhead_pct: 0, work_days_month: 22, day_hours: 9, quota_warn_pct: 80, quota_gap_pct: 10 } });
+    if (v.phone || v.email) { const [c] = await db.insert('contacts', { tenant_id: t.id, name: v.contact_name?.trim() || v.name.trim(), company: v.name.trim(), phone: v.phone || null, email: v.email || null }); await db.update('tenants', t.id, { contact_id: c.id }); }
     await reloadTenants(); S.tenantId = t.id; store('subcon-tenant', t.id); toast('הלקוח נוסף'); location.hash = '#/client/' + t.id;
   };
   $$('[data-open]', el).forEach(b => b.onclick = () => { S.tenantId = b.dataset.open; store('subcon-tenant', S.tenantId); reloadTenants().then(() => { location.hash = '#/'; render(); }); });
@@ -43,6 +45,8 @@ export async function viewClient(id) {
   const st = { employer_factor: 1.3, crit_pct: 15, vat_pct: 18, overhead_pct: 0, work_days_month: 22, day_hours: 9, quota_warn_pct: 80, quota_gap_pct: 10, cash_opening: 0, cash_min: 0, supplier_terms_days: 60, ...(t.settings || {}) };
   const [members, mcs, projects, series] = await Promise.all([db.rpc('tenant_members', { t: id }), db.select('main_contractors', { eq: { tenant_id: id }, order: 'name' }), db.select('projects', { eq: { tenant_id: id }, order: 'name' }),
     db.select('index_series', { eq: { tenant_id: id }, order: 'month' }).catch(() => [])]);
+  await ensureLinksLocal();
+  const contacts = await loadContacts(true);
   const tpls = await loadTemplates();
   const closes = await db.select('month_closes', { eq: { tenant_id: id }, order: 'month' }).catch(() => null);
   const through = closedThrough(closes || []), nextM = nextToClose(through, todayStr());
@@ -55,7 +59,7 @@ export async function viewClient(id) {
   const pname = pid => projects.find(p => p.id === pid)?.name || '';
   const el = h(`<div><div class="top"><div><h1>${esc(t.name)}</h1><div class="sub">הגדרות לקוח, משתמשים, קבלנים ראשיים ומזמינים</div></div></div>
   <div class="cols even">
-    <div class="card"><h2>פרטי הלקוח</h2><form id="tf">${tenantForm(t)}<button class="btn">שמירת פרטים</button></form></div>
+    <div class="card"><h2>פרטי הלקוח</h2><form id="tf">${tenantForm(t, contacts)}<button class="btn">שמירת פרטים</button></form></div>
     <div class="card"><h2>הגדרות חישוב</h2><form id="sf"><div class="grid g2">
       ${field('מקדם עלות מעביד', 'employer_factor', st.employer_factor, { type: 'number', hint: 'שכר ברוטו × מקדם = עלות מעביד. ברירת מחדל 1.30' })}
       ${field('סף חריגה קריטית (%)', 'crit_pct', st.crit_pct, { type: 'number' })}
@@ -112,14 +116,8 @@ export async function viewClient(id) {
   $('#tf', el).onsubmit = async e => {
     e.preventDefault(); const v = Object.fromEntries(new FormData(e.target));
     if (!v.name.trim()) return toast('חסר שם', 'bad');
-    await db.update('tenants', id, v);
-    // איש הקשר השתנה: פרויקטים שרשום בהם איש קשר משלהם ממשיכים לשלוח אליו. מציעים להחליף גם שם
-    const changed = ['contact_name', 'phone', 'email'].some(k => String(v[k] ?? '').trim() !== String(t[k] ?? '').trim());
-    const own = changed ? projects.filter(p => p.notify_phone || p.notify_emails || p.notify_name) : [];
-    if (own.length && await confirmBox('לעדכן גם בפרויקטים?', `בפרויקטים ${own.map(p => p.name).join(', ')} רשום איש קשר משלהם להתרעות בוואטסאפ ובמייל (${own.map(p => [p.notify_name, p.notify_phone].filter(Boolean).join(' ')).filter(Boolean).join(', ')}). ההתרעות שם עדיין נשלחות אליו. להחליף גם שם ל${v.contact_name || 'איש הקשר החדש'}${v.phone ? ' ' + v.phone : ''}?`, 'כן, לעדכן בפרויקטים')) {
-      for (const p of own) await db.update('projects', p.id, { notify_name: v.contact_name?.trim() || null, notify_phone: v.phone?.trim() || null, notify_emails: v.email?.trim() || null });
-      S.projList = null;
-    }
+    const c = (await loadContacts()).find(x => x.id === v.contact_id);
+    await db.update('tenants', id, { ...v, contact_id: c?.id || null, ...cardFields(c) });
     await reloadTenants(); toast('נשמר'); render();
   };
   $('#sf', el).onsubmit = async e => {
@@ -189,6 +187,7 @@ export async function viewClient(id) {
   $$('[data-uninv]', el).forEach(b => b.onclick = async () => { const i = invites.find(x => x.id === b.dataset.uninv);
     if (await confirmBox('ביטול הזמנה', `${i.email} לא יצטרף ללקוח גם אם יירשם.`, 'ביטול ההזמנה', true)) { await db.remove('member_invites', i.id); toast('ההזמנה בוטלה'); render(); } });
   wireTemplatesCard(el, tpls, render);
+  wireContactPickers($('#tf', el));
   $('#closem', el)?.addEventListener('click', async () => {
     const [ex, inc] = await Promise.all([db.select('expenses', { eq: { tenant_id: id } }), db.select('dev_income', { eq: { tenant_id: id } }).catch(() => [])]);
     const end = nextM, inM = d => d && String(d).slice(0, 7) === end, upto = d => d && String(d).slice(0, 7) <= end;
@@ -212,9 +211,8 @@ export async function viewClient(id) {
   $$('[data-em]', el).forEach(b => b.onclick = () => memberDlg({ email: b.dataset.em, role: b.dataset.role, pids: b.dataset.pids }));
   $$('[data-rm]', el).forEach(b => b.onclick = async () => { if (await confirmBox('הסרת משתמש', 'המשתמש לא יוכל לראות יותר את נתוני הלקוח.', 'הסרה', true)) { await db.rpc('remove_member', { id: b.dataset.rm }); render(); } });
   const mcDlg = async (m = {}) => {
-    const v = await modal({ title: m.id ? 'עריכת קבלן ראשי / מזמין' : 'קבלן ראשי / מזמין חדש', body: mcForm(m), validate: d => !d.name.trim() && 'חסר שם' });
-    if (!v) return;
-    const row = { ...v, pay_terms_days: Math.round(n(v.pay_terms_days)) };
+    const row = await mcModal(m);
+    if (!row) return;
     if (m.id) await db.update('main_contractors', m.id, row); else await db.insert('main_contractors', { tenant_id: id, ...row });
     toast('נשמר'); render();
   };
@@ -228,6 +226,13 @@ export async function viewClient(id) {
   return el;
 }
 
-export const mcForm = (m = {}) => `<div class="grid g2">${field('שם', 'name', m.name, { req: true })}${field('ח"פ', 'company_no', m.company_no)}
-  ${field('איש קשר', 'contact_name', m.contact_name)}${field('טלפון', 'phone', m.phone, { type: 'tel', attrs: 'dir="ltr"' })}
-  ${field('אימייל', 'email', m.email, { type: 'email', attrs: 'dir="ltr"' })}${field('תנאי תשלום (שוטף + ימים)', 'pay_terms_days', m.pay_terms_days ?? 60, { type: 'number' })}</div>`;
+export const mcForm = (m = {}, contacts = []) => `<div class="grid g2">${field('שם', 'name', m.name, { req: true })}${field('ח"פ', 'company_no', m.company_no)}
+  ${contactPicker('איש קשר', 'contact_id', contacts.find(c => c.id === m.contact_id))}${field('תנאי תשלום (שוטף + ימים)', 'pay_terms_days', m.pay_terms_days ?? 60, { type: 'number' })}</div>`;
+/** חלון קבלן ראשי / מזמין: מחזיר שורה לשמירה (עם העתק פרטי איש הקשר) או null */
+export async function mcModal(m = {}, title = null) {
+  const contacts = await loadContacts();
+  const v = await modal({ title: title || (m.id ? 'עריכת קבלן ראשי / מזמין' : 'קבלן ראשי / מזמין חדש'), body: mcForm(m, contacts), onMount: el => wireContactPickers(el), validate: d => !d.name.trim() && 'חסר שם' });
+  if (!v) return null;
+  const c = (await loadContacts()).find(x => x.id === v.contact_id);
+  return { name: v.name.trim(), company_no: v.company_no || null, pay_terms_days: Math.round(n(v.pay_terms_days)), contact_id: c?.id || null, ...cardFields(c) };
+}

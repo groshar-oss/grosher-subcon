@@ -53,7 +53,7 @@ export function modal({ title, body, ok = 'שמירה', cancel = 'ביטול', w
       e?.preventDefault();
       const data = formData(form);
       const err = validate ? await validate(data, form) : null;
-      if (err) { const box = $('.err', el); box.textContent = err; box.hidden = false; return; }
+      if (err) { const box = $('.err', el); box.textContent = err; box.hidden = false; box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); toast(err, 'bad'); return; }
       close(data);
     };
     const okBtn = $('[data-ok]', el); if (okBtn) okBtn.onclick = submit;

@@ -19,6 +19,7 @@ import { isDev, PROJECT_TYPES, party } from '../dev.js';
 import { devControl, devContracts } from './dev.js';
 import { devCos, devCbills, cbillView, cbillSheet } from './devflow.js';
 import { devCashTab } from './devcash.js';
+import { saveProjectContacts } from '../contacts.js';
 import { saveTemplateDialog } from './templates.js';
 import { salesTab, bankTab } from './sales.js';
 
@@ -204,7 +205,10 @@ function tabSettings(P) {
     if (row.modules) { const before = mods(P.project); for (const [k, on] of Object.entries(row.modules)) if (!!before[k] !== on) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'מודולים בפרויקט', field: MODULES[k].label, old_value: before[k] ? 'דלוק' : 'כבוי', new_value: on ? 'דלוק' : 'כבוי' }); }
     if (row.spread && JSON.stringify(row.spread) !== JSON.stringify(P.project.spread || null)) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'פריסה לאורך הפרויקט', field: row.spread.floors.length ? `${row.spread.floors.length} שלבים` : (row.spread.curve === 's' ? 'עקומת S' : 'שווה בכל חודש'), old_value: P.project.spread ? 'הוגדר' : '', new_value: 'עודכן' });
     for (const [k, nv] of Object.entries(row)) { if (k === 'modules' || k === 'spread') continue; const ov = P.project[k]; if (String(ov ?? '') !== String(nv ?? '')) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'הגדרות פרויקט', field: k, old_value: ov, new_value: nv }); }
-    await db.update('projects', P.id, row); toast('נשמר'); render();
+    await db.update('projects', P.id, row);
+    const pc = await saveProjectContacts(P.id, v.pc_json);
+    if (pc) for (const k of ['notify_phone', 'notify_emails', 'approver_email']) if (String(P.project[k] ?? '') !== String(pc[k] ?? '')) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'אנשי קשר בפרויקט', field: k, old_value: P.project[k], new_value: pc[k] });
+    toast('נשמר'); render();
   };
   $('#savetpl', el)?.addEventListener('click', () => saveTemplateDialog(P));
   $('#del', el).onclick = async () => {

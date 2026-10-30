@@ -50,6 +50,7 @@ export function modeSwitch(onChange) {
 
 // טעינת כל נתוני הלקוח הנבחר
 export async function loadTenantData(tenantId = S.tenantId) {
+  if (tenantId === S.tenantId) { try { const { ensureLinksLocal } = await import('./contacts.js'); await ensureLinksLocal(); } catch (e) { console.warn('contacts', e); } }
   const q = { eq: { tenant_id: tenantId } };
   const [projects, mcs] = await Promise.all([db.select('projects', { ...q, order: 'created_at' }), can.prices() ? db.select('main_contractors', { ...q, order: 'name' }) : []]);
   if (tenantId === S.tenantId) S.projList = { t: tenantId, list: projects };

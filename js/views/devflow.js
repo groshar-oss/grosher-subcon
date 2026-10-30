@@ -120,7 +120,8 @@ export async function coDialog(P, co = null) {
       e.target.value = ''; draw(); });
     $('#addfree', el)?.addEventListener('click', () => { const it = itemBy[$('[name=boq_item_id]', el).value]; lines.push({ contract_line_id: null, description: '', unit: it?.unit || '', qty: null, price_sale: null, price_contract: null, price_requested: null, price_approved: null }); draw(); });
     $('[name=stage]', el)?.addEventListener('change', e => { if (e.target.value === 'approved' && !$('[name=approved_date]', el).value) $('[name=approved_date]', el).value = todayStr(); if (e.target.value === 'executed' && !$('[name=executed_date]', el).value) $('[name=executed_date]', el).value = todayStr(); });
-  }, validate: d => {
+  }, validate: d => { const err = coCheck(d); if (err) after = null; return err; } });
+  function coCheck(d) {
     if (!d.title.trim()) return 'חסר תיאור השינוי';
     if (!lines.length) return 'אין שורות בהוראת השינוי';
     if (lines.some(l => !String(l.description || '').trim())) return 'יש שורה בלי תיאור';
@@ -131,7 +132,7 @@ export async function coDialog(P, co = null) {
     if (after === 'send' && lines.some(needsAnalysis) && !d.price_analysis.trim()) { after = null; return 'לפני שליחה ליזם: יש שורה בלי מחיר בחוזה ובלי מחיר בכתב הכמויות, צריך לכתוב ניתוח מחיר'; }
     if (d.approved_date && lines.some(needsAnalysis) && !d.price_analysis.trim()) return 'יש שורה בלי מחיר בחוזה ובלי מחיר בכתב הכמויות: צריך לכתוב ניתוח מחיר לפני אישור';
     return null;
-  } });
+  }
   if (!v || ro) return;
   const c = contracts.find(x => x.id === v.contract_id);
   const row = { number: v.number.trim() || null, title: v.title.trim(), contract_id: v.contract_id || null, vendor_name: c?.vendor_name || null, boq_item_id: v.boq_item_id || null, initiator: v.initiator, initiator_name: v.initiator_name || null,

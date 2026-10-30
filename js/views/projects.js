@@ -4,9 +4,10 @@ import { db } from '../db.js';
 import { S, can, loadTenantData, modeSwitch, settings, render } from '../app.js';
 import { n } from '../calc.js';
 import { STATUS, CONTRACT, projData, summarize, rowAttr, modeLine } from './common.js';
-import { mcForm } from './clients.js';
+import { mcModal } from './clients.js';
 import { isDev, isExec, party, partyOfMany, PROJECT_TYPES, devSummary } from '../dev.js';
 import { modulesFieldset, readModules, syncModulesType, mods, moduleTags } from '../modules.js';
+import { projectContactsBlock, wireProjectContacts, saveProjectContacts } from '../contacts.js';
 import { loadTemplates, templatePicker, wireTemplatePicker, applyTemplate } from './templates.js';
 import { spreadBlock, wireSpread, readSpread } from './spreadui.js';
 
@@ -29,27 +30,22 @@ export function projectForm(p = {}, mcs = [], { isNew = false } = {}) {
   ${modulesFieldset(p, { isNew })}
   <div class="idxonly" ${(isNew ? false : mods(p).index) ? '' : 'hidden'}><div class="grid g2">${field('מדד בסיס של הפרויקט (מדד תשומות הבנייה)', 'base_index', p.base_index, { type: 'number', attrs: 'step="any" dir="ltr"' })}<p class="small mut" style="align-self:end">החוזה צמוד למדד. המדד של כל חודש מוזן פעם אחת לכל הפרויקטים, ב"הגדרות לקוח ומשתמשים".</p></div></div>
   ${spreadBlock(p, { isNew, on: !isNew && mods(p).spread })}
-  <div class="devonly" ${dev ? '' : 'hidden'}><h3 style="margin:10px 0 6px">אישור הוראות שינוי</h3><p class="small mut" style="margin:0 0 6px">היזם שמאשר בחתימה. הבקשה לאישור נשלחת למייל הזה, עם קישור לחתימה.</p>
-  <div class="grid g2">${field('שם המאשר מטעם היזם', 'approver_name', p.approver_name || '')}${field('מייל לאישורים', 'approver_email', p.approver_email || '', { attrs: 'dir="ltr" inputmode="email"' })}</div></div>
-  <h3 style="margin:10px 0 6px">נמענים להתרעות בפרויקט</h3><p class="small mut" style="margin:0 0 6px">לכפתורי הוואטסאפ והמייל ליד כל התרעה. אם מלא, גובר על איש הקשר בכרטיס הלקוח. ריק = איש הקשר והטלפון מכרטיס הלקוח.</p>
-  <div class="grid g3">${field('איש קשר אצל הלקוח', 'notify_name', p.notify_name || '')}${field('נייד לוואטסאפ', 'notify_phone', p.notify_phone || '', { attrs: 'dir="ltr" inputmode="tel"' })}${field('מיילים (מופרדים בפסיק)', 'notify_emails', p.notify_emails || '', { attrs: 'dir="ltr"' })}</div>`;
+  ${projectContactsBlock(p.id)}`;
 }
 
 export async function projectRow(v, mcs, type = null) {
   let mcId = v.main_contractor_id;
   if (mcId === '__new') {
-    const m = await modal({ title: `${(v.project_type || type) === 'exec' ? 'מזמין' : 'קבלן ראשי'} חדש`, body: mcForm(), validate: d => !d.name.trim() && 'חסר שם' });
-    if (m) { const [r] = await db.insert('main_contractors', { tenant_id: S.tenantId, ...m, pay_terms_days: Math.round(n(m.pay_terms_days)) }); mcId = r.id; mcs.push(r); }
+    const m = await mcModal({}, `${(v.project_type || type) === 'exec' ? 'מזמין' : 'קבלן ראשי'} חדש`);
+    if (m) { const [r] = await db.insert('main_contractors', { tenant_id: S.tenantId, ...m }); mcId = r.id; mcs.push(r); }
     else mcId = null;
   }
   const row = {
     name: v.name.trim(), main_contractor_id: nullIfEmpty(mcId), address: v.address, owner_name: v.owner_name,
     start_date: nullIfEmpty(v.start_date), end_date: nullIfEmpty(v.end_date), contract_type: v.contract_type, status: v.status,
     pay_terms_days: Math.round(n(v.pay_terms_days)), overhead_pct: n(v.overhead_pct), retention_pct: n(v.retention_pct), retention_cap: numOrNull(v.retention_cap),
-    insurance_pct: n(v.insurance_pct), shared_pct: n(v.shared_pct), tax_pct: n(v.tax_pct), base_index: numOrNull(v.base_index),
-    notify_name: v.notify_name?.trim() || null, notify_phone: v.notify_phone?.trim() || null, notify_emails: v.notify_emails?.trim() || null
+    insurance_pct: n(v.insurance_pct), shared_pct: n(v.shared_pct), tax_pct: n(v.tax_pct), base_index: numOrNull(v.base_index)
   };
-  if ('approver_email' in v) { row.approver_name = v.approver_name?.trim() || null; row.approver_email = v.approver_email?.trim() || null; }
   if (v.project_type) row.project_type = v.project_type;
   const t = v.project_type || type || 'sub';
   if (Object.keys(v).some(k => k.startsWith('mod_'))) { row.modules = readModules(v, t); row.indexation = !!row.modules.index; }
@@ -69,19 +65,7 @@ export function wireProjectType(el) {
     const own = $('[name=owner_name]', el)?.closest('.fld')?.querySelector('span'); if (own) own.textContent = dev ? 'יזם / בעלים' : exec ? 'בעל הנכס (אם שונה מהמזמין)' : 'מזמין / יזם'; };
   $$('[name=project_type]', el).forEach(r => r.onchange = () => { sync(); syncModulesType(el, typeNow()); }); sync();
   wireModules(el);
-  wireNotifyPicker(el);
-}
-// נמען להתרעות: בחירה מספר הטלפונים ממלאת נייד ומייל
-async function wireNotifyPicker(el) {
-  const nm = $('[name=notify_name]', el); if (!nm || !S.tenantId) return;
-  const list = await db.select('contacts', { eq: { tenant_id: S.tenantId }, order: 'name' }).catch(() => []);
-  if (!list.length) return;
-  const id = 'ctl' + Math.random().toString(36).slice(2, 7);
-  nm.setAttribute('list', id); nm.setAttribute('placeholder', 'הקלדה לבחירה מספר הטלפונים');
-  nm.insertAdjacentHTML('afterend', `<datalist id="${id}">${list.map(c => `<option value="${esc(c.name)}">${esc([c.company, c.phone].filter(Boolean).join(' · '))}</option>`).join('')}</datalist>`);
-  const pick = () => { const c = list.find(x => x.name === nm.value.trim()); if (!c) return;
-    if (c.phone) $('[name=notify_phone]', el).value = c.phone; if (c.email) $('[name=notify_emails]', el).value = c.email; };
-  nm.addEventListener('change', pick); nm.addEventListener('input', pick);
+  wireProjectContacts(el);
 }
 // מודול הצמדה: שדה מדד הבסיס מופיע רק כשהמודול דלוק
 export function wireModules(el) {
@@ -99,6 +83,7 @@ export async function newProject(mcs) {
   const row = await projectRow(v, mcs);
   if (row.project_type === 'dev') Object.assign(row, { main_contractor_id: null, retention_pct: 0, insurance_pct: 0, shared_pct: 0, tax_pct: 0, overhead_pct: 0 });
   const [p] = await db.insert('projects', { tenant_id: S.tenantId, ...row });
+  await saveProjectContacts(p.id, v.pc_json);
   const tpl = tpls.find(t => t.id === v.tpl); if (tpl) await applyTemplate(tpl, p);
   toast(row.project_type === 'dev' ? 'הפרויקט נוסף. השלב הבא: קליטת התקציב' : 'הפרויקט נוסף. השלב הבא: כתב כמויות');
   location.hash = `#/project/${p.id}/boq`;

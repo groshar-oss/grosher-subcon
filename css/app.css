@@ -371,3 +371,14 @@ fieldset.mods legend{padding:0 6px}
 .pbar i{display:block;height:100%;background:#f0a020;border-radius:6px}
 .pbar i.ok{background:#1f9d6a}
 .plt input{width:100%;box-sizing:border-box}
+
+/* חבילה 22: בחירה מספר הטלפונים */
+.cpick{position:relative}
+.cprow{display:flex;gap:6px;align-items:center}
+.cprow .cpq{flex:1 1 auto;min-width:0}
+.cpres{position:absolute;inset-inline:0;top:100%;z-index:30;background:var(--card,#fff);border:1px solid var(--line,#dfe4ee);border-radius:10px;box-shadow:0 8px 24px rgba(20,36,92,.14);max-height:260px;overflow:auto;margin-top:2px}
+.cpres button{display:block;width:100%;text-align:right;background:none;border:0;padding:8px 10px;cursor:pointer;font:inherit;border-bottom:1px solid var(--line,#eef1f6)}
+.cpres button:hover,.cpres button:focus{background:rgba(47,91,234,.07)}
+.cpinfo{display:block;margin-top:3px}
+.pclist .pcrm{margin:-4px 0 8px}
+.cused{color:#2f5bea;margin-top:2px}

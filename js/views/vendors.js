@@ -3,6 +3,7 @@ import { guarVisible } from '../modules.js';
 import { composeMail } from '../mailui.js';
 import { h, esc, $, $$, modal, field, select, area, toast, money, fmtDate, nullIfEmpty, confirmBox, WA_ICON } from '../util.js';
 import { phoneIntl } from '../alertsui.js';
+import { contactPicker, wireContactPickers, loadContacts, cardFields, propagateContact, usageMap, dropContactsCache, ensureLinksLocal } from '../contacts.js';
 import { db } from '../db.js';
 import { S, can, render, loadTenantData, logChange, reloadTenants } from '../app.js';
 import { n } from '../calc.js';
@@ -61,9 +62,10 @@ function tabList(data) {
 
 async function vendorDialog(data, v) {
   const edit = can.expense(), today = todayStr();
+  const contacts = await loadContacts();
   const docs = v ? data.documents.filter(d => d.vendor_id === v.id) : [];
   const body = `<div class="grid g2">${field('שם', 'name', v?.name, { req: true })}${select('סוג', 'kind', VENDOR_KINDS, v?.kind || 'supplier')}
-    ${field('ח"פ / ע"מ', 'company_no', v?.company_no)}${field('איש קשר', 'contact_name', v?.contact_name)}${field('טלפון', 'phone', v?.phone, { attrs: 'dir="ltr" inputmode="tel"' })}${field('אימייל', 'email', v?.email, { type: 'email', attrs: 'dir="ltr"' })}
+    ${field('ח"פ / ע"מ', 'company_no', v?.company_no)}${edit ? contactPicker('איש קשר', 'contact_id', contacts.find(c => c.id === v?.contact_id)) : field('איש קשר', 'contact_name', [v?.contact_name, v?.phone, v?.email].filter(Boolean).join(' · '), { attrs: 'readonly' })}
     ${field('בנק / סניף / חשבון', 'bank', v?.bank)}${field('תנאי תשלום (שוטף + ימים)', 'pay_terms_days', v?.pay_terms_days ?? '', { type: 'number', hint: 'ריק = לפי ההגדרה הכללית' })}</div>
     ${v ? `<label class="chk"><input type="checkbox" name="active" ${v.active !== false ? 'checked' : ''}> פעיל</label>` : ''}${area('הערות', 'notes', v?.notes)}
     ${v ? `<h3 style="margin:12px 0 6px">מסמכים ${edit ? '<button type="button" class="btn small" id="adddoc">+ מסמך</button>' : ''}</h3>${docTable(docs, today, edit)}` : '<p class="small mut">אחרי השמירה אפשר להוסיף מסמכים לכרטיס.</p>'}
@@ -71,11 +73,12 @@ async function vendorDialog(data, v) {
   const d = await modal({ title: v ? v.name : 'ספק / קבלן חדש', body, wide: true, ok: edit ? 'שמירה' : null, cancel: edit ? 'ביטול' : 'סגירה', onMount: (el, close) => {
     $('#adddoc', el)?.addEventListener('click', () => { close(null); docDialog(data, { vendor_id: v.id }, fresh => vendorDialog(fresh, fresh.vendors.find(x => x.id === v.id))); });
     wireAttach(el, FILES, null);
+    wireContactPickers(el);
     $$('[data-doc]', el).forEach(b => b.onclick = () => { close(null); docDialog(data, data.documents.find(x => x.id === b.dataset.doc), fresh => vendorDialog(fresh, fresh.vendors.find(x => x.id === v.id))); });
     $('#delv', el)?.addEventListener('click', async () => { if (!(await confirmBox('מחיקת כרטיס', `למחוק את ${v.name} ואת המסמכים שלו? ההוצאות נשארות.`, 'מחיקה', true))) return; await db.remove('vendors', v.id); close(null); toast('נמחק'); render(); });
   }, validate: x => (!x.name.trim() ? 'חסר שם' : (!v || x.name.trim() !== v.name) && data.vendors.some(o => o.name.trim() === x.name.trim()) ? 'כבר יש כרטיס בשם הזה' : null) });
   if (!d || !edit) return;
-  const row = { name: d.name.trim(), kind: d.kind, company_no: d.company_no || null, contact_name: d.contact_name || null, phone: d.phone || null, email: d.email || null, bank: d.bank || null,
+  const row = { name: d.name.trim(), kind: d.kind, company_no: d.company_no || null, contact_id: d.contact_id || null, ...cardFields((await loadContacts()).find(c => c.id === d.contact_id)), bank: d.bank || null,
     pay_terms_days: d.pay_terms_days === '' ? null : Math.round(n(d.pay_terms_days)), notes: d.notes || null, active: v ? !!d.active : true };
   if (v) await db.update('vendors', v.id, row); else await db.insert('vendors', { tenant_id: S.tenantId, ...row });
   toast('נשמר'); render();
@@ -172,17 +175,18 @@ export async function guarDialog(data, g, preset = {}) {
 
 // ===== ספר טלפונים (כל משתמשי הלקוח רואים) =====
 export async function viewContacts() {
-  const list = await db.select('contacts', { eq: { tenant_id: S.tenantId }, order: 'name' });
+  await ensureLinksLocal();
+  const [list, used] = await Promise.all([db.select('contacts', { eq: { tenant_id: S.tenantId }, order: 'name' }), usageMap()]);
   const edit = can.expense();
-  const F = { q: '' };
-  const el = h(`<div><div class="top"><div><h1>ספר טלפונים</h1><div class="sub">משותף לכל משתמשי הלקוח · ${list.length} אנשי קשר</div></div></div>
-    <div class="actions" style="margin-bottom:12px;flex-wrap:wrap;gap:8px"><input id="q" type="search" placeholder="חיפוש שם, חברה, טלפון" style="flex:1 1 220px;max-width:340px">
+  const F = { q: '', used: false };
+  const el = h(`<div><div class="top"><div><h1>ספר טלפונים</h1><div class="sub">המקום היחיד לטלפונים ומיילים. כרטיס הלקוח, הספקים, הקבלנים הראשיים והפרויקטים בוחרים מכאן · ${list.length} אנשי קשר</div></div></div>
+    <div class="actions" style="margin-bottom:12px;flex-wrap:wrap;gap:8px"><input id="q" type="search" placeholder="חיפוש שם, חברה, טלפון" style="flex:1 1 220px;max-width:340px"><label class="chk small" style="margin:0"><input type="checkbox" id="fu"> רק מי שבשימוש</label>
       ${edit ? '<button class="btn" id="add">+ איש קשר</button><label class="btn ghost" style="cursor:pointer">ייבוא מאקסל<input type="file" id="imp" accept=".xlsx,.xls,.csv" hidden></label>' : ''}<button class="btn ghost" id="xl">ייצוא לאקסל</button></div>
     <div id="cl"></div></div>`);
   const draw = () => {
     const q = F.q;
-    const rows = list.filter(c => !q || [c.name, c.company, c.role, c.phone, c.phone2, c.email].join(' ').toLowerCase().includes(q.toLowerCase()) || (q.replace(/\D/g, '').length >= 3 && [c.phone, c.phone2].join(' ').replace(/\D/g, '').includes(q.replace(/\D/g, ''))));
-    $('#cl', el).innerHTML = `<div class="ctl">${rows.slice(0, 300).map(c => `<div class="ccard"><div class="cn"><b>${esc(c.name)}</b>${c.role ? `<span class="small mut"> · ${esc(c.role)}</span>` : ''}<div class="small mut">${esc(c.company || '')}</div></div>
+    const rows = list.filter(c => !F.used || used[c.id]).filter(c => !q || [c.name, c.company, c.role, c.phone, c.phone2, c.email].join(' ').toLowerCase().includes(q.toLowerCase()) || (q.replace(/\D/g, '').length >= 3 && [c.phone, c.phone2].join(' ').replace(/\D/g, '').includes(q.replace(/\D/g, ''))));
+    $('#cl', el).innerHTML = `<div class="ctl">${rows.slice(0, 300).map(c => `<div class="ccard"><div class="cn"><b>${esc(c.name)}</b>${c.role ? `<span class="small mut"> · ${esc(c.role)}</span>` : ''}<div class="small mut">${esc(c.company || '')}</div>${used[c.id] ? `<div class="small cused">🔗 ${used[c.id].map(esc).join(' · ')}</div>` : ''}</div>
       <div class="cp">${c.phone ? `<span class="nw"><a href="tel:${esc(c.phone)}" dir="ltr">${esc(c.phone)}</a> <a href="https://wa.me/${phoneIntl(c.phone)}" target="_blank" rel="noopener" class="wa-a" title="וואטסאפ" aria-label="וואטסאפ">${WA_ICON}</a></span>` : ''}${c.phone2 ? `<a href="tel:${esc(c.phone2)}" dir="ltr" class="small">${esc(c.phone2)}</a>` : ''}${c.email ? `<a href="#" data-mail="${esc(c.email)}" dir="ltr" class="small" title="שליחת מייל ישירה">${esc(c.email)}</a>` : ''}</div>
       ${edit ? `<button class="btn small ghost" data-c="${c.id}" aria-label="עריכה">✎</button>` : ''}</div>`).join('') || '<div class="card empty">אין אנשי קשר. אפשר לייבא מאקסל עם עמודות: שם, חברה, תפקיד, נייד, אימייל.</div>'}</div>
       ${rows.length > 300 ? `<p class="small mut">מוצגים 300 מתוך ${rows.length}. צמצמי בחיפוש.</p>` : ''}`;
@@ -191,6 +195,7 @@ export async function viewContacts() {
   };
   $('#q', el).oninput = e => { F.q = e.target.value.trim(); draw(); };
   $('#add', el)?.addEventListener('click', () => contactDialog(null));
+  $('#fu', el).onchange = e => { F.used = e.target.checked; draw(); };
   $('#imp', el)?.addEventListener('change', async e => {
     const f = e.target.files[0]; if (!f) return;
     try {
@@ -214,37 +219,24 @@ export async function viewContacts() {
   return el;
 }
 
-async function contactDialog(c) {
-  const body = `<div class="grid g2">${field('שם', 'name', c?.name, { req: true })}${field('חברה', 'company', c?.company)}${field('תפקיד', 'role', c?.role)}${field('נייד', 'phone', c?.phone, { attrs: 'dir="ltr" inputmode="tel"' })}
+export async function contactDialog(c, { name = '', noRender = false } = {}) {
+  const used = c ? ((await usageMap())[c.id] || []) : [];
+  const body = `<div class="grid g2">${field('שם', 'name', c?.name ?? name, { req: true })}${field('חברה', 'company', c?.company)}${field('תפקיד', 'role', c?.role)}${field('נייד', 'phone', c?.phone, { attrs: 'dir="ltr" inputmode="tel"' })}
     ${field('טלפון נוסף', 'phone2', c?.phone2, { attrs: 'dir="ltr" inputmode="tel"' })}${field('אימייל', 'email', c?.email, { type: 'email', attrs: 'dir="ltr"' })}</div>${area('הערות', 'notes', c?.notes)}
+    ${used.length ? `<p class="small"><b>בשימוש ב:</b> ${used.map(esc).join(' · ')}. שינוי כאן מתעדכן שם לבד.</p>` : ''}
     ${c ? '<p><button type="button" class="btn small ghost danger-t" id="delc">מחיקה</button></p>' : ''}`;
   const d = await modal({ title: c ? c.name : 'איש קשר חדש', body, onMount: (el, close) => {
-    $('#delc', el)?.addEventListener('click', async () => { if (!(await confirmBox('מחיקה', `למחוק את ${c.name}?`, 'מחיקה', true))) return; await db.remove('contacts', c.id); close(null); toast('נמחק'); render(); });
+    $('#delc', el)?.addEventListener('click', async () => {
+      if (!(await confirmBox('מחיקה', used.length ? `${c.name} בשימוש ב: ${used.join(', ')}. אחרי המחיקה המקומות האלה יישארו בלי איש קשר. למחוק?` : `למחוק את ${c.name}?`, 'מחיקה', true))) return;
+      await propagateContact(c.id, { deleted: true }); await db.remove('contacts', c.id); dropContactsCache(); S.projList = null; await reloadTenants(); close(null); toast('נמחק'); render(); });
   }, validate: x => (!x.name.trim() ? 'חסר שם' : null) });
-  if (!d) return;
+  if (!d) return null;
   const row = { name: d.name.trim(), company: d.company || null, role: d.role || null, phone: d.phone || null, phone2: d.phone2 || null, email: d.email || null, notes: d.notes || null };
-  if (c) await db.update('contacts', c.id, row); else await db.insert('contacts', { tenant_id: S.tenantId, ...row });
-  if (c) await syncAlertContact(c, row);
-  toast('נשמר'); render();
-}
-
-// איש קשר שהשתנה בספר הטלפונים: אם הוא רשום כנמען להתרעות בפרויקט או בכרטיס הלקוח, מעדכנים גם שם
-const digits = v => String(v || '').replace(/\D/g, '').replace(/^972/, '0');
-async function syncAlertContact(c, row) {
-  const phoneChanged = digits(c.phone) !== digits(row.phone), mailChanged = String(c.email || '').trim().toLowerCase() !== String(row.email || '').trim().toLowerCase(), nameChanged = (c.name || '') !== row.name;
-  if (!phoneChanged && !mailChanged && !nameChanged) return;
-  const isOld = (name, phone, mails) => (c.phone && digits(phone) === digits(c.phone)) || (c.email && String(mails || '').toLowerCase().includes(String(c.email).toLowerCase())) || (c.name && (name || '').trim() === c.name.trim());
-  const projects = (await db.select('projects', { eq: { tenant_id: S.tenantId } })).filter(p => isOld(p.notify_name, p.notify_phone, p.notify_emails));
-  const t = S.tenants.find(x => x.id === S.tenantId), inTenant = t && isOld(t.contact_name, t.phone, t.email);
-  if (!projects.length && !inTenant) return;
-  const where = [...projects.map(p => p.name), inTenant ? 'כרטיס הלקוח' : ''].filter(Boolean).join(', ');
-  if (!(await confirmBox('לעדכן גם בהתרעות?', `${c.name} רשום כנמען להתרעות בוואטסאפ ובמייל ב: ${where}. לעדכן שם ל${row.phone ? ' ' + row.phone : ''}${row.email ? ' ' + row.email : ''}? אחרת ההתרעות ימשיכו לצאת לפרטים הישנים.`, 'כן, לעדכן'))) return;
-  for (const p of projects) {
-    const mails = String(p.notify_emails || '').split(/[\s,;]+/).filter(Boolean).map(m => c.email && m.toLowerCase() === c.email.toLowerCase() ? row.email || '' : m).filter(Boolean);
-    if (row.email && !mails.some(m => m.toLowerCase() === row.email.toLowerCase())) mails.push(row.email);
-    await db.update('projects', p.id, { notify_name: row.name, notify_phone: row.phone || p.notify_phone, notify_emails: mails.join(', ') || null });
-  }
-  if (inTenant) { await db.update('tenants', t.id, { contact_name: row.name, phone: row.phone || t.phone, email: row.email || t.email }); }
-  S.projList = null;
-  await reloadTenants();
+  let saved;
+  if (c) { await db.update('contacts', c.id, row); saved = { ...c, ...row }; } else [saved] = await db.insert('contacts', { tenant_id: S.tenantId, ...row });
+  dropContactsCache();
+  if (c) { const k = await propagateContact(c.id); if (k) { S.projList = null; await reloadTenants(); } }
+  toast(c && used.length ? `נשמר ועודכן ב-${used.length} מקומות` : 'נשמר');
+  if (!noRender) render();
+  return saved;
 }

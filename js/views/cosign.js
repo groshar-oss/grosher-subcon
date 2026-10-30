@@ -1,5 +1,6 @@
 // אישור יזם להוראת שינוי: שליחה במייל עם PDF וקישור אישי לחתימה, תזכורת, שמירת המסמך החתום, ושליחה לקבלן לביצוע.
 import { esc, toast, WA_ICON, MAIL_ICON, fmtDate } from '../util.js';
+import { emailsOf } from '../alertsui.js';
 import { logSend } from '../sendlog.js';
 import { db, uuid } from '../db.js';
 import { S, can, logChange, loadTenantData, tenant } from '../app.js';
@@ -79,7 +80,10 @@ const lbl = co => `${co.number || ''} ${co.title}`.trim();
 
 /** בקשה לאישור (או תזכורת על אותו קישור): PDF מצורף, קישור לחתימה, נשלח מה-Gmail */
 export async function sendForApproval(P, x, { reminder = false } = {}) {
-  const co = x.co, project = P.project;
+  const co = x.co, project = { ...P.project };
+  // מאשר: מהגדרות הפרויקט, ואם אין, איש הקשר להתרעות בפרויקט, ואם אין, איש הקשר בכרטיס הלקוח
+  if (!project.approver_email) { const t = tenant() || {}, em = emailsOf(project.notify_emails)[0] || emailsOf(t.email)[0];
+    if (em) { project.approver_email = em; project.approver_name ||= (emailsOf(project.notify_emails)[0] ? project.notify_name : t.contact_name) || ''; project.__fallback = true; } }
   if (!x.lines.length) return toast('אין שורות בהוראת השינוי', 'bad');
   if (x.lines.some(l => coPrice(l) == null)) return toast('יש שורה בלי מחיר מאושר. ממלאים "מחיר מאושר" לפני השליחה ליזם', 'bad');
   const { contract } = vendorFor(P, co);
@@ -102,13 +106,13 @@ export async function sendForApproval(P, x, { reminder = false } = {}) {
   const r = await composeMail({ log: { project_id: project.id, kind: 'co_approval' }, title: reminder ? 'תזכורת ליזם לאישור הוראת השינוי' : 'שליחת הוראת השינוי לאישור היזם', to: [project.approver_email].filter(Boolean),
     subject: `${reminder ? 'תזכורת: ' : ''}בקשה לאישור הוראת שינוי ${snap.co.number} · ${snap.project}`, text, html: button + coSheetHtml(snap, so),
     attachments: pdf ? [{ name: coPdfName(snap, null), blob: pdf }] : [],
-    note: project.approver_email ? 'הנוסח ניתן לעריכה. הקישור לחתימה והטבלה המלאה נכללים במייל, וה-PDF מצורף.' : 'אין מייל מאשר בהגדרות הפרויקט. כותבים כאן, והוא יישמר לפרויקט.' });
+    note: project.__fallback ? `אין "מייל לאישורים" בהגדרות הפרויקט, אז נלקח ${project.approver_name || project.approver_email} מאנשי הקשר. אחרי השליחה הוא יישמר כמאשר בפרויקט.` : project.approver_email ? 'הנוסח ניתן לעריכה. הקישור לחתימה והטבלה המלאה נכללים במייל, וה-PDF מצורף.' : 'אין מייל מאשר בהגדרות הפרויקט. כותבים כאן, והוא יישמר לפרויקט.' });
   if (!r) { if (created) await db.remove('co_signoffs', so.id); return; }
   if (created) {
     await db.update('co_signoffs', so.id, { sent_to: r.to.join(', ') });
     for (const o of (P.pd.signoffs || []).filter(s => s.co_id === co.id && s.status === 'pending' && s.id !== so.id)) await db.update('co_signoffs', o.id, { status: 'cancelled' });
     if (['request', 'pricing'].includes(co.stage)) await db.update('change_orders', co.id, { stage: 'dev_approval' });
-    if (!project.approver_email) await db.update('projects', project.id, { approver_email: r.to[0] });
+    if (!P.project.approver_email) await db.update('projects', project.id, { approver_email: r.to[0], approver_name: P.project.approver_name || project.approver_name || null });
   } else await db.update('co_signoffs', so.id, { reminded_at: new Date().toISOString() });
   await logChange({ project_id: P.id, entity: 'change_order', entity_id: co.id, label: lbl(co), field: 'אישור יזם', old_value: null, new_value: `${reminder ? 'תזכורת נשלחה' : 'נשלח לאישור'} ל-${r.to.join(', ')}`, reason: `סה"כ לאישור ${Math.round(snap.totals.approved)}` });
 }

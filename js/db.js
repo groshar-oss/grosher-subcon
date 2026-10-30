@@ -9,7 +9,7 @@ export const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-x
 
 const TABLES = ['tenants', 'memberships', 'main_contractors', 'projects', 'variations', 'boq_items', 'cost_lines', 'expenses', 'change_log', 'members_demo',
   'workers', 'work_days', 'work_entries', 'work_qty', 'purchase_orders', 'po_lines', 'bills', 'bill_lines', 'bill_fines', 'bill_payments',
-  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'alert_state', 'co_signoffs', 'index_series', 'fixed_costs', 'member_invites', 'dev_units', 'project_templates', 'month_closes', 'send_log'];
+  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'alert_state', 'co_signoffs', 'index_series', 'fixed_costs', 'member_invites', 'dev_units', 'project_templates', 'month_closes', 'send_log', 'project_contacts'];
 
 function match(row, q = {}) {
   for (const [k, v] of Object.entries(q.eq || {})) if (String(row[k] ?? '') !== String(v ?? '')) return false;
@@ -84,9 +84,9 @@ class LocalDB {
     const T = this.data.tables;
     T[table] = T[table].filter(r => !ids.includes(r.id));
     const deps = {
-      tenants: [['project_templates', 'tenant_id'], ['month_closes', 'tenant_id'], ['send_log', 'tenant_id'], ['member_invites', 'tenant_id'], ['index_series', 'tenant_id'], ['files', 'tenant_id'], ['alert_log', 'tenant_id'], ['alert_state', 'tenant_id'], ['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
+      tenants: [['project_contacts', 'tenant_id'], ['project_templates', 'tenant_id'], ['month_closes', 'tenant_id'], ['send_log', 'tenant_id'], ['member_invites', 'tenant_id'], ['index_series', 'tenant_id'], ['files', 'tenant_id'], ['alert_log', 'tenant_id'], ['alert_state', 'tenant_id'], ['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
       projects: [['fixed_costs', 'project_id'], ['variations', 'project_id'], ['boq_items', 'project_id'], ['cost_lines', 'project_id'], ['expenses', 'project_id'], ['change_log', 'project_id'],
-        ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id'], ['contracts', 'project_id'], ['change_orders', 'project_id'], ['cbills', 'project_id'], ['dev_income', 'project_id'], ['dev_units', 'project_id'], ['alert_state', 'project_id']],
+        ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id'], ['contracts', 'project_id'], ['change_orders', 'project_id'], ['cbills', 'project_id'], ['dev_income', 'project_id'], ['dev_units', 'project_id'], ['project_contacts', 'project_id'], ['alert_state', 'project_id']],
       contracts: [['contract_lines', 'contract_id'], ['cbills', 'contract_id']],
       change_orders: [['co_lines', 'co_id']],
       co_lines: [['cbill_lines', 'co_line_id']],
@@ -96,7 +96,8 @@ class LocalDB {
       bills: [['bill_lines', 'bill_id'], ['bill_fines', 'bill_id'], ['bill_payments', 'bill_id']],
       variations: [['boq_items', 'variation_id']],
       boq_items: [['cost_lines', 'boq_item_id'], ['work_qty', 'boq_item_id'], ['bill_lines', 'boq_item_id']],
-      purchase_orders: [['po_lines', 'po_id']]
+      purchase_orders: [['po_lines', 'po_id']],
+      contacts: [['project_contacts', 'contact_id']]
     }[table] || [];
     const nullify = (t, k) => T[t].forEach(r => { if (ids.includes(r[k])) r[k] = null; });
     for (const [t, k] of deps) this.cascade(t, T[t].filter(r => ids.includes(r[k])).map(r => r.id));
@@ -111,6 +112,7 @@ class LocalDB {
     if (table === 'purchase_orders') nullify('expenses', 'po_id');
     if (table === 'dev_units') nullify('dev_income', 'unit_id');
     if (table === 'projects') nullify('send_log', 'project_id');
+    if (table === 'contacts') ['tenants', 'main_contractors', 'vendors'].forEach(t => nullify(t, 'contact_id'));
   }
   async rpc(name, args) {
     const T = this.data.tables;
