@@ -5,6 +5,7 @@ import { COMMITTED } from './dev.js';
 import { forecastSales, salesConf } from './sales.js';
 import { has, indexRate, fixedMonths, spreadWeights, spreadEnd } from './modules.js';
 
+const corrTag = x => (x.corr_month ? ` (תיקון ל-${x.corr_month.split('-').reverse().join('/')})` : '');
 export const INCOME_SOURCES = { buyer: 'רוכשים', bank: 'בנק מלווה', equity: 'הון עצמי', other: 'אחר' };
 export const DCF_ROWS = {
   in_buyer: 'תקבולים מרוכשים', in_forecast: 'מכירות צפויות (לפי קצב)', in_bank: 'משיכות מהבנק המלווה', in_equity: 'הון עצמי', in_other: 'הכנסות אחרות',
@@ -49,7 +50,7 @@ export function devCashflow(projects, opts = {}) {
     // --- הכנסות ---
     for (const i of pd.income || []) {
       const key = 'in_' + (i.source || 'other');
-      const label = `${i.payer || INCOME_SOURCES[i.source] || ''}${i.description ? ' · ' + i.description : ''}`;
+      const label = `${i.payer || INCOME_SOURCES[i.source] || ''}${i.description ? ' · ' + i.description : ''}${corrTag(i)}`;
       incomeTotal += n(i.status === 'received' ? i.received_amount ?? i.amount : i.amount);
       if (i.status === 'received') { incomeReceived += n(i.received_amount ?? i.amount); put(mkey(i.received_date || i.due_date || today), key, n(i.received_amount ?? i.amount), label, P.id); continue; }
       let m = mkey(i.due_date || today);
@@ -68,8 +69,8 @@ export function devCashflow(projects, opts = {}) {
     for (const e of pd.expenses || []) {
       if (e.status === 'expected') continue;
       const amt = n(e.amount) * (1 + n(e.vat_pct ?? st.vat_pct) / 100);
-      if (e.status === 'paid') put(mkey(e.pay_date || e.doc_date || today), 'out_paid', amt, e.supplier_name || 'תשלום', P.id);
-      else put(notPast(addMonths(mkey(e.doc_date || today), termsMonths(termsOf(e)))), 'out_open', amt, `${e.supplier_name || 'ספק'}${e.doc_no ? ' ' + e.doc_no : ''}`, P.id);
+      if (e.status === 'paid') put(mkey(e.pay_date || e.doc_date || today), 'out_paid', amt, (e.supplier_name || 'תשלום') + corrTag(e), P.id);
+      else put(notPast(addMonths(mkey(e.doc_date || today), termsMonths(termsOf(e)))), 'out_open', amt, `${e.supplier_name || 'ספק'}${e.doc_no ? ' ' + e.doc_no : ''}${corrTag(e)}`, P.id);
     }
     // יתרת התקשרויות חתומות שעוד לא חויבה: לפי לו"ז הפרויקט ותנאי התשלום של כל התקשרות
     for (const c of s.contracts.filter(c => COMMITTED.includes(c.contract.status))) {

@@ -1,6 +1,7 @@
 // מסך בית: מה דורש טיפול, לכל הפרויקטים של הלקוח
 const n0 = v => Number(v) || 0;
 import { guarVisible } from '../modules.js';
+import { logSend } from '../sendlog.js';
 import { h, esc, money, pct, $, $$, plainMoney, toast, modal, WA_ICON, MAIL_ICON } from '../util.js';
 import { composeMail } from '../mailui.js';
 import { S, can, loadTenantData, modeSwitch, tenant, render, settings } from '../app.js';
@@ -201,7 +202,8 @@ async function digestDialog(actions, states, data) {
     <div class="actions" style="margin-top:10px"><button type="button" class="btn small" id="dcopy">העתקת הטקסט</button><a class="btn small ghost" id="dwa" target="_blank" rel="noopener" href="${esc(waLink(tg.phone, text))}">${WA_ICON} וואטסאפ</a><button type="button" class="btn small ghost" id="dml">${MAIL_ICON} שליחה במייל</button></div>`,
     onMount: el => {
       $('#dcopy', el).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('הטקסט הועתק'); } catch { toast('לא הצלחתי להעתיק', 'bad'); } };
-      $('#dml', el).onclick = () => composeMail({ title: 'שליחת הסיכום במייל', to: tg.emails.length ? tg.emails : recipients(), subject: `גרושר · סיכום ${freq === 'daily' ? 'יומי' : 'שבועי'} · ${name}`, text: 'מצורף סיכום הנושאים הפתוחים.', html: digestHtml(list, name, freq) });
+      $('#dwa', el).addEventListener('click', () => logSend({ channel: 'whatsapp', kind: 'digest', recipients: [tg.name, tg.phone].filter(Boolean).join(' ') || 'בחירת איש קשר בוואטסאפ', subject: `סיכום ${freq === 'daily' ? 'יומי' : 'שבועי'}`, body: text }));
+      $('#dml', el).onclick = () => composeMail({ log: { kind: 'digest' }, title: 'שליחת הסיכום במייל', to: tg.emails.length ? tg.emails : recipients(), subject: `גרושר · סיכום ${freq === 'daily' ? 'יומי' : 'שבועי'} · ${name}`, text: 'מצורף סיכום הנושאים הפתוחים.', html: digestHtml(list, name, freq) });
     } });
 }
 

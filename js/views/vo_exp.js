@@ -1,5 +1,7 @@
 // הוראות שינוי (תוספות ושינויים) והוצאות בפועל
 import { h, esc, $, $$, modal, field, select, area, toast, money, pct, fmtDate, confirmBox, numOrNull, nullIfEmpty } from '../util.js';
+import { closedThrough, isClosedDate, corrLabel, correctionDate } from '../monthclose.js';
+import { monthLabel } from '../cashflow.js';
 import { db } from '../db.js';
 import { S, can, render, logChange, settings, modeSwitch } from '../app.js';
 import { n, VO_STATUS, VO_APPROVED, VO_AT_RISK, EXPENSE_KINDS, EXPENSE_STATUS, itemSale } from '../calc.js';
@@ -100,18 +102,20 @@ export function tabExpenses(P) {
       <select id="fs" style="width:auto"><option value="">כל הסטטוסים</option>${Object.entries(EXPENSE_STATUS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
     ${P.project.project_type === 'dev' ? '<div class="note small">כל הוצאה משייכים לסעיף תקציב ולהתקשרות, כדי שהבקרה תראה כמה חויב ושולם מול כל חוזה.</div>' : '<div class="note small">עלות עובדים נרשמת ביומן העבודה ולא כאן, כדי שלא תיספר פעמיים. חשבונית של ספק מקשרים להזמנת הרכש שלה (לשונית רכש).</div>'}
     <div class="tw"><table><thead><tr><th>תאריך</th><th>ספק</th><th class="hide-m">מסמך</th><th>שיוך</th><th>סוג</th><th class="n">לפני מע"מ</th><th class="n hide-m">כולל מע"מ</th><th>סטטוס</th>${can.expense() ? '<th></th>' : ''}</tr></thead><tbody id="tb"></tbody></table></div></div>`);
+  const through = closedThrough(P.data.closes);
   const draw = () => {
     const q = F.q.trim();
     const rows = P.pd.expenses.filter(e => (!F.kind || e.kind === F.kind) && (!F.status || e.status === F.status) && (!q || [e.supplier_name, e.doc_no, e.description, linkText(e)].join(' ').includes(q)));
     const tot = rows.reduce((a, e) => a + n(e.amount), 0), totV = rows.reduce((a, e) => a + n(e.amount) * (1 + n(e.vat_pct ?? vat) / 100), 0);
-    $('#tb', el).innerHTML = rows.map(e => `<tr><td>${fmtDate(e.doc_date)}</td><td>${esc(e.supplier_name || '')}<div class="small mut">${esc(e.description || '')}</div></td><td class="hide-m">${esc(e.doc_no || '')}</td>
+    $('#tb', el).innerHTML = rows.map(e => `<tr><td>${fmtDate(e.doc_date)}</td><td>${esc(e.supplier_name || '')}${e.corr_month ? ` <span class="chip amber">${corrLabel(e.corr_month)}</span>` : ''}${isClosedDate(e.doc_date, through) ? ' <span class="small mut" title="החודש סגור">🔒</span>' : ''}<div class="small mut">${esc(e.description || '')}</div></td><td class="hide-m">${esc(e.doc_no || '')}</td>
       <td class="wrap small">${esc(linkText(e))}</td><td>${EXPENSE_KINDS[e.kind]}</td><td class="n">${money(e.amount)}</td><td class="n hide-m">${money(n(e.amount) * (1 + n(e.vat_pct ?? vat) / 100))}</td><td>${EXPENSE_STATUS[e.status]}</td>
       ${can.expense() ? `<td style="white-space:nowrap">${attachBtn(P.data.files, 'expenses', e.id, { projectId: P.id, docType: 'invoice', label: `${e.supplier_name || ''} ${e.doc_no || ''}`.trim() })} <button class="btn small ghost" data-ed="${e.id}">עריכה</button> <button class="btn small ghost" data-del="${e.id}" aria-label="מחיקה">✕</button></td>` : ''}</tr>`).join('')
       + (rows.length ? `<tr class="tot"><td></td><td>סה"כ (${rows.length})</td><td class="hide-m"></td><td></td><td></td><td class="n">${money(tot)}</td><td class="n hide-m">${money(totV)}</td><td></td>${can.expense() ? '<td></td>' : ''}</tr>` : `<tr><td colspan="9" class="empty">אין הוצאות</td></tr>`);
     wireAttach(el, P.data.files || [], render);
-    $$('[data-ed]', el).forEach(b => b.onclick = () => expenseDialog(P, P.pd.expenses.find(x => x.id === b.dataset.ed)));
+    $$('[data-ed]', el).forEach(b => b.onclick = () => { const x = P.pd.expenses.find(y => y.id === b.dataset.ed); return isClosedDate(x.doc_date, through) ? lockedExpense(P, x, 'edit') : expenseDialog(P, x); });
     $$('[data-del]', el).forEach(b => b.onclick = async () => {
       const x = P.pd.expenses.find(y => y.id === b.dataset.del);
+      if (isClosedDate(x.doc_date, through)) return lockedExpense(P, x, 'delete');
       if (!(await confirmBox('מחיקת הוצאה', `למחוק הוצאה של ${x.supplier_name || ''} בסך ${Math.round(n(x.amount)).toLocaleString('en-US')} ₪?`, 'מחיקה', true))) return;
       await db.remove('expenses', x.id);
       await logChange({ project_id: P.id, entity: 'expense', entity_id: x.id, label: `${x.supplier_name || ''} ${x.doc_no || ''}`, field: 'מחיקת הוצאה', old_value: x.amount });
@@ -168,7 +172,7 @@ export async function expenseDialog(P, e, preset = {}) {
       if (c && !sn.value.trim()) { sn.value = c.vendor_name || ''; vchk(); }
       const ls = c ? (P.pd.cLines || []).filter(l => l.contract_id === c.id && l.boq_item_id) : [];
       if (ls.length && $('#lnk', el).value === 'g') { $('#lnk', el).value = 'i:' + ls[0].boq_item_id; sync(); } });
-  }, validate: x => (!n(x.amount) ? 'חסר סכום' : !x.doc_date ? 'חסר תאריך' : null) });
+  }, validate: x => (!n(x.amount) ? 'חסר סכום' : !x.doc_date ? 'חסר תאריך' : e && !e.corr_month && isClosedDate(x.doc_date, closedThrough(P.data.closes)) ? `${monthLabel(x.doc_date.slice(0, 7))} סגור. אי אפשר להעביר הוצאה לחודש סגור` : null) });
   if (!d) return;
   const [t, lid] = d.link.split(':');
   const isMat = d.kind === 'material' && t === 'i';
@@ -176,9 +180,30 @@ export async function expenseDialog(P, e, preset = {}) {
     boq_item_id: t === 'i' ? lid : null, variation_id: t === 'v' ? lid : (t === 'i' ? P.pd.items.find(i => i.id === lid)?.variation_id || null : null),
     po_id: d.po_id || null, contract_id: d.contract_id || null, cost_line_id: isMat ? (d.cost_line_id || null) : null, qty: isMat ? numOrNull(d.qty) : null, unit: isMat ? (d.unit || null) : null };
   if (row.kind === 'general') { row.boq_item_id = null; }
+  // מסמך מחודש סגור (למשל חשבונית שהגיעה באיחור): נרשם היום כשורת תיקון לאותו חודש
+  const thr = closedThrough(P.data.closes);
+  if (!e && isClosedDate(row.doc_date, thr)) { row.corr_month = row.doc_date.slice(0, 7); row.notes = `מסמך מתאריך ${fmtDate(row.doc_date)}${row.notes ? '. ' + row.notes : ''}`; row.doc_date = correctionDate(); }
+  if (preset.corr_month) { row.corr_month = preset.corr_month; row.correction_of = preset.correction_of || null; }
   if (e) {
     await db.update('expenses', e.id, row);
     if (n(e.amount) !== row.amount) await logChange({ project_id: P.id, entity: 'expense', entity_id: e.id, label: `${row.supplier_name} ${row.doc_no}`, field: 'סכום', old_value: e.amount, new_value: row.amount });
   } else await db.insert('expenses', { tenant_id: S.tenantId, project_id: P.id, ...row });
-  toast('ההוצאה נשמרה'); render();
+  toast(row.corr_month && !e ? `נרשם כשורת תיקון ל${monthLabel(row.corr_month)} (החודש סגור)` : 'ההוצאה נשמרה'); render();
+}
+
+// הוצאה בחודש סגור: במקום לשנות או למחוק, רושמים שורת תיקון בחודש פתוח
+async function lockedExpense(P, x, what) {
+  const m = String(x.doc_date).slice(0, 7);
+  const v = await modal({ title: `${monthLabel(m)} סגור`, ok: null, cancel: 'סגירה', body: `<p>ההוצאה של <b>${esc(x.supplier_name || '')}</b> (${money(x.amount)}) שייכת לחודש סגור, ולכן לא משנים אותה.</p>
+    <p class="small mut">במקום זה רושמים שורת תיקון בחודש הנוכחי. היא מסומנת "${corrLabel(m)}" בכל הדוחות, והבפועל של ${monthLabel(m)} נשאר כמו שנסגר.</p>
+    <div class="actions" style="flex-wrap:wrap;gap:8px">${what === 'delete' ? '<button type="button" class="btn danger" data-k="rev">ביטול ההוצאה (שורת תיקון בסכום שלילי)</button>' : ''}<button type="button" class="btn" data-k="fix">שורת תיקון בסכום ההפרש</button></div>`,
+    onMount: (el, close) => $$('[data-k]', el).forEach(b => b.onclick = () => close({ k: b.dataset.k })) });
+  if (!v) return;
+  const base = { ...x, cbill_id: null }; delete base.id; delete base.created_at;
+  if (v.k === 'rev') {
+    await db.insert('expenses', { ...base, amount: -n(x.amount), qty: x.qty != null ? -n(x.qty) : null, doc_date: correctionDate(), status: x.status === 'paid' ? 'approved' : x.status, pay_date: null, corr_month: m, correction_of: x.id, notes: `ביטול הוצאה מ-${fmtDate(x.doc_date)}` });
+    await logChange({ project_id: P.id, entity: 'expense', entity_id: x.id, label: `${x.supplier_name || ''} ${x.doc_no || ''}`, field: corrLabel(m), old_value: x.amount, new_value: 'בוטל בשורת תיקון' });
+    toast('נרשמה שורת תיקון שמבטלת את ההוצאה'); return render();
+  }
+  return expenseDialog(P, null, { ...base, amount: '', doc_date: correctionDate(), corr_month: m, correction_of: x.id, notes: `תיקון להוצאה מ-${fmtDate(x.doc_date)}`, status: 'invoice', pay_date: null });
 }

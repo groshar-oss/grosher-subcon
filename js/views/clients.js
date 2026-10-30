@@ -1,10 +1,13 @@
 // לקוחות (קבלני משנה), הגדרות לקוח, משתמשים וקבלנים ראשיים
 import { h, esc, $, $$, modal, field, select, toast, numOrNull, confirmBox } from '../util.js';
+import { logSend } from '../sendlog.js';
 import { db } from '../db.js';
 import { S, can, reloadTenants, render, roleName, logChange } from '../app.js';
 import { n } from '../calc.js';
 import { store } from '../util.js';
 import { has } from '../modules.js';
+import { loadTemplates, templatesCard, wireTemplatesCard } from './templates.js';
+import { closedThrough, nextToClose, todayStr } from '../monthclose.js';
 import { composeMail, googleConfigured } from '../mailui.js';
 import { waLink, mailLink } from '../alertsui.js';
 
@@ -40,6 +43,9 @@ export async function viewClient(id) {
   const st = { employer_factor: 1.3, crit_pct: 15, vat_pct: 18, overhead_pct: 0, work_days_month: 22, day_hours: 9, quota_warn_pct: 80, quota_gap_pct: 10, cash_opening: 0, cash_min: 0, supplier_terms_days: 60, ...(t.settings || {}) };
   const [members, mcs, projects, series] = await Promise.all([db.rpc('tenant_members', { t: id }), db.select('main_contractors', { eq: { tenant_id: id }, order: 'name' }), db.select('projects', { eq: { tenant_id: id }, order: 'name' }),
     db.select('index_series', { eq: { tenant_id: id }, order: 'month' }).catch(() => [])]);
+  const tpls = await loadTemplates();
+  const closes = await db.select('month_closes', { eq: { tenant_id: id }, order: 'month' }).catch(() => null);
+  const through = closedThrough(closes || []), nextM = nextToClose(through, todayStr());
   const invites = (await db.select('member_invites', { eq: { tenant_id: id } }).catch(() => [])).filter(i => !i.accepted_at);
   // כרטיס המדד מופיע רק כשיש פרויקט עם מודול הצמדה, או שכבר הוזנו מדדים
   const idxProjects = projects.filter(p => has(p, 'index'));
@@ -80,6 +86,12 @@ export async function viewClient(id) {
         <td class="n ${ch > 0 ? 'neg' : ''}">${ch == null ? '' : `<span dir="ltr">${ch >= 0 ? '+' : '−'}${Math.abs(ch).toFixed(2)}%</span>`}</td><td class="wrap">${esc(x.note || '')}</td>
         <td><button class="btn small ghost" data-ix="${x.id}">עריכה</button></td></tr>`; }).join('') || '<tr><td colspan="5" class="empty">עוד לא הוזן מדד. מוסיפים את המדד האחרון שפורסם.</td></tr>'}
     </tbody></table></div></div>` : ''}
+  ${closes === null ? '' : `<div class="card" id="mccard"><h2>סגירת חודש</h2>
+    <p class="small mut">חודש סגור נעול: הוצאות, תקבולים שהתקבלו ויומן העבודה שלו לא משתנים. תיקון מאוחר נרשם כשורה חדשה בחודש פתוח, עם סימון "תיקון לחודש".</p>
+    <p>${through ? `סגור עד <b>${mLabel(through)}</b> (כולל)` : 'עוד לא נסגר אף חודש'}</p>
+    <div class="actions" style="flex-wrap:wrap;gap:8px">${nextM && can.expense() ? `<button class="btn" id="closem">סגירת ${mLabel(nextM)}</button>` : ''}${through && ['admin', 'owner'].includes(S.role) ? `<button class="btn ghost" id="reopen">פתיחה מחדש של ${mLabel(through)}</button>` : ''}</div>
+    ${closes.length ? `<div class="small mut" style="margin-top:8px">${[...closes].reverse().slice(0, 6).map(c => `${mLabel(c.month)}: נסגר ${new Date(c.closed_at).toLocaleDateString('he-IL')}${c.closed_by ? ' ע"י ' + esc(c.closed_by) : ''}`).join(' · ')}</div>` : ''}</div>`}
+  ${templatesCard(tpls)}
   <div class="card"><h2>משתמשים <button class="btn small" id="addm">+ הזמנת משתמש</button></h2>
     <p class="small mut">כותבים אימייל ובוחרים תפקיד. מי שעוד לא רשום מקבל מייל עם קישור להרשמה, ואחרי שנרשם הוא מצטרף לבד עם התפקיד שנבחר. מנהל עבודה רואה רק את הפרויקטים שמסומנים לו, ובלי מחירים, רווח ושכר.</p>
     <div class="tw"><table><thead><tr><th>אימייל</th><th>תפקיד</th><th>פרויקטים (למנהל עבודה)</th><th></th></tr></thead><tbody>
@@ -169,13 +181,33 @@ export async function viewClient(id) {
           if (b.dataset.how === 'copy') { try { await navigator.clipboard.writeText(link); } catch { d.querySelector('#invlink').select(); } toast('הקישור הועתק'); how = 'copy'; return; }
           how = 'gmail'; close(null);
         });
-        ['#invwa', '#invml'].forEach(s => d.querySelector(s)?.addEventListener('click', () => { how = 'link'; }));
+        ['#invwa', '#invml'].forEach(s => d.querySelector(s)?.addEventListener('click', () => { how = 'link'; logSend({ channel: s === '#invwa' ? 'whatsapp' : 'email', kind: 'invite', recipients: email, subject, body: text }); }));
       } });
-    if (how === 'gmail') { const ok = await composeMail({ title: 'שליחת הזמנה', to: [email], subject, text }); toast(ok ? 'ההזמנה נשלחה' : 'ההזמנה נשמרה בלי מייל'); }
+    if (how === 'gmail') { const ok = await composeMail({ log: { kind: 'invite' }, title: 'שליחת הזמנה', to: [email], subject, text }); toast(ok ? 'ההזמנה נשלחה' : 'ההזמנה נשמרה בלי מייל'); }
   };
   $$('[data-resend]', el).forEach(b => b.onclick = () => { const i = invites.find(x => x.id === b.dataset.resend); sendInvite(i.email, i.role); });
   $$('[data-uninv]', el).forEach(b => b.onclick = async () => { const i = invites.find(x => x.id === b.dataset.uninv);
     if (await confirmBox('ביטול הזמנה', `${i.email} לא יצטרף ללקוח גם אם יירשם.`, 'ביטול ההזמנה', true)) { await db.remove('member_invites', i.id); toast('ההזמנה בוטלה'); render(); } });
+  wireTemplatesCard(el, tpls, render);
+  $('#closem', el)?.addEventListener('click', async () => {
+    const [ex, inc] = await Promise.all([db.select('expenses', { eq: { tenant_id: id } }), db.select('dev_income', { eq: { tenant_id: id } }).catch(() => [])]);
+    const end = nextM, inM = d => d && String(d).slice(0, 7) === end, upto = d => d && String(d).slice(0, 7) <= end;
+    const open = ex.filter(e => inM(e.doc_date) && e.status === 'invoice').length;
+    if (!(await confirmBox(`סגירת ${mLabel(end)}`, `אחרי הסגירה ההוצאות, התקבולים ויומן העבודה של ${mLabel(end)} ושל החודשים שלפניו נעולים. תיקונים יירשמו כשורות תיקון בחודש פתוח.${open ? ` שים לב: ${open} חשבוניות מהחודש עוד לא אושרו (אפשר לאשר ולשלם גם אחרי הסגירה).` : ''}`, 'סגירת החודש'))) return;
+    const snapshot = Object.fromEntries(projects.map(p => [p.id, { name: p.name, month_cost: ex.filter(e => e.project_id === p.id && inM(e.doc_date)).reduce((a, e) => a + n(e.amount), 0),
+      cost_to_date: ex.filter(e => e.project_id === p.id && upto(e.doc_date)).reduce((a, e) => a + n(e.amount), 0),
+      income_to_date: inc.filter(i => i.project_id === p.id && i.status === 'received' && upto(i.received_date)).reduce((a, i) => a + n(i.received_amount ?? i.amount), 0) }]));
+    await db.insert('month_closes', { tenant_id: id, month: end, snapshot, closed_by: S.user?.email || '', closed_at: new Date().toISOString() });
+    await logChange({ entity: 'tenant', entity_id: id, label: 'סגירת חודש', field: end, new_value: 'נסגר' });
+    toast(`${mLabel(end)} נסגר`); render();
+  });
+  $('#reopen', el)?.addEventListener('click', async () => {
+    const c = closes.find(x => x.month === through);
+    if (!(await confirmBox(`פתיחה מחדש של ${mLabel(through)}`, 'החודש ייפתח לעריכה. הפתיחה נרשמת ביומן השינויים. כדאי לסגור אותו שוב אחרי התיקון.', 'פתיחה מחדש', true))) return;
+    await db.remove('month_closes', c.id);
+    await logChange({ entity: 'tenant', entity_id: id, label: 'סגירת חודש', field: through, old_value: 'נסגר', new_value: 'נפתח מחדש' });
+    toast('החודש נפתח'); render();
+  });
   $('#addm', el).onclick = () => memberDlg();
   $$('[data-em]', el).forEach(b => b.onclick = () => memberDlg({ email: b.dataset.em, role: b.dataset.role, pids: b.dataset.pids }));
   $$('[data-rm]', el).forEach(b => b.onclick = async () => { if (await confirmBox('הסרת משתמש', 'המשתמש לא יוכל לראות יותר את נתוני הלקוח.', 'הסרה', true)) { await db.rpc('remove_member', { id: b.dataset.rm }); render(); } });

@@ -1,6 +1,7 @@
 // שליחת מייל ישירה מהמערכת (מה-Gmail המחובר), בלי לפתוח תוכנת דואר. חלון אחד: נמענים, נושא, הודעה, קבצים מצורפים.
 import { esc, modal, field, toast } from './util.js';
 import { gconf, gConnect, gReady, gEnabled, gmailSend } from './google.js';
+import { logSend } from './sendlog.js';
 
 const EMAIL = /^\S+@\S+\.\S+$/;
 export const splitEmails = s => String(s || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
@@ -11,7 +12,7 @@ export const googleConfigured = () => !!(gconf().clientId || window.__GOOGLE_MOC
  * חלון שליחה. to/cc: מערכים. text: נוסח שאפשר לערוך. html: תוכן נוסף שמצורף מתחת לנוסח (למשל טבלה).
  * attachments: [{ name, blob }]. מחזיר { to } אחרי שליחה, או null.
  */
-export async function composeMail({ title = 'שליחה במייל', to = [], cc = [], subject = '', text = '', html = '', attachments = [], note = '' } = {}) {
+export async function composeMail({ title = 'שליחה במייל', to = [], cc = [], subject = '', text = '', html = '', attachments = [], note = '', log = {} } = {}) {
   if (!googleConfigured()) {
     await modal({ title, ok: null, cancel: 'סגירה', body: `<p>שליחה ישירה מהמערכת עובדת דרך חשבון ה-Google שלך (Gmail). החיבור עוד לא הוגדר.</p>
       <p class="small mut">מגדירים פעם אחת במסך <a href="#/settings">תצוגה ומצב</a> ← Google Drive ו-Gmail.</p>` });
@@ -36,6 +37,7 @@ export async function composeMail({ title = 'שליחה במייל', to = [], cc
       await gmailSend({ to: T, cc: C, subject: d.subject.trim(), html: textHtml(d.text) + (html ? `<div style="margin-top:14px">${html}</div>` : ''), attachments });
     } catch (e) { return e.message || 'השליחה נכשלה'; }
     sent = { to: T, cc: C, subject: d.subject.trim(), text: d.text };
+    if (log) await logSend({ ...log, channel: 'email', recipients: [...T, ...C], subject: sent.subject, body: d.text, html, attachments });
     return null;
   } });
   if (sent) toast(`המייל נשלח ל-${sent.to.join(', ')}`);

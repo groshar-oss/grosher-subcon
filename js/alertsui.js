@@ -6,6 +6,7 @@ import { esc, modal, field, area, select, toast, WA_ICON, MAIL_ICON } from './ut
 import { composeMail } from './mailui.js';
 import { actKey, recipients } from './alerts.js';
 import { gReady, gEnabled, gmailSend } from './google.js';
+import { logSend } from './sendlog.js';
 
 export const ALERT_STATUS = { open: 'פתוח', in_progress: 'בטיפול', handled: 'טופל' };
 const DECISIONS = {
@@ -105,9 +106,10 @@ export async function sendOne(a, how, states, projects) {
     const url = waLink(tg.phone, text);
     window.__LAST_SEND__ = { how, url, text }; // לבדיקות
     window.open(url, '_blank', 'noopener');
+    await logSend({ project_id: projectIdOf(a), channel: 'whatsapp', kind: 'alert', recipients: [tg.name, tg.phone].filter(Boolean).join(' ') || 'בחירת איש קשר בוואטסאפ', subject: clean(a.title), body: text });
   } else {
     window.__LAST_SEND__ = { how, to: tg.emails, subject, text };
-    const r = await composeMail({ title: 'שליחת התרעה במייל', to: tg.emails, subject, text, note: tg.emails.length ? '' : 'אין נמענים שמורים לפרויקט. מוסיפים בהגדרות הפרויקט או הלקוח, או כותבים כאן.' });
+    const r = await composeMail({ title: 'שליחת התרעה במייל', to: tg.emails, subject, text, log: { project_id: projectIdOf(a), kind: 'alert' }, note: tg.emails.length ? '' : 'אין נמענים שמורים לפרויקט. מוסיפים בהגדרות הפרויקט או הלקוח, או כותבים כאן.' });
     if (!r) return false;
     tg.emails = r.to;
   }
@@ -151,7 +153,9 @@ export async function maybeSendDigest(actions, states, { force = false } = {}) {
   if (!force) { const log = await db.select('alert_log', { eq: { tenant_id: S.tenantId, key } }); if (log.length) return { skipped: 'sent' }; }
   const list = digestList(actions, states); if (!list.length) return { sent: 0 };
   const name = tenant()?.name || '';
-  await gmailSend({ to, subject: `גרושר · סיכום ${freq === 'daily' ? 'יומי' : 'שבועי'} · ${name}`, html: digestHtml(list, name, freq === 'daily' ? 'daily' : 'weekly') });
+  const dsub = `גרושר · סיכום ${freq === 'daily' ? 'יומי' : 'שבועי'} · ${name}`, dhtml = digestHtml(list, name, freq === 'daily' ? 'daily' : 'weekly');
+  await gmailSend({ to, subject: dsub, html: dhtml });
+  await logSend({ channel: 'digest', kind: 'digest', recipients: to, subject: dsub, html: dhtml });
   await db.insert('alert_log', { tenant_id: S.tenantId, key: key + (force ? '|' + Date.now() : ''), title: 'סיכום התרעות', sent_to: to.join(', '), sent_at: new Date().toISOString() }).catch(() => {});
   return { sent: list.length, to };
 }

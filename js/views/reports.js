@@ -173,6 +173,8 @@ function repExpenses({ sums, o }) {
       ['סה"כ', xs.length, m0(tot), m0(withVat(xs)), m0(paid(xs)), m0(tot - paid(xs)), ''], 'אין הוצאות בתקופה')}</div>
     <div data-sheet="לפי סוג"><h2>לפי סוג</h2>${T([['סוג'], ['מסמכים', 1], ['לפני מע"מ', 1], ['חלק', 1]],
       kinds.map(([k, a]) => [EXPENSE_KINDS[k] || k, a.length, m0(amt(a)), pct(tot ? amt(a) / tot * 100 : 0)]), ['סה"כ', xs.length, m0(tot), '100%'], 'אין הוצאות בתקופה')}</div></div>
+    ${(() => { const cs = xs.filter(x => x.e.corr_month); return cs.length ? `<div data-sheet="שורות תיקון"><h2>שורות תיקון לחודשים סגורים</h2>${T([['תאריך'], ['פרויקט'], ['ספק'], ['מתקן את'], ['לפני מע"מ', 1], ['הערה']],
+      cs.map(x => [fmtDate(x.e.doc_date), esc(x.p.name), esc(x.e.supplier_name || ''), x.e.corr_month.split('-').reverse().join('/'), m0(x.e.amount), esc(x.e.notes || '')]), ['סה"כ', '', '', '', m0(amt(cs)), ''], '')}</div>` : ''; })()}
     <p class="small mut">לפי תאריך המסמך. עלות עובדים מיומן העבודה מופיעה בדוח עלות עבודה ולא כאן. סטטוסים: ${Object.values(EXPENSE_STATUS).join(', ')}; "פתוח" = כל מה שלא סומן שולם.</p></div>`);
 }
 

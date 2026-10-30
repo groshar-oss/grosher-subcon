@@ -5,6 +5,7 @@ import { CONFIG } from './config.js';
 import { esc, h, $, $$, toast, store, modal, field } from './util.js';
 import { PROFIT_MODES } from './calc.js';
 import { viewHome } from './views/home.js';
+import { viewSentLog } from './views/sentlog.js';
 import { viewClients, viewClient } from './views/clients.js';
 import { viewProjects } from './views/projects.js';
 import { viewProject } from './views/project.js';
@@ -59,7 +60,7 @@ export async function loadTenantData(tenantId = S.tenantId) {
     const m = S.ctx.memberships.find(x => x.tenant_id === tenantId);
     const vis = S.role === 'foreman' ? projects.filter(p => (m?.project_ids || []).includes(p.id)) : projects;
     const workers = await db.rpc('field_workers', { t: tenantId });
-    return { projects: vis, mcs: [], items: [], lines: [], vos: [], expenses: [], workers, entries, days, wqty, pos: [], poLines: [], bills: [], billLines: [], fines: [], payments: [], vendors: [], documents: [], guarantees: [], files: [], contracts: [], cLines: [], cos: [], coLines: [], cbills: [], cbLines: [], income: [], alertStates: [] };
+    return { projects: vis, mcs: [], items: [], lines: [], vos: [], expenses: [], workers, entries, days, wqty, pos: [], poLines: [], bills: [], billLines: [], fines: [], payments: [], vendors: [], documents: [], guarantees: [], files: [], contracts: [], cLines: [], cos: [], coLines: [], cbills: [], cbLines: [], income: [], alertStates: [], closes: await db.select('month_closes', q).catch(() => []) };
   }
   const [items, lines, vos, expenses, workers, pos, poLines, bills, billLines, fines, payments] = await Promise.all([
     db.select('boq_items', { ...q, order: ['sort', 'code'] }),
@@ -76,8 +77,8 @@ export async function loadTenantData(tenantId = S.tenantId) {
     db.select('contracts', { ...q, order: 'created_at' }), db.select('contract_lines', { ...q, order: 'sort' }),
     db.select('change_orders', { ...q, order: 'created_at' }), db.select('co_lines', { ...q, order: 'sort' }), db.select('cbills', { ...q, order: 'number' }), db.select('cbill_lines', q)]);
   const [income, alertStates, signoffs] = await Promise.all([db.select('dev_income', { ...q, order: 'due_date' }), db.select('alert_state', q), db.select('co_signoffs', { ...q, order: 'sent_at' }).catch(() => [])]);
-  const [indexSeries, fixedCosts, units] = await Promise.all([db.select('index_series', { ...q, order: 'month' }).catch(() => []), db.select('fixed_costs', { ...q, order: 'from_month' }).catch(() => []), db.select('dev_units', { ...q, order: ['sort', 'name'] }).catch(() => [])]);
-  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines, income, alertStates, signoffs, indexSeries, fixedCosts, units };
+  const [indexSeries, fixedCosts, units, closes] = await Promise.all([db.select('index_series', { ...q, order: 'month' }).catch(() => []), db.select('fixed_costs', { ...q, order: 'from_month' }).catch(() => []), db.select('dev_units', { ...q, order: ['sort', 'name'] }).catch(() => []), db.select('month_closes', { eq: { tenant_id: tenantId }, order: 'month' }).catch(() => [])]);
+  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines, income, alertStates, signoffs, indexSeries, fixedCosts, units, closes };
 }
 
 export async function logChange(e) {
@@ -99,7 +100,8 @@ const NAV = () => [
   ['#/cashflow', '≋', 'תזרים מזומנים', can.prices()],
   ['#/reports', '▦', 'דוחות', can.prices()],
   ['#/vendors', '▣', 'ספקים, מסמכים וערבויות', can.prices()],
-  ['#/contacts', '☏', 'ספר טלפונים', !!S.tenantId]
+  ['#/contacts', '☏', 'ספר טלפונים', !!S.tenantId],
+  ['#/sent', '✉', 'ארכיון שליחות', can.expense()]
 ].filter(x => x[3]);
 const NAV_ADMIN = () => [
   ['#/clients', '◎', 'לקוחות', can.admin()],
@@ -195,6 +197,7 @@ export async function render() {
     else if (route === 'collection') { view = await viewCollection(); title = 'חשבונות וגבייה'; }
     else if (route === 'vendors') { view = await viewVendors(a || 'list'); title = 'ספקים ומסמכים'; }
     else if (route === 'contacts') { view = await viewContacts(); title = 'ספר טלפונים'; }
+    else if (route === 'sent') { view = can.expense() ? await viewSentLog() : h('<div class="card empty">אין הרשאה</div>'); title = 'ארכיון שליחות'; }
     else if (route === 'reports') { view = await viewReports(a); title = 'דוחות'; }
     else if (route === 'cashflow') { view = can.prices() ? await viewCashflow() : h('<div class="card empty">אין הרשאה</div>'); title = 'תזרים מזומנים'; }
     else if (route === 'workers') { view = await viewWorkers(a || 'list'); title = 'עובדים ונוכחות'; }

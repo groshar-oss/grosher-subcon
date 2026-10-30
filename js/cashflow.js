@@ -7,6 +7,7 @@ import { dueDate } from './bills.js';
 import { has, indexRate, fixedMonths, spreadWeights, spreadEnd } from './modules.js';
 
 const DEF = { cash_opening: 0, cash_asof: '', cash_min: 0, supplier_terms_days: 60, vat_pct: 18 };
+const corrTag = x => (x.corr_month ? ` (תיקון ל-${x.corr_month.split('-').reverse().join('/')})` : '');
 export const mkey = d => String(d).slice(0, 7);
 export const addMonths = (m, k) => { const [y, mo] = m.split('-').map(Number); const d = new Date(Date.UTC(y, mo - 1 + k, 1)); return d.toISOString().slice(0, 7); };
 export const monthsBetween = (a, b) => { const [y1, m1] = a.split('-').map(Number), [y2, m2] = b.split('-').map(Number); return (y2 - y1) * 12 + (m2 - m1); };
@@ -93,8 +94,8 @@ export function cashflow(projects, opts = {}) {
       const pre = n(e.amount), withVat = n(e.vat_pct ?? s.vat_pct) > 0;
       const due = e.pay_date || dueDate(e.doc_date, supTerms) || today;
       if (M[mkey(due)] && mkey(due) < cur) M[mkey(due)].schedOut += pre * (1 + (withVat ? vat : 0));
-      if (e.status === 'paid') put(mkey(e.pay_date || e.doc_date || today), 'out_paid', pre, withVat, e.supplier_name || 'הוצאה', P.id);
-      else { put(notPast(mkey(due)), 'out_open', pre, withVat, `${e.supplier_name || 'ספק'}${e.doc_no ? ' ' + e.doc_no : ''}`, P.id); invoicedOpen += pre; }
+      if (e.status === 'paid') put(mkey(e.pay_date || e.doc_date || today), 'out_paid', pre, withVat, (e.supplier_name || 'הוצאה') + corrTag(e), P.id);
+      else { put(notPast(mkey(due)), 'out_open', pre, withVat, `${e.supplier_name || 'ספק'}${e.doc_no ? ' ' + e.doc_no : ''}${corrTag(e)}`, P.id); invoicedOpen += pre; }
     }
     // הזמנות רכש פתוחות: יתרה שעוד לא חויבה, לפי מועד אספקה + תנאי ספק
     for (const po of pd.pos || []) {

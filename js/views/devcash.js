@@ -1,5 +1,6 @@
 // פרויקט יזם: הכנסות (רוכשים, בנק מלווה, הון עצמי) ותזרים מול ההוצאות והתקציב, עם תרחישי איחור בתקבולים ועיכוב בלו"ז
 import { h, esc, $, $$, modal, field, select, area, toast, money, fmtDate, confirmBox, numOrNull, nullIfEmpty, store } from '../util.js';
+import { closedThrough, isClosedDate, corrLabel, correctionDate } from '../monthclose.js';
 import { db } from '../db.js';
 import { S, can, render, logChange, settings } from '../app.js';
 import { n } from '../calc.js';
@@ -37,7 +38,7 @@ function incomeCard(P) {
   const el = h(`<details class="card" ${list.length ? '' : 'open'}><summary><b>הכנסות היזם</b> <span class="small mut">· התקבל ${money(sum(i => i.status === 'received'))} · צפוי ${money(sum(i => i.status !== 'received'))}${late.length ? ` · <span class="neg">${late.length} באיחור</span>` : ''} · ${bySrc.map(([k, v]) => `${INCOME_SOURCES[k]} ${money(v)}`).join(' · ')}</span></summary>
     ${edit ? '<div class="actions" style="margin:10px 0"><button class="btn small" id="addinc" type="button">+ הכנסה</button><span class="small mut">רוכשים, משיכות מהבנק המלווה, הון עצמי. כולל מע"מ.</span></div>' : ''}
     <div class="tw" style="max-height:360px;overflow:auto"><table><thead><tr><th>מועד</th><th>מקור</th><th>משלם / פירוט</th><th class="n">סכום</th><th>מצב</th></tr></thead><tbody>
-    ${list.map(i => `<tr class="click ${i.status !== 'received' && i.due_date < today ? 'al-r' : ''}" data-inc="${i.id}"><td>${fmtDate(i.status === 'received' ? i.received_date || i.due_date : i.due_date)}</td><td>${INCOME_SOURCES[i.source]}</td><td class="wrap">${esc(i.payer || '')}<div class="small mut">${esc(i.description || '')}</div></td>
+    ${list.map(i => `<tr class="click ${i.status !== 'received' && i.due_date < today ? 'al-r' : ''}" data-inc="${i.id}"><td>${fmtDate(i.status === 'received' ? i.received_date || i.due_date : i.due_date)}</td><td>${INCOME_SOURCES[i.source]}</td><td class="wrap">${esc(i.payer || '')}${i.corr_month ? ` <span class="chip amber">${corrLabel(i.corr_month)}</span>` : ''}<div class="small mut">${esc(i.description || '')}</div></td>
       <td class="n">${money(i.status === 'received' ? i.received_amount ?? i.amount : i.amount)}</td><td>${i.status === 'received' ? '<span class="chip green">התקבל</span>' : i.due_date < today ? '<span class="chip red">באיחור</span>' : '<span class="chip">צפוי</span>'}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">אין הכנסות. מוסיפים תשלומי רוכשים ומשיכות מהבנק כדי לראות תזרים.</td></tr>'}
     </tbody></table></div></details>`);
   $('#addinc', el)?.addEventListener('click', () => incomeDialog(P));
@@ -45,19 +46,29 @@ function incomeCard(P) {
   return el;
 }
 
-async function incomeDialog(P, i = null) {
-  const v = await modal({ title: i ? 'הכנסה' : 'הכנסה חדשה', body: `<div class="grid g2">${select('מקור', 'source', INCOME_SOURCES, i?.source || 'buyer')}${field('משלם', 'payer', i?.payer || '')}</div>
+async function incomeDialog(P, i = null, preset = null) {
+  const thr = closedThrough(P.data.closes);
+  if (i && i.status === 'received' && isClosedDate(i.received_date, thr)) {
+    const m = String(i.received_date).slice(0, 7);
+    if (!(await confirmBox(`${monthLabel(m)} סגור`, `התקבול הזה התקבל בחודש סגור ולכן לא משנים אותו. אפשר לרשום שורת תיקון בחודש הנוכחי (בסכום ההפרש, גם שלילי), שתסומן "${corrLabel(m)}".`, 'שורת תיקון'))) return;
+    return incomeDialog(P, null, { source: i.source, payer: i.payer, description: `תיקון: ${i.description || ''}`.trim(), status: 'received', received_date: correctionDate(), due_date: correctionDate(), amount: '', unit_id: i.unit_id || null, corr_month: m, correction_of: i.id });
+  }
+  const i0 = i; i = i || preset;
+  const v = await modal({ title: i0 ? 'הכנסה' : preset?.corr_month ? corrLabel(preset.corr_month) : 'הכנסה חדשה', body: `<div class="grid g2">${select('מקור', 'source', INCOME_SOURCES, i?.source || 'buyer')}${field('משלם', 'payer', i?.payer || '')}</div>
     ${field('פירוט (למשל: דירה 14, תשלום שני)', 'description', i?.description || '')}
     <div class="grid g3">${field('מועד צפוי', 'due_date', i?.due_date || todayStr(), { type: 'date', req: true })}${field('סכום ₪ (כולל מע"מ)', 'amount', i?.amount ?? '', { type: 'number', req: true })}${select('מצב', 'status', { expected: 'צפוי', received: 'התקבל' }, i?.status || 'expected')}</div>
     <div class="grid g2">${field('תאריך קבלה בפועל', 'received_date', i?.received_date || '', { type: 'date' })}${field('סכום שהתקבל ₪ (ריק = הסכום הצפוי)', 'received_amount', i?.received_amount ?? '', { type: 'number' })}</div>${area('הערות', 'notes', i?.notes || '')}
-    ${i ? '<button type="button" class="btn small ghost danger-t" id="delinc">מחיקה</button>' : ''}`,
+    ${i0 ? '<button type="button" class="btn small ghost danger-t" id="delinc">מחיקה</button>' : ''}`,
     onMount: (el, close) => { $('[name=status]', el).onchange = e => { if (e.target.value === 'received' && !$('[name=received_date]', el).value) $('[name=received_date]', el).value = todayStr(); };
       $('#delinc', el)?.addEventListener('click', async () => { if (!(await confirmBox('מחיקת הכנסה', 'למחוק את ההכנסה?', 'מחיקה', true))) return; await db.remove('dev_income', i.id); close(null); toast('נמחק'); render(); }); },
-    validate: d => (!n(d.amount) ? 'חסר סכום' : !d.due_date ? 'חסר מועד' : null) });
+    validate: d => (!n(d.amount) ? 'חסר סכום' : !d.due_date ? 'חסר מועד' : i0 && d.status === 'received' && isClosedDate(d.received_date, thr) ? 'תאריך הקבלה בחודש סגור. רושמים תאריך בחודש פתוח' : null) });
   if (!v) return;
   const row = { source: v.source, payer: v.payer.trim() || null, description: v.description.trim() || null, due_date: v.due_date, amount: n(v.amount), status: v.status,
     received_date: v.status === 'received' ? nullIfEmpty(v.received_date) || todayStr() : null, received_amount: v.status === 'received' ? numOrNull(v.received_amount) : null, notes: v.notes || null };
   const lbl = `${INCOME_SOURCES[row.source]}${row.payer ? ' · ' + row.payer : ''}`;
+  if (preset?.corr_month) Object.assign(row, { corr_month: preset.corr_month, correction_of: preset.correction_of, unit_id: preset.unit_id || null });
+  else if (!i0 && row.status === 'received' && isClosedDate(row.received_date, thr)) { row.corr_month = row.received_date.slice(0, 7); row.notes = `התקבל ב-${fmtDate(row.received_date)}${row.notes ? '. ' + row.notes : ''}`; row.received_date = correctionDate(); }
+  i = i0;
   if (i) { await db.update('dev_income', i.id, row); if (i.status !== row.status || n(i.amount) !== row.amount) await logChange({ project_id: P.id, entity: 'income', entity_id: i.id, label: lbl, field: i.status !== row.status ? 'מצב הכנסה' : 'סכום הכנסה', old_value: i.status !== row.status ? (i.status === 'received' ? 'התקבל' : 'צפוי') : i.amount, new_value: i.status !== row.status ? (row.status === 'received' ? 'התקבל' : 'צפוי') : row.amount }); }
   else { const [r] = await db.insert('dev_income', { tenant_id: S.tenantId, project_id: P.id, ...row }); await logChange({ project_id: P.id, entity: 'income', entity_id: r.id, label: lbl, field: 'הכנסה חדשה', new_value: row.amount }); }
   toast('נשמר'); render();

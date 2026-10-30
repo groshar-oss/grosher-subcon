@@ -1,5 +1,7 @@
 // יומן עבודה: מסך יום (מתוכנן לטלפון), רשימת ימים במשרד, ושמירה בלי קליטה (תור שנשלח כשהקליטה חוזרת)
 import { h, esc, $, $$, toast, money, num, store, fmtDate, confirmBox } from '../util.js';
+import { closedThrough, isClosedDate } from '../monthclose.js';
+import { monthLabel } from '../cashflow.js';
 import { db } from '../db.js';
 import { S, can, render, settings } from '../app.js';
 import { n } from '../calc.js';
@@ -162,7 +164,10 @@ export async function dayView(P, date) {
       return true;
     }
   };
+  const locked = isClosedDate(d, closedThrough(P.data.closes));
+  if (locked) { $('#save', el).insertAdjacentHTML('beforebegin', `<div class="note">🔒 ${monthLabel(d.slice(0, 7))} סגור. אפשר לצפות ביום, אבל לא לשנות אותו. תיקון לעלות העבודה רושמים כהוצאה בחודש פתוח.</div>`); $('#save', el).disabled = true; $('#delday', el)?.setAttribute('disabled', ''); }
   $('#save', el).onclick = async () => {
+    if (locked) return toast('החודש סגור', 'bad');
     const p = payloadOf();
     const badPiece = rows.filter(r => W[r.worker_id]?.pay_type === 'piece' && (r.piece_qty === '' || !r.link));
     if (badPiece.length && !(await confirmBox('חסרים נתוני קבלנות', `ל-${badPiece.length} רישומי קבלנות חסר סעיף או כמות. בלי כמות לא תחושב עלות. לשמור בכל זאת?`, 'שמירה'))) return;
@@ -170,6 +175,7 @@ export async function dayView(P, date) {
     if (await commit(p)) { toast('יום העבודה נשמר'); location.hash = `#/project/${P.id}/${can.prices() ? 'worklog' : 'field'}`; render(); }
   };
   $('#delday', el)?.addEventListener('click', async () => {
+    if (locked) return toast('החודש סגור', 'bad');
     if (!(await confirmBox('מחיקת יום עבודה', `למחוק את כל הרישומים של ${fmtDate(d)}?`, 'מחיקה', true))) return;
     if (await commit({ delete: true })) { toast('היום נמחק'); location.hash = `#/project/${P.id}/${can.prices() ? 'worklog' : 'field'}`; render(); }
   });

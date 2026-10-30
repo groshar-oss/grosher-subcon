@@ -1,5 +1,6 @@
 // אישור יזם להוראת שינוי: שליחה במייל עם PDF וקישור אישי לחתימה, תזכורת, שמירת המסמך החתום, ושליחה לקבלן לביצוע.
 import { esc, toast, WA_ICON, MAIL_ICON, fmtDate } from '../util.js';
+import { logSend } from '../sendlog.js';
 import { db, uuid } from '../db.js';
 import { S, can, logChange, loadTenantData, tenant } from '../app.js';
 import { coSnapshot, coPrice, SIGNOFF_STATUS } from '../devflow.js';
@@ -98,7 +99,7 @@ export async function sendForApproval(P, x, { reminder = false } = {}) {
   const button = `<div dir="rtl" style="margin:16px 0"><a href="${esc(link)}" style="display:inline-block;background:#2f5bea;color:#fff;text-decoration:none;font-weight:700;font-size:16px;padding:12px 26px;border-radius:10px;font-family:Arial,sans-serif">לאישור וחתימה</a>
     <div style="font-size:12px;color:#6b7491;margin-top:6px;font-family:Arial,sans-serif" dir="ltr">${esc(link)}</div></div>`;
   window.__LAST_SIGN_LINK__ = link; // לבדיקות
-  const r = await composeMail({ title: reminder ? 'תזכורת ליזם לאישור הוראת השינוי' : 'שליחת הוראת השינוי לאישור היזם', to: [project.approver_email].filter(Boolean),
+  const r = await composeMail({ log: { project_id: project.id, kind: 'co_approval' }, title: reminder ? 'תזכורת ליזם לאישור הוראת השינוי' : 'שליחת הוראת השינוי לאישור היזם', to: [project.approver_email].filter(Boolean),
     subject: `${reminder ? 'תזכורת: ' : ''}בקשה לאישור הוראת שינוי ${snap.co.number} · ${snap.project}`, text, html: button + coSheetHtml(snap, so),
     attachments: pdf ? [{ name: coPdfName(snap, null), blob: pdf }] : [],
     note: project.approver_email ? 'הנוסח ניתן לעריכה. הקישור לחתימה והטבלה המלאה נכללים במייל, וה-PDF מצורף.' : 'אין מייל מאשר בהגדרות הפרויקט. כותבים כאן, והוא יישמר לפרויקט.' });
@@ -144,10 +145,11 @@ export async function sendToContractor(P, x, how) {
   if (how === 'wa') {
     const url = waLink(vendor?.phone || '', text.replace(/"/g, '״'));
     window.__LAST_SEND__ = { how, url, text }; window.open(url, '_blank', 'noopener');
+    await logSend({ project_id: P.id, channel: 'whatsapp', kind: 'co_contractor', recipients: [vendor?.name, vendor?.phone].filter(Boolean).join(' '), subject: `הוראת שינוי ${x.co.number || ''}`, body: text });
   } else {
     const f = await signedFile(P, x).catch(() => null);
     const att = f ? [{ name: f.name, blob: await fileBlob(f) }] : [];
-    const r = await composeMail({ title: 'שליחת הוראת השינוי לקבלן לביצוע', to: [vendor?.email].filter(Boolean), subject: `הוראת שינוי ${x.co.number || ''} מאושרת לביצוע · ${P.project.name}`, text, attachments: att,
+    const r = await composeMail({ log: { project_id: P.id, kind: 'co_contractor' }, title: 'שליחת הוראת השינוי לקבלן לביצוע', to: [vendor?.email].filter(Boolean), subject: `הוראת שינוי ${x.co.number || ''} מאושרת לביצוע · ${P.project.name}`, text, attachments: att,
       note: vendor?.email ? '' : 'אין מייל לקבלן בכרטיס הספק. כותבים כאן (וכדאי להוסיף בכרטיס הספק).' });
     if (!r) return;
   }

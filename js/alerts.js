@@ -1,6 +1,7 @@
 // התראות במייל: כל התראה אדומה חדשה (חריגה, איחור תשלום, מסמך שפג וכו') נשלחת פעם אחת מה-Gmail של המשתמשת המחוברת.
 // מה שכבר נשלח נרשם בטבלת alert_log, כדי שלא יישלח שוב. כשחריגה בסעיף מחמירה לדרגה כהה יותר, נשלחת התראה חדשה.
 import { db } from './db.js';
+import { logSend } from './sendlog.js';
 import { S, tenant, settings } from './app.js';
 import { gReady, gEnabled, gmailSend } from './google.js';
 import { esc } from './util.js';
@@ -40,7 +41,9 @@ export async function sendAlerts(actions, { force = false, decisionOf = null } =
   const list = await pendingAlerts(actions);
   if (!list.length) return { sent: 0 };
   const name = tenant()?.name || '';
-  await gmailSend({ to, subject: `גרושר · ${list.length === 1 ? list[0].title : list.length + ' התראות חדשות'} · ${name}`, html: alertHtml(list, name, { decisionOf }) });
+  const asub = `גרושר · ${list.length === 1 ? list[0].title : list.length + ' התראות חדשות'} · ${name}`, ahtml = alertHtml(list, name, { decisionOf });
+  await gmailSend({ to, subject: asub, html: ahtml });
+  await logSend({ channel: 'email', kind: 'auto_alert', recipients: to, subject: asub, html: ahtml });
   const now = new Date().toISOString();
   for (const a of list) await db.insert('alert_log', { tenant_id: S.tenantId, key: actKey(a), title: a.title, sent_to: to.join(', '), sent_at: now }).catch(() => {});
   return { sent: list.length, to };

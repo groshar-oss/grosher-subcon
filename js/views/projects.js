@@ -7,6 +7,7 @@ import { STATUS, CONTRACT, projData, summarize, rowAttr, modeLine } from './comm
 import { mcForm } from './clients.js';
 import { isDev, isExec, party, partyOfMany, PROJECT_TYPES, devSummary } from '../dev.js';
 import { modulesFieldset, readModules, syncModulesType, mods, moduleTags } from '../modules.js';
+import { loadTemplates, templatePicker, wireTemplatePicker, applyTemplate } from './templates.js';
 import { spreadBlock, wireSpread, readSpread } from './spreadui.js';
 
 export function projectForm(p = {}, mcs = [], { isNew = false } = {}) {
@@ -92,11 +93,13 @@ export function wireModules(el) {
 }
 
 export async function newProject(mcs) {
-  const v = await modal({ title: 'פרויקט חדש', body: projectForm({}, mcs, { isNew: true }), wide: true, onMount: wireProjectType, validate: d => !d.name.trim() && 'חסר שם פרויקט' });
+  const tpls = await loadTemplates();
+  const v = await modal({ title: 'פרויקט חדש', body: templatePicker(tpls) + projectForm({}, mcs, { isNew: true }), wide: true, onMount: el => { wireProjectType(el); wireTemplatePicker(el, tpls); }, validate: d => !d.name.trim() && 'חסר שם פרויקט' });
   if (!v) return;
   const row = await projectRow(v, mcs);
   if (row.project_type === 'dev') Object.assign(row, { main_contractor_id: null, retention_pct: 0, insurance_pct: 0, shared_pct: 0, tax_pct: 0, overhead_pct: 0 });
   const [p] = await db.insert('projects', { tenant_id: S.tenantId, ...row });
+  const tpl = tpls.find(t => t.id === v.tpl); if (tpl) await applyTemplate(tpl, p);
   toast(row.project_type === 'dev' ? 'הפרויקט נוסף. השלב הבא: קליטת התקציב' : 'הפרויקט נוסף. השלב הבא: כתב כמויות');
   location.hash = `#/project/${p.id}/boq`;
 }

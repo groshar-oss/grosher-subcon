@@ -19,6 +19,7 @@ import { isDev, PROJECT_TYPES, party } from '../dev.js';
 import { devControl, devContracts } from './dev.js';
 import { devCos, devCbills, cbillView, cbillSheet } from './devflow.js';
 import { devCashTab } from './devcash.js';
+import { saveTemplateDialog } from './templates.js';
 import { salesTab, bankTab } from './sales.js';
 
 
@@ -192,6 +193,7 @@ async function tabLog(P) {
 // ===== הגדרות פרויקט =====
 function tabSettings(P) {
   const el = h(`<div><div class="card"><form id="pf">${projectForm(P.project, P.mcs)}<button class="btn">שמירה</button></form></div>
+    ${can.edit() && ['admin', 'owner'].includes(S.role) ? '<div class="card"><h2>תבנית</h2><p class="small mut">שומר את מבנה הפרויקט (סעיפים, תמחיר, מודולים והגדרות) כדי לפתוח ממנו פרויקטים דומים.</p><button class="btn ghost" id="savetpl">שמירה כתבנית</button></div>' : ''}
     <div class="card"><h2>מחיקת פרויקט</h2><p class="small mut">מוחקת את הפרויקט עם כתב הכמויות, התמחיר, הוראות השינוי וההוצאות. אי אפשר לשחזר.</p><button class="btn danger" id="del">מחיקת הפרויקט</button></div></div>`);
   wireProjectType(el);
   $('#pf', el).onsubmit = async e => {
@@ -204,6 +206,7 @@ function tabSettings(P) {
     for (const [k, nv] of Object.entries(row)) { if (k === 'modules' || k === 'spread') continue; const ov = P.project[k]; if (String(ov ?? '') !== String(nv ?? '')) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'הגדרות פרויקט', field: k, old_value: ov, new_value: nv }); }
     await db.update('projects', P.id, row); toast('נשמר'); render();
   };
+  $('#savetpl', el)?.addEventListener('click', () => saveTemplateDialog(P));
   $('#del', el).onclick = async () => {
     const v = await modal({ title: 'מחיקת פרויקט', body: `<p>כדי לאשר, כתוב את שם הפרויקט: <b>${esc(P.project.name)}</b></p>${field('שם הפרויקט', 'c', '')}`, ok: 'מחיקה לצמיתות', danger: true, validate: d => d.c.trim() !== P.project.name.trim() && 'השם לא תואם' });
     if (!v) return;
