@@ -100,7 +100,7 @@ export async function viewClient(id) {
     <p class="small mut">כותבים אימייל ובוחרים תפקיד. מי שעוד לא רשום מקבל מייל עם קישור להרשמה, ואחרי שנרשם הוא מצטרף לבד עם התפקיד שנבחר. מנהל עבודה רואה רק את הפרויקטים שמסומנים לו, ובלי מחירים, רווח ושכר.</p>
     <div class="tw"><table><thead><tr><th>אימייל</th><th>תפקיד</th><th>פרויקטים (למנהל עבודה)</th><th></th></tr></thead><tbody>
     ${members.map(m => `<tr><td dir="ltr" style="text-align:right">${esc(m.email)}</td><td>${roleName(m.role)}</td><td class="wrap">${m.role === 'foreman' ? esc((m.project_ids || []).map(pname).join(', ') || 'אין') : '<span class="mut">כולם</span>'}</td>
-      <td><button class="btn small ghost" data-em="${esc(m.email)}" data-role="${m.role}" data-pids="${(m.project_ids || []).join(',')}">עריכה</button> <button class="btn small ghost" data-rm="${m.id}">הסרה</button></td></tr>`).join('')}
+      <td class="nw"><button class="btn small ghost" data-link="${esc(m.email)}" data-role="${m.role}">קישור</button> <button class="btn small ghost" data-em="${esc(m.email)}" data-role="${m.role}" data-pids="${(m.project_ids || []).join(',')}">עריכה</button> <button class="btn small ghost" data-rm="${m.id}" data-rme="${esc(m.email)}">הסרה</button></td></tr>`).join('')}
     ${invites.map(i => `<tr class="mut"><td dir="ltr" style="text-align:right">${esc(i.email)}</td><td>${roleName(i.role)} <span class="chip blue">הוזמן, ממתין להרשמה</span></td><td class="wrap">${i.role === 'foreman' ? esc((i.project_ids || []).map(pname).join(', ') || 'אין') : '<span class="mut">כולם</span>'}</td>
       <td class="nw"><button class="btn small ghost" data-resend="${i.id}">שליחה שוב</button> <button class="btn small ghost" data-uninv="${i.id}">ביטול</button></td></tr>`).join('')}
     ${!members.length && !invites.length ? '<tr><td colspan="4" class="empty">אין משתמשים מלבד מנהל השירות</td></tr>' : ''}
@@ -152,21 +152,25 @@ export async function viewClient(id) {
       <div class="fld"><span>פרויקטים למנהל עבודה</span>${projects.map(p => `<label class="chk"><input type="checkbox" name="p_${p.id}" ${pids.includes(p.id) ? 'checked' : ''}> ${esc(p.name)}</label>`).join('') || '<span class="mut small">אין פרויקטים</span>'}</div>`,
       validate: d => !/^\S+@\S+\.\S+$/.test(d.email) && 'אימייל לא תקין' });
     if (!v) return;
+    if (isMe(v.email) && v.role !== m.role && !(await confirmBox('שינוי התפקיד שלך', `זה המשתמש שלך. אחרי השמירה תהיה ${roleName(v.role)} בלקוח הזה, ויכול להיות שלא תוכל לשנות את זה בחזרה. להמשיך?`, 'כן, לשנות', true))) return;
     const chosen = projects.filter(p => v['p_' + p.id]).map(p => p.id);
     const r = await db.rpc('add_member', { t: id, member_email: v.email.trim(), member_role: v.role, member_projects: v.role === 'foreman' ? chosen : [] });
     if (r === 'not_registered') return toast('המשתמש עוד לא נרשם. צריך להריץ את schema.sql של חבילה 20 כדי לשלוח הזמנה.', 'bad');
     if (r === 'invited') { await sendInvite(v.email.trim(), v.role); return render(); }
-    toast('המשתמש נשמר'); render();
+    toast('המשתמש נשמר');
+    if (!m.email) await sendInvite(v.email.trim(), v.role, true);
+    render();
   };
+  const isMe = e => !!S.user?.email && String(e || '').trim().toLowerCase() === S.user.email.toLowerCase();
   // מייל הזמנה מה-Gmail של מי שמחובר, עם קישור שממלא את האימייל במסך הכניסה
-  const sendInvite = async (email, role) => {
+  const sendInvite = async (email, role, existing = false) => {
     const link = `${location.origin}${location.pathname}?invite=${encodeURIComponent(email)}`;
-    const text = `שלום,\n\nהוזמנת למערכת "גרושר · בקרת עלויות ותזרים" של ${t.name}, בתפקיד ${roleName(role)}.\n\nלהצטרפות:\n1. לפתוח את הקישור: ${link}\n2. לבחור סיסמה וללחוץ "הרשמה".\n3. לאשר את המייל שיגיע לתיבה שלך.\n4. להיכנס עם האימייל והסיסמה. הגישה ללקוח נפתחת לבד.\n\nבברכה,\n${S.user?.email || ''}\nגרושר פרויקטים בע"מ`;
+    const text = existing ? `שלום,\n\nקיבלת גישה למערכת "גרושר · בקרת עלויות ותזרים" של ${t.name}, בתפקיד ${roleName(role)}.\n\nלכניסה: ${link}\nנכנסים עם האימייל והסיסמה שלך. בטלפון אפשר לשמור את הקישור במסך הבית ולפתוח אותו כמו אפליקציה.\n\nבברכה,\n${S.user?.email || ''}\nגרושר פרויקטים בע"מ` : `שלום,\n\nהוזמנת למערכת "גרושר · בקרת עלויות ותזרים" של ${t.name}, בתפקיד ${roleName(role)}.\n\nלהצטרפות:\n1. לפתוח את הקישור: ${link}\n2. לבחור סיסמה וללחוץ "הרשמה".\n3. לאשר את המייל שיגיע לתיבה שלך.\n4. להיכנס עם האימייל והסיסמה. הגישה ללקוח נפתחת לבד.\n\nבברכה,\n${S.user?.email || ''}\nגרושר פרויקטים בע"מ`;
     window.__LAST_INVITE__ = { email, link, text }; // לבדיקות
-    const subject = `הזמנה למערכת גרושר · ${t.name}`;
+    const subject = existing ? `קישור למערכת גרושר · ${t.name}` : `הזמנה למערכת גרושר · ${t.name}`;
     // חלון אחד עם כמה דרכים לשלוח: Gmail ישיר (אם מחובר), וואטסאפ, תוכנת המייל, או העתקת הקישור
     let how = null;
-    await modal({ title: 'שליחת הזמנה', ok: null, cancel: 'סגירה', body: `<p class="small">ההזמנה ל-<b dir="ltr">${esc(email)}</b> נשמרה. ברגע שיירשם עם האימייל הזה הוא ייכנס לבד ללקוח, בתפקיד ${esc(roleName(role))}.</p>
+    await modal({ title: existing ? 'שליחת קישור למערכת' : 'שליחת הזמנה', ok: null, cancel: 'סגירה', body: `<p class="small">${existing ? `ל-<b dir="ltr">${esc(email)}</b> יש גישה ללקוח, בתפקיד ${esc(roleName(role))}. הוא נכנס עם האימייל והסיסמה שלו.` : `ההזמנה ל-<b dir="ltr">${esc(email)}</b> נשמרה. ברגע שיירשם עם האימייל הזה הוא ייכנס לבד ללקוח, בתפקיד ${esc(roleName(role))}.`}</p>
       <p class="small mut">נשאר לשלוח לו את הקישור. בוחרים איך:</p>
       <div class="actions" style="flex-wrap:wrap;gap:8px">
         ${googleConfigured() ? '<button type="button" class="btn" data-how="gmail">✉ שליחה מה-Gmail</button>' : ''}
@@ -209,7 +213,8 @@ export async function viewClient(id) {
   });
   $('#addm', el).onclick = () => memberDlg();
   $$('[data-em]', el).forEach(b => b.onclick = () => memberDlg({ email: b.dataset.em, role: b.dataset.role, pids: b.dataset.pids }));
-  $$('[data-rm]', el).forEach(b => b.onclick = async () => { if (await confirmBox('הסרת משתמש', 'המשתמש לא יוכל לראות יותר את נתוני הלקוח.', 'הסרה', true)) { await db.rpc('remove_member', { id: b.dataset.rm }); render(); } });
+  $$('[data-link]', el).forEach(b => b.onclick = () => sendInvite(b.dataset.link, b.dataset.role, true));
+  $$('[data-rm]', el).forEach(b => b.onclick = async () => { if (await confirmBox('הסרת משתמש', isMe(b.dataset.rme) ? 'זה המשתמש שלך. אחרי ההסרה לא תוכל להיכנס יותר ללקוח הזה. להסיר?' : 'המשתמש לא יוכל לראות יותר את נתוני הלקוח.', 'הסרה', true)) { await db.rpc('remove_member', { id: b.dataset.rm }); render(); } });
   const mcDlg = async (m = {}) => {
     const row = await mcModal(m);
     if (!row) return;
