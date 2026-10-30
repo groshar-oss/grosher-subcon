@@ -3,7 +3,7 @@ import { db } from './db.js';
 import { S } from './app.js';
 
 export const CHANNELS = { email: 'מייל', whatsapp: 'וואטסאפ', digest: 'סיכום אוטומטי' };
-export const SEND_KINDS = { alert: 'התרעה', digest: 'סיכום התרעות', co_approval: 'הוראת שינוי לאישור היזם', co_contractor: 'הוראת שינוי לקבלן', invite: 'הזמנת משתמש', auto_alert: 'התרעה אוטומטית', report: 'דוח', other: 'אחר' };
+export const SEND_KINDS = { alert: 'התרעה', digest: 'סיכום התרעות', co_approval: 'הוראת שינוי לאישור היזם', co_contractor: 'הוראת שינוי לקבלן', cbill_approval: 'חשבון קבלן לאישור היזם', vo_approval: 'הוראת שינוי לאישור בחתימה', invite: 'הזמנת משתמש', auto_alert: 'התרעה אוטומטית', report: 'דוח', other: 'אחר' };
 const strip = h => String(h || '').replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|tr|h\d|li)>/gi, '\n').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
 
 /** רישום שליחה. לא מפיל את השליחה אם הרישום נכשל (למשל לפני הרצת schema.sql של חבילה 21) */

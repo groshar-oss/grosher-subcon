@@ -283,6 +283,7 @@ export function billView(P, billId) {
   $('#xl', el).onclick = () => exportBill(P, calcNow(), items);
   wireAttach(el, P.data.files || [], render);
   fillAppendixDocs(el, P.data.files || []);
+  import('./docsign.js').then(m => m.fileNewDocSignatures(P, 'variation')).then(k => k && render()).catch(() => {});
   return el;
 }
 

@@ -15,7 +15,7 @@ export function projData(data, projectId) {
     entries: f(data.entries), days: f(data.days), wqty: f(data.wqty), extras: f(data.extras || []), pos: f(data.pos), poLines: f(data.poLines),
     bills: f(data.bills), billLines: f(data.billLines), fines: f(data.fines), payments: f(data.payments),
     workers: data.workers || [], allEntries: data.entries || [], contracts: f(data.contracts), cLines: f(data.cLines),
-    cos: f(data.cos), coLines: f(data.coLines), cbills: f(data.cbills), cbLines: f(data.cbLines), income: f(data.income), signoffs: f(data.signoffs), fixedCosts: f(data.fixedCosts), units: f(data.units || []), indexSeries: data.indexSeries || [] };
+    cos: f(data.cos), coLines: f(data.coLines), cbills: f(data.cbills), cbLines: f(data.cbLines), income: f(data.income), signoffs: f(data.signoffs), docSignoffs: f(data.docSignoffs || []), fixedCosts: f(data.fixedCosts), units: f(data.units || []), indexSeries: data.indexSeries || [] };
 }
 
 // סיכום פרויקט: הוצאות + עלות עבודה מהיומן + התקשרויות רכש פתוחות, ומכסות

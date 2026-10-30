@@ -8,6 +8,7 @@ import { n } from '../calc.js';
 import { PAY_TYPES } from '../quota.js';
 import { uploadFile } from '../files.js';
 import { modal, field, select } from '../util.js';
+import { sigPad } from '../sigpad.js';
 
 const OUTBOX = 'subcon-outbox';
 const today = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
@@ -66,6 +67,10 @@ export async function dayView(P, date) {
   const toX = x => ({ id: x.id || crypto.randomUUID(), description: x.description || '', unit: x.unit || '', qty: x.qty ?? '', note: x.note || '', is_vo: !!x.is_vo, variation_id: x.variation_id || null });
   let extras = (pending?.payload.extras || (P.data.extras || []).filter(x => x.project_id === P.id && x.log_date === d)).map(toX);
   const meta = pending ? pending.payload : (dayRow || {});
+  // חתימת מפקח (לא חובה): נשמרת עם היום. supDirty = נחתם או הוסר במסך הזה
+  let sup = pending && 'sup' in pending.payload ? pending.payload.sup : dayRow?.sup_sig ? { name: dayRow.sup_name, sig: dayRow.sup_sig, signed_at: dayRow.sup_signed_at, note: dayRow.sup_note, snapshot: dayRow.sup_snapshot } : null;
+  let supDirty = !!(pending && 'sup' in pending.payload);
+  const lastSup = [...(P.data.days || [])].filter(x => x.project_id === P.id && x.sup_name).sort((a, b) => b.log_date.localeCompare(a.log_date))[0]?.sup_name || '';
   const isNew = !rows.length && !dayRow && !pending && !extras.length;
   // סדר: מי שעבד ביום הקודם קודם
   const prevSet = new Set(pe.filter(e => e.log_date === prevDate).map(e => e.worker_id));
@@ -87,6 +92,7 @@ export async function dayView(P, date) {
       <p class="small mut">לא חובה. עוזר למשרד לעדכן אחוז ביצוע ולהשוות למדידה.</p></div>
     <div class="card"><h2>עבודה שלא ברשימה</h2><div id="xlst"></div><button type="button" class="btn ghost small" id="addx">+ עבודה שלא ברשימה</button>
       <p class="small mut">עבודה שאין לה סעיף. אם זו תוספת שצריך לגבות עליה, מסמנים "תוספת / הוראת שינוי", והיא עוברת למשרד לתמחור ולגבייה.</p></div>
+    <div class="card" id="supc"><h2>חתימת מפקח <span class="small mut" style="font-weight:400">(לא חובה)</span></h2><div id="supb"></div></div>
     <div class="card"><h2>הערות</h2><div class="grid g2"><label class="fld"><span>מזג אוויר</span><select id="we">${Object.entries(WEATHER).map(([k, v]) => `<option value="${k}" ${meta.weather === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
       <label class="fld"><span>עיכובים</span><input id="dl" value="${esc(meta.delays || '')}" placeholder="למשל: חומר לא הגיע, אין גישה לקומה"></label></div>
       <label class="fld"><span>הערות</span><textarea id="nt" rows="2">${esc(meta.notes || '')}</textarea></label></div>
@@ -157,7 +163,46 @@ export async function dayView(P, date) {
     $('#cnt', el).textContent = ppl ? `${ppl} סומנו` : '';
     $('#sum', el).innerHTML = `${ppl} עובדים · ${num(days, 2)} ימי עבודה`;
   };
-  drawWorkers(); drawQty(); drawExtras(); summary();
+  // מה המפקח מאשר: הכמויות והעבודות שלא ברשימה (ומספר העובדים)
+  const nm = v => n(v).toLocaleString('en-US', { maximumFractionDigits: 2 });
+  const supLines = () => [
+    ...qty.filter(q => q.link && q.qty !== '').map(q => { const it = itemById[q.link.slice(2)]; return `${it ? `${it.code || ''} ${it.description}`.trim() : 'סעיף'}: ${nm(q.qty)} ${it?.unit || ''}${q.note ? ' · ' + q.note : ''}`.trim(); }),
+    ...extras.filter(x => x.description.trim()).map(x => `${x.description.trim()}${x.qty !== '' ? `: ${nm(x.qty)} ${x.unit || ''}` : ''}${x.is_vo || x.variation_id ? ' (תוספת)' : ''}${x.note ? ' · ' + x.note : ''}`.trim())];
+  const supSig = () => JSON.stringify(supLines());
+  const supb = $('#supb', el);
+  const drawSup = () => {
+    if (!sup) {
+      supb.innerHTML = `<p class="small mut">אם המפקח באתר, הוא יכול לאשר כאן בחתימה על המסך את הכמויות והתוספות של היום. זו ראיה חזקה כשיש ויכוח על תוספת. אפשר לשמור את היום גם בלי חתימה.</p>
+        <button type="button" class="btn ghost" id="supgo">✍ המפקח חותם עכשיו</button>`;
+      $('#supgo', supb).onclick = signNow; return;
+    }
+    const changed = sup.snapshot?.sig && sup.snapshot.sig !== supSig();
+    supb.innerHTML = `<div class="supok"><b class="pos">✓ אושר ע"י המפקח ${esc(sup.name || '')}</b> <span class="small mut">${sup.signed_at ? new Date(sup.signed_at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+      ${sup.note ? `<div class="small">הערת המפקח: ${esc(sup.note)}</div>` : ''}${sup.sig ? `<img src="${esc(sup.sig)}" alt="חתימת המפקח" class="sigimg">` : ''}
+      ${(sup.snapshot?.lines || []).length ? `<ul class="small" style="margin:4px 0">${sup.snapshot.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}</div>
+      ${changed ? '<p class="small neg"><b>הכמויות או התוספות השתנו אחרי החתימה.</b> בשמירה החתימה תוסר, אלא אם המפקח יחתום מחדש.</p>' : ''}
+      <div class="actions"><button type="button" class="btn small ghost" id="supre">חתימה מחדש</button><button type="button" class="btn small ghost" id="suprm">הסרת החתימה</button></div>`;
+    $('#supre', supb).onclick = signNow;
+    $('#suprm', supb).onclick = async () => { if (await confirmBox('הסרת חתימת המפקח', 'להסיר את חתימת המפקח מהיום הזה?', 'הסרה', true)) { sup = null; supDirty = true; drawSup(); } };
+  };
+  const signNow = async () => {
+    const lines = supLines(); let pad = null;
+    const v = await modal({ title: 'אישור המפקח בחתימה', ok: 'אישור וחתימה', body: `<p class="small">${fmtDate(d)} · ${esc(P.project.name)}${rows.length ? ` · ${new Set(rows.map(r => r.worker_id)).size} עובדים` : ''}</p>
+      ${lines.length ? `<p class="small" style="margin-bottom:2px"><b>המפקח מאשר שבוצע היום:</b></p><ul class="small" style="margin-top:0">${lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : '<p class="small mut">לא נרשמו כמויות או עבודות שלא ברשימה. החתימה מאשרת את יומן היום.</p>'}
+      ${field('שם המפקח', 'name', lastSup, { req: true, attrs: 'autocomplete="name"' })}
+      <label class="fld"><span>חתימה</span><div class="sigpad"><canvas></canvas><span class="sph">המפקח חותם כאן באצבע</span></div></label>
+      <div class="actions" style="margin-top:4px"><button type="button" class="btn small ghost" id="padclr">ניקוי</button></div>
+      ${field('הערת המפקח (לא חובה)', 'note', '')}`,
+      onMount: m => { const cv = $('.sigpad canvas', m); setTimeout(() => { pad = sigPad(cv, () => { $('.sph', m).hidden = true; }); }, 40);
+        $('#padclr', m).onclick = e => { e.preventDefault(); pad?.clear(); $('.sph', m).hidden = false; }; },
+      validate: x => !x.name.trim() ? 'חסר שם המפקח' : !pad || pad.empty() ? 'חסרה חתימה' : null });
+    if (!v) return;
+    sup = { name: v.name.trim(), sig: pad.png(), signed_at: new Date().toISOString(), note: v.note.trim() || null, snapshot: { sig: supSig(), lines, workers: new Set(rows.map(r => r.worker_id)).size } };
+    supDirty = true; drawSup(); toast('המפקח חתם. לא לשכוח לשמור את היום');
+  };
+  drawWorkers(); drawQty(); drawExtras(); summary(); drawSup();
+  el.addEventListener('change', e => { if (sup && el.isConnected && (e.target.closest('#ql') || e.target.closest('#xlst'))) drawSup(); });
+  el.addEventListener('click', e => { if (sup && e.target.closest('[data-rmq],[data-rmx]')) setTimeout(drawSup); });
 
   $('#dt', el).onchange = e => { if (e.target.value) location.hash = `#/project/${P.id}/day/${e.target.value}`; };
   $('#copy', el)?.addEventListener('click', () => {
@@ -214,6 +259,11 @@ export async function dayView(P, date) {
     if (badPiece.length && !(await confirmBox('חסרים נתוני קבלנות', `ל-${badPiece.length} רישומי קבלנות חסר סעיף או כמות. בלי כמות לא תחושב עלות. לשמור בכל זאת?`, 'שמירה'))) return;
     if (extras.some(x => !x.description.trim() && (x.qty !== '' || x.note))) return toast('בעבודה שלא ברשימה חסר תיאור', 'bad');
     if (!p.entries.length && !p.qty.length && !p.extras.length && !p.notes && !p.delays && !(await confirmBox('יום בלי עובדים', 'לא סומנו עובדים. לשמור את היום בכל זאת?', 'שמירה'))) return;
+    if (sup && sup.snapshot?.sig && sup.snapshot.sig !== supSig()) {
+      if (!(await confirmBox('השתנו כמויות אחרי חתימת המפקח', 'החתימה אישרה כמויות אחרות. אם שומרים עכשיו, החתימה תוסר מהיום. אפשר לבטל ולבקש מהמפקח לחתום מחדש.', 'שמירה בלי החתימה'))) return;
+      sup = null; supDirty = true;
+    }
+    if (supDirty) p.sup = sup;
     if (await commit(p)) { toast('יום העבודה נשמר'); location.hash = `#/project/${P.id}/${can.prices() ? 'worklog' : 'field'}`; render(); }
   };
   $('#delday', el)?.addEventListener('click', async () => {
@@ -251,7 +301,7 @@ export function tabWorkLog(P) {
     $('#t', el).innerHTML = `<table><thead><tr><th>תאריך</th><th>עובדים</th><th class="n">ימים</th><th class="n hide-m">שעות נוספות</th><th class="hide-m">סעיפים</th><th class="hide-m">כמויות</th><th class="n">עלות</th><th class="hide-m">הערות</th></tr></thead><tbody>
       ${dates.map(dt => { const de = es.filter(e => e.log_date === dt), dq = pq.filter(q => q.log_date === dt), dd = P.pd.days.find(x => x.log_date === dt);
         const its = [...new Set(de.map(e => e.boq_item_id ? (items[e.boq_item_id]?.code || '?') : 'כללי'))];
-        return `<tr class="click" data-d="${dt}"><td>${fmtDate(dt)}</td><td class="wrap small">${esc([...new Set(de.map(e => W[e.worker_id]?.name || '?'))].join(', '))}</td>
+        return `<tr class="click" data-d="${dt}"><td>${fmtDate(dt)}${dd?.sup_sig ? `<div><span class="chip green" title="אושר בחתימת המפקח ${esc(dd.sup_name || '')}">✍ מפקח</span></div>` : ''}</td><td class="wrap small">${esc([...new Set(de.map(e => W[e.worker_id]?.name || '?'))].join(', '))}</td>
           <td class="n">${num(de.filter(e => W[e.worker_id]?.pay_type !== 'piece').reduce((a, e) => a + n(e.days), 0), 2)}</td><td class="n hide-m">${num(de.reduce((a, e) => a + n(e.ot_hours), 0), 1)}</td>
           <td class="hide-m small">${esc(its.join(', '))}</td><td class="hide-m small">${dq.map(q => `${esc(items[q.boq_item_id]?.code || '')}: ${num(q.qty)}`).join(' · ')}${(P.pd.extras || []).some(x => x.log_date === dt) ? ` <span class="chip amber">${(P.pd.extras || []).filter(x => x.log_date === dt).length} לא ברשימה</span>` : ''}</td>
           <td class="n">${money(de.reduce((a, e) => a + (costs[e.id]?.cost || 0), 0))}</td><td class="hide-m wrap small">${esc([dd?.weather ? WEATHER[dd.weather] : '', dd?.delays, dd?.notes].filter(Boolean).join(' · '))}</td></tr>`; }).join('')
@@ -285,14 +335,14 @@ export function tabWorkLog(P) {
 export function fieldProject(P, fieldItems) {
   const W = Object.fromEntries((P.data.workers || []).map(w => [w.id, w]));
   const pe = P.data.entries.filter(e => e.project_id === P.id);
-  const dates = [...new Set(pe.map(e => e.log_date))].sort().reverse().slice(0, 14);
+  const dates = [...new Set(pe.map(e => e.log_date).concat((P.data.days || []).filter(x => x.project_id === P.id).map(x => x.log_date)))].sort().reverse().slice(0, 14);
   const pend = outbox().filter(j => j.p === P.id);
   const el = h(`<div><div class="top"><div><h1>${esc(P.project.name)}</h1><div class="sub">${esc(P.project.address || '')}</div></div></div>
     <a class="btn big" href="#/project/${P.id}/day/today">יומן עבודה להיום</a>
     <button class="btn big ghost" id="dnote" style="margin-top:8px">📷 צילום תעודת משלוח</button><input type="file" id="dnf" accept="image/*,application/pdf" capture="environment" multiple hidden>
     <p class="small mut" style="margin:4px 0 12px">התעודה נשלחת למשרד לבדיקה ולקליטה מול ההזמנה.</p>
     ${pend.length ? `<div class="note">${pend.length} ימים ממתינים לשליחה (אין קליטה).</div>` : ''}
-    <div class="card"><h2>ימים אחרונים</h2>${dates.map(d => { const de = pe.filter(e => e.log_date === d); return `<a class="act" href="#/project/${P.id}/day/${d}"><div><b>${fmtDate(d)}</b><small>${esc([...new Set(de.map(e => W[e.worker_id]?.name || '?'))].join(', '))}</small></div><span class="amt">${new Set(de.map(e => e.worker_id)).size} עובדים</span></a>`; }).join('') || '<div class="empty">עדיין אין רישומים</div>'}</div>
+    <div class="card"><h2>ימים אחרונים</h2>${dates.map(d => { const de = pe.filter(e => e.log_date === d); return `<a class="act" href="#/project/${P.id}/day/${d}"><div><b>${fmtDate(d)}</b>${(P.data.days || []).some(x => x.project_id === P.id && x.log_date === d && x.sup_sig) ? ' <span class="chip green">✍ מפקח</span>' : ''}<small>${esc([...new Set(de.map(e => W[e.worker_id]?.name || '?'))].join(', '))}</small></div><span class="amt">${new Set(de.map(e => e.worker_id)).size} עובדים</span></a>`; }).join('') || '<div class="empty">עדיין אין רישומים</div>'}</div>
     <details class="card"><summary><b>סעיפי העבודה בפרויקט (${fieldItems.length})</b></summary>${fieldItems.map(i => `<div class="act"><div><b>${esc(i.code || '')}</b> ${esc(i.description)}<small>${esc(i.chapter || '')} · ${esc(i.unit || '')}</small></div></div>`).join('')}</details></div>`);
   wireDeliveryPhoto(el, P.id);
   return el;

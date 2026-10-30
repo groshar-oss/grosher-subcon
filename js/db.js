@@ -9,7 +9,7 @@ export const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-x
 
 const TABLES = ['tenants', 'memberships', 'main_contractors', 'projects', 'variations', 'boq_items', 'cost_lines', 'expenses', 'change_log', 'members_demo',
   'workers', 'work_days', 'work_entries', 'work_qty', 'purchase_orders', 'po_lines', 'bills', 'bill_lines', 'bill_fines', 'bill_payments',
-  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'alert_state', 'co_signoffs', 'index_series', 'fixed_costs', 'member_invites', 'dev_units', 'project_templates', 'month_closes', 'send_log', 'project_contacts', 'work_extras'];
+  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'alert_state', 'co_signoffs', 'index_series', 'fixed_costs', 'member_invites', 'dev_units', 'project_templates', 'month_closes', 'send_log', 'project_contacts', 'work_extras', 'doc_signoffs'];
 
 function match(row, q = {}) {
   for (const [k, v] of Object.entries(q.eq || {})) if (String(row[k] ?? '') !== String(v ?? '')) return false;
@@ -98,15 +98,15 @@ class LocalDB {
     const deps = {
       tenants: [['project_contacts', 'tenant_id'], ['project_templates', 'tenant_id'], ['month_closes', 'tenant_id'], ['send_log', 'tenant_id'], ['member_invites', 'tenant_id'], ['index_series', 'tenant_id'], ['files', 'tenant_id'], ['alert_log', 'tenant_id'], ['alert_state', 'tenant_id'], ['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
       projects: [['fixed_costs', 'project_id'], ['variations', 'project_id'], ['boq_items', 'project_id'], ['cost_lines', 'project_id'], ['expenses', 'project_id'], ['change_log', 'project_id'],
-        ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['work_extras', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id'], ['contracts', 'project_id'], ['change_orders', 'project_id'], ['cbills', 'project_id'], ['dev_income', 'project_id'], ['dev_units', 'project_id'], ['project_contacts', 'project_id'], ['alert_state', 'project_id']],
+        ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['work_extras', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id'], ['contracts', 'project_id'], ['change_orders', 'project_id'], ['cbills', 'project_id'], ['dev_income', 'project_id'], ['dev_units', 'project_id'], ['project_contacts', 'project_id'], ['alert_state', 'project_id'], ['doc_signoffs', 'project_id']],
       contracts: [['contract_lines', 'contract_id'], ['cbills', 'contract_id']],
       change_orders: [['co_lines', 'co_id']],
       co_lines: [['cbill_lines', 'co_line_id']],
       contract_lines: [['cbill_lines', 'contract_line_id']],
-      cbills: [['cbill_lines', 'cbill_id']],
+      cbills: [['cbill_lines', 'cbill_id'], ['doc_signoffs', 'cbill_id']],
       vendors: [['documents', 'vendor_id']],
       bills: [['bill_lines', 'bill_id'], ['bill_fines', 'bill_id'], ['bill_payments', 'bill_id']],
-      variations: [['boq_items', 'variation_id']],
+      variations: [['boq_items', 'variation_id'], ['doc_signoffs', 'variation_id']],
       boq_items: [['cost_lines', 'boq_item_id'], ['work_qty', 'boq_item_id'], ['bill_lines', 'boq_item_id']],
       purchase_orders: [['po_lines', 'po_id']],
       contacts: [['project_contacts', 'contact_id']]
@@ -153,9 +153,15 @@ class LocalDB {
       T.work_entries = T.work_entries.filter(r => !same(r)); T.work_qty = T.work_qty.filter(r => !same(r));
       const P = args.payload || {};
       if (P.delete) { T.work_days = T.work_days.filter(r => !same(r)); T.work_extras = (T.work_extras || []).filter(r => !(same(r) && !r.variation_id)); this.save(); return 'deleted'; }
-      const day = T.work_days.find(same);
+      let day = T.work_days.find(same);
       if (day) Object.assign(day, { weather: P.weather || null, delays: P.delays || null, notes: P.notes || null });
-      else T.work_days.push({ id: uuid(), tenant_id: pr.tenant_id, project_id: args.p, log_date: args.d, weather: P.weather || null, delays: P.delays || null, notes: P.notes || null, created_at: new Date().toISOString() });
+      else T.work_days.push(day = { id: uuid(), tenant_id: pr.tenant_id, project_id: args.p, log_date: args.d, weather: P.weather || null, delays: P.delays || null, notes: P.notes || null, created_at: new Date().toISOString() });
+      if ('sup' in P) {
+        const sp = P.sup;
+        if (!sp) Object.assign(day, { sup_name: null, sup_sig: null, sup_signed_at: null, sup_note: null, sup_snapshot: null });
+        else { if (!String(sp.sig || '').startsWith('data:image/png;base64,')) throw new Error('חתימת המפקח לא תקינה');
+          Object.assign(day, { sup_name: String(sp.name || '').trim() || null, sup_sig: sp.sig, sup_signed_at: sp.signed_at || new Date().toISOString(), sup_note: String(sp.note || '').trim() || null, sup_snapshot: sp.snapshot || null }); }
+      }
       const num = v => v === '' || v == null ? null : +v;
       for (const e of P.entries || []) T.work_entries.push({ id: uuid(), tenant_id: pr.tenant_id, project_id: args.p, log_date: args.d, worker_id: e.worker_id, boq_item_id: e.boq_item_id || null, variation_id: e.variation_id || null,
         cost_line_id: null, days: num(e.days) ?? 1, hours: num(e.hours), ot_hours: num(e.ot_hours) ?? 0, piece_qty: num(e.piece_qty), piece_rate: null, note: e.note || null, created_at: new Date().toISOString() });
@@ -206,6 +212,41 @@ class LocalDB {
         else Object.assign(co, { stage: 'rejected', decision_note: note || co.decision_note });
       }
       T.change_log.push({ id: uuid(), tenant_id: x.tenant_id, project_id: x.project_id, entity: 'change_order', entity_id: x.co_id, label: `${x.snapshot?.co?.number || ''} ${x.snapshot?.co?.title || ''}`.trim(), field: 'אישור יזם', old_value: 'ממתין לאישור יזם', new_value: args.decision === 'approved' ? 'אושר בחתימה' : 'נדחה', reason: note, user_name: nm + ' (דף חתימה)', at: now.toISOString() });
+      this.save(); return { status: args.decision, signed_at: now.toISOString() };
+    }
+    // חתימה על חשבון קבלן / הוראת שינוי מול קבלן ראשי (חבילה 24)
+    if (name === 'doc_signoff_get') {
+      const x = T.doc_signoffs.find(r => r.token === args.t); if (!x) return null;
+      return { kind: x.kind, status: x.status === 'pending' && new Date(x.expires_at) < new Date() ? 'expired' : x.status, expires_at: x.expires_at, sent_at: x.sent_at, sent_name: x.sent_name, sent_to: x.sent_to, snapshot: x.snapshot, signer_name: x.signer_name, signed_at: x.signed_at, signer_note: x.signer_note, signature: x.signature };
+    }
+    if (name === 'doc_signoff_submit') {
+      const x = T.doc_signoffs.find(r => r.token === args.t);
+      if (!x) throw new Error('הקישור לא נמצא');
+      if (x.status !== 'pending') throw new Error('הבקשה כבר טופלה');
+      if (new Date(x.expires_at) < new Date()) throw new Error('תוקף הקישור פג. צריך לבקש קישור חדש');
+      if (!['approved', 'rejected'].includes(args.decision)) throw new Error('החלטה לא תקינה');
+      if (!String(args.signer || '').trim()) throw new Error('חסר שם החותם');
+      if (args.decision === 'approved' && !String(args.sig || '').startsWith('data:image/png;base64,')) throw new Error('חסרה חתימה');
+      const now = new Date(), nm = String(args.signer).trim(), note = String(args.note || '').trim() || null, ok = args.decision === 'approved', sn = x.snapshot || {};
+      const log = (entity, id, label, field, oldv, newv) => T.change_log.push({ id: uuid(), tenant_id: x.tenant_id, project_id: x.project_id, entity, entity_id: id, label, field, old_value: oldv, new_value: newv, reason: note, user_name: nm + ' (דף חתימה)', at: now.toISOString() });
+      if (x.kind === 'cbill') {
+        const b = T.cbills.find(r => r.id === x.cbill_id);
+        if (!b) throw new Error('החשבון נמחק. אין מה לאשר');
+        if (b.status !== 'recommended') throw new Error('החשבון כבר לא ממתין לאישור (הסטטוס שלו השתנה). צריך לבקש קישור חדש');
+        if (ok) {
+          Object.assign(b, { status: 'approved', approved_date: now.toISOString().slice(0, 10) });
+          if (!T.expenses.some(e => e.cbill_id === b.id)) T.expenses.push({ id: uuid(), tenant_id: b.tenant_id, project_id: b.project_id, cbill_id: b.id, contract_id: b.contract_id, supplier_name: sn.bill?.vendor || null, kind: 'sub', doc_no: b.invoice_no || null,
+            doc_date: b.invoice_date || now.toISOString().slice(0, 10), description: `חשבון ${b.number} · ${sn.bill?.contract || ''}`, amount: Math.round((+sn.totals?.net || 0) * 100) / 100, vat_pct: +sn.totals?.vat_pct || 18, status: 'approved', pay_date: null, notes: null, boq_item_id: null, created_at: now.toISOString() });
+        } else Object.assign(b, { status: 'checked', notes: `${b.notes ? b.notes + '\n' : ''}היזם דחה (${nm}): ${note || 'בלי הערה'}` });
+        log('cbill', b.id, `${sn.bill?.vendor || ''} חשבון ${sn.bill?.number || ''}`, 'אישור יזם לחשבון', 'הומלץ לתשלום', ok ? 'אושר בחתימה' : 'נדחה, חזר לבדיקה');
+      } else {
+        const v = T.variations.find(r => r.id === x.variation_id);
+        if (!v) throw new Error('הוראת השינוי נמחקה. אין מה לאשר');
+        if (ok && v.status !== 'rejected') Object.assign(v, { status: ['draft', 'submitted', 'executed_unapproved'].includes(v.status) ? 'approved' : v.status, has_written_order: true });
+        if (!ok && ['draft', 'submitted', 'executed_unapproved'].includes(v.status)) Object.assign(v, { status: 'rejected', notes: `${v.notes ? v.notes + '\n' : ''}נדחה בחתימה (${nm}): ${note || 'בלי הערה'}` });
+        log('variation', v.id, `${v.number} ${v.title}`, 'אישור בחתימה', 'נשלח לחתימה', ok ? 'אושר בחתימה' : 'נדחה');
+      }
+      Object.assign(x, { status: args.decision, signer_name: nm, signature: args.sig || null, signed_at: now.toISOString(), signer_note: note, signer_agent: String(args.agent || '').slice(0, 300) });
       this.save(); return { status: args.decision, signed_at: now.toISOString() };
     }
     throw new Error('פעולה לא מוכרת: ' + name);

@@ -11,6 +11,7 @@ import { attachBtn, wireAttach } from '../files.js';
 import { has as hasMod } from '../modules.js';
 import { party } from '../dev.js';
 import { fixedCostsCard } from './fixedcosts.js';
+import { docState, docSignBlock, docSignChip, wireDocSign, varSnapshot, varSig, fileNewDocSignatures } from './docsign.js';
 
 const SOURCES = { change_order: 'הוראת שינוי', supervisor: 'הוראת מפקח', main_request: 'בקשת הקבלן הראשי', daywork: 'עבודת רג\'י', field: 'מיומן העבודה (מהשטח)' };
 const srcOf = P => ({ ...SOURCES, main_request: party(P.project).req });
@@ -32,21 +33,32 @@ export function tabVo(P) {
     ${can.edit() ? '<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ הוראת שינוי חדשה</button></div>' : ''}
     <div id="list"></div></div>`);
   const list = $('#list', el);
+  const pt = party(P.project);
+  const sctx = g => { const v = g.vo, bad = !g.rows.length ? 'מוסיפים להוראה סעיפים (כמות × מחיר) לפני השליחה לחתימה.' : g.rows.some(r => r.item.unit_price == null || r.item.unit_price === '') ? 'יש סעיף בלי מחיר. ממלאים מחיר לפני השליחה לחתימה.' : '';
+    return { kind: 'variation', P, refId: v.id, label: `${v.number} ${v.title}`, voStatus: v.status, state: docState(P, 'variation', v.id, varSig(g)),
+      can: !bad && !VO_APPROVED.includes(v.status) && v.status !== 'rejected', why: bad && !VO_APPROVED.includes(v.status) && v.status !== 'rejected' ? bad : '', snapshot: () => varSnapshot(P, g) }; };
+  // הוראה ששונתה אחרי שנשלחה לחתימה: הקישור הישן מתבטל
+  if (can.edit()) for (const g of groups) { const ds = docState(P, 'variation', g.vo.id, varSig(g));
+    if (ds?.changedPending) { db.update('doc_signoffs', ds.last.id, { status: 'cancelled' }).then(() => logChange({ project_id: P.id, entity: 'variation', entity_id: g.vo.id, label: `${g.vo.number} ${g.vo.title}`, field: 'אישור בחתימה', old_value: 'ממתין לחתימה', new_value: 'הקישור בוטל כי ההוראה השתנתה' }))
+      .then(() => { toast(`${g.vo.number} השתנתה אחרי השליחה, ולכן הקישור לחתימה בוטל. שולחים שוב.`, 'warn'); render(); }); } }
+  fileNewDocSignatures(P, 'variation').then(k => k && render()).catch(() => {});
   if (!groups.length) list.innerHTML = '<div class="card empty">אין הוראות שינוי בפרויקט</div>';
   for (const g of groups) {
     const v = g.vo, sale = VO_APPROVED.includes(v.status) ? g.approvedSale : g.requested;
     const d = h(`<details class="card" ${v.status === 'executed_unapproved' ? 'open' : ''}><summary style="cursor:pointer;list-style:none">
-      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div><b>${esc(v.number)}</b> ${esc(v.title)} ${statusChip(v.status)}${v.from_field ? ' <span class="chip violet">מהשטח</span>' : ''}
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div><b>${esc(v.number)}</b> ${esc(v.title)} ${statusChip(v.status)}${v.from_field ? ' <span class="chip violet">מהשטח</span>' : ''}${docSignChip(docState(P, 'variation', v.id, varSig(g)))}
         <div class="small mut">${srcOf(P)[v.source]} · ${v.has_written_order ? 'יש הוראה בכתב' : '<span class="neg">אין הוראה בכתב</span>'}${v.vo_date ? ' · ' + fmtDate(v.vo_date) : ''}</div></div>
         <div class="pr" style="grid-template-columns:repeat(5,auto);gap:16px"><div>מבוקש<b>${money(g.requested)}</b></div><div>מאושר<b>${VO_APPROVED.includes(v.status) ? money(g.approvedSale) : '—'}</b></div><div>תמחיר<b>${money(g.planned)}</b></div><div>בפועל<b>${money(g.actual)}</b></div><div>רווח צפוי<b class="${sale - g.forecast < 0 ? 'neg' : ''}">${money(sale - g.forecast)}</b></div></div></div></summary>
       ${v.notes ? `<p class="small">${esc(v.notes)}</p>` : ''}
       ${v.status === 'executed_unapproved' ? `<div class="note neg">הוראת השינוי בוצעה ועדיין לא אושרה. ${money(g.requested)} בסיכון. כדאי לצרף תמונות לפני ואחרי ויומני עבודה ולהגיש הוראת שינוי.</div>` : ''}
       ${can.edit() ? `<div class="actions" style="margin:8px 0"><button class="btn small ghost" data-ed="${v.id}">עריכת הוראה וסטטוס</button><a class="btn small ghost" href="#/project/${P.id}/costing">תמחיר ההוראה</a><button class="btn small ghost" data-del="${v.id}">מחיקה</button>${can.expense() ? attachBtn(P.data.files, 'variations', v.id, { projectId: P.id, docType: 'vo', label: `${v.number} ${v.title}` }) : ''}</div>` : ''}
+      ${(() => { const c = sctx(g); return c.state || c.can || c.why ? `<div class="vsign"><h3 style="margin:10px 0 4px">אישור ${esc(pt.the)} בחתימה</h3>${docSignBlock(c)}</div>` : ''; })()}
       <div data-items></div></details>`);
     $('[data-items]', d).appendChild(tabBoq(P, v.id));
     list.appendChild(d);
   }
   wireAttach(el, P.data.files || [], render);
+  wireDocSign(el, (k, id) => sctx(groups.find(g => g.vo.id === id)), render);
   $('#add', el)?.addEventListener('click', () => voDialog(P));
   $$('[data-ed]', el).forEach(b => b.onclick = () => voDialog(P, P.pd.variations.find(v => v.id === b.dataset.ed)));
   $$('[data-del]', el).forEach(b => b.onclick = async () => {

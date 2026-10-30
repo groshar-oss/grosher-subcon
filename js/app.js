@@ -78,9 +78,9 @@ export async function loadTenantData(tenantId = S.tenantId) {
     can.expense() ? db.select('files', { ...q, order: 'created_at desc' }) : [],
     db.select('contracts', { ...q, order: 'created_at' }), db.select('contract_lines', { ...q, order: 'sort' }),
     db.select('change_orders', { ...q, order: 'created_at' }), db.select('co_lines', { ...q, order: 'sort' }), db.select('cbills', { ...q, order: 'number' }), db.select('cbill_lines', q)]);
-  const [income, alertStates, signoffs] = await Promise.all([db.select('dev_income', { ...q, order: 'due_date' }), db.select('alert_state', q), db.select('co_signoffs', { ...q, order: 'sent_at' }).catch(() => [])]);
+  const [income, alertStates, signoffs, docSignoffs] = await Promise.all([db.select('dev_income', { ...q, order: 'due_date' }), db.select('alert_state', q), db.select('co_signoffs', { ...q, order: 'sent_at' }).catch(() => []), db.select('doc_signoffs', { ...q, order: 'sent_at' }).catch(() => [])]);
   const [indexSeries, fixedCosts, units, closes] = await Promise.all([db.select('index_series', { ...q, order: 'month' }).catch(() => []), db.select('fixed_costs', { ...q, order: 'from_month' }).catch(() => []), db.select('dev_units', { ...q, order: ['sort', 'name'] }).catch(() => []), db.select('month_closes', { eq: { tenant_id: tenantId }, order: 'month' }).catch(() => [])]);
-  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, extras, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines, income, alertStates, signoffs, indexSeries, fixedCosts, units, closes };
+  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, extras, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines, income, alertStates, signoffs, docSignoffs, indexSeries, fixedCosts, units, closes };
 }
 
 export async function logChange(e) {

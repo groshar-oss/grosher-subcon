@@ -167,6 +167,19 @@ export function buildActions(data, sums, devSums = []) {
     if (s.unallocated) out.push({ w: 25, color: '#f2c400', title: 'הוצאות שלא שויכו', sub: p.name, amt: money(s.unallocated), href: `#/project/${p.id}/expenses` });
   }
   for (const w of (data.workers || []).filter(w => w.pending_rate && w.active !== false)) out.push({ w: 88, color: '#ff9f43', sev: 'amber', key: `wrate|${w.id}`, title: `עובד חדש ממתין לתעריף: ${w.name}`, sub: `נוסף מהשטח${w.added_by ? ' ע"י ' + w.added_by : ''} · עד שיוזן תעריף, העלות שלו לא נספרת`, amt: '', href: '#/workers' });
+  // חבילה 24: בקשות חתימה (חשבון קבלן ליזם, הוראת שינוי לקבלן הראשי / למזמין)
+  { const last = {};
+    for (const so of [...(data.docSignoffs || [])].sort((a, b) => String(a.sent_at).localeCompare(String(b.sent_at)))) last[so.kind + '|' + (so.cbill_id || so.variation_id)] = so;
+    for (const so of Object.values(last)) {
+      const p = data.projects.find(x => x.id === so.project_id); if (!p) continue;
+      const sn = so.snapshot || {}, lbl = so.kind === 'cbill' ? `חשבון ${sn.bill?.number || ''} · ${sn.bill?.vendor || ''}` : `${sn.vo?.number || ''} ${sn.vo?.title || ''}`;
+      const href = so.kind === 'cbill' ? `#/project/${p.id}/cbill/${so.cbill_id}` : `#/project/${p.id}/vo`;
+      const days = Math.floor((Date.now() - new Date(so.status === 'pending' ? so.sent_at : so.signed_at || so.sent_at)) / 864e5);
+      if (so.status === 'pending' && new Date(so.expires_at) < new Date()) out.push({ w: 62, color: '#ff9f43', sev: 'amber', key: `dsx|${so.id}`, title: `פג תוקף קישור החתימה: ${lbl}`, sub: `${p.name} · לא נחתם. שולחים קישור חדש`, amt: '', href });
+      else if (so.status === 'pending' && days >= 3) out.push({ w: 60, color: '#ff9f43', sev: 'amber', key: `dsw|${so.id}`, title: `ממתין לחתימה ${days} ימים: ${lbl}`, sub: `${p.name} · נשלח ל-${so.sent_to || so.sent_name || ''} · אפשר לשלוח תזכורת`, amt: '', href });
+      else if (so.status === 'rejected' && days <= 14) out.push({ w: 84, color: 'var(--ri)', sev: 'red', key: `dsr|${so.id}`, title: `נדחה בחתימה: ${lbl}`, sub: `${p.name} · ${so.signer_name || ''}${so.signer_note ? ': ' + so.signer_note : ''}`, amt: '', href });
+      else if (so.status === 'approved' && so.kind === 'cbill' && days <= 7) out.push({ w: 72, color: 'var(--ok, #1b7a3a)', key: `dsa|${so.id}`, title: `היזם אישר בחתימה: ${lbl}`, sub: `${p.name} · ${so.signer_name || ''} · החשבון עבר לתשלום ונכנס לתזרים`, amt: money(sn.totals?.total || 0), href });
+    } }
   // שלב 7: מסמכים, ערבויות וסגירה
   const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const recent = new Set(data.expenses.filter(e => (Date.now() - new Date(e.doc_date)) / 864e5 < 120).map(e => (e.supplier_name || '').trim()));

@@ -28,6 +28,7 @@ export function voAppendix(P, r0, filesFor) {
         <div class="small">${vo.vo_date ? 'תאריך ' + fmtDate(vo.vo_date) + ' · ' : ''}${vo.has_written_order ? 'יש הוראה בכתב' : 'אין הוראה בכתב'}</div></div>
         <span class="chip ${ok ? 'green' : vo.status === 'rejected' ? 'red' : 'amber'}">${esc(VO_STATUS[vo.status] || '')}</span></div>
       <p class="${ok ? '' : 'neg'} small" style="margin:8px 0">${NOTE[vo.status] || ''}</p>
+      ${supBox(P, vo)}
       <div class="tw"><table><thead><tr><th>סעיף</th><th>יח'</th><th class="n">כמות בהוראה</th><th class="n">מחיר</th><th class="n">מצטבר בחשבון</th><th class="n">בחשבון הזה</th></tr></thead><tbody>
         ${rows.map(r => `<tr><td class="wrap">${esc(r.item.code || '')} ${esc(r.item.description)}</td><td>${esc(r.item.unit || '')}</td><td class="n">${num(r.item.qty)}</td><td class="n">${money(r.item.unit_price)}</td><td class="n">${money(r.cumSubAmt)}</td><td class="n">${money(r.curSubAmt)}</td></tr>`).join('')}
         <tr class="tot"><td>סה"כ</td><td></td><td></td><td></td><td class="n">${money(cum)}</td><td class="n">${money(sub)}</td></tr></tbody></table></div>
@@ -38,6 +39,14 @@ export function voAppendix(P, r0, filesFor) {
     </div>`; }).join('')}`;
 }
 const n0 = v => Number(v) || 0;
+// תוספת שנרשמה ביומן העבודה ונחתמה ע"י המפקח בשטח: מצורף אישור המפקח
+function supBox(P, vo) {
+  const xs = (P.pd.extras || []).filter(x => x.variation_id === vo.id);
+  const days = [...new Set(xs.map(x => x.log_date))].map(d => (P.pd.days || []).find(x => x.log_date === d && x.sup_sig)).filter(Boolean);
+  return days.map(d => `<div class="apx-sup"><b>אושר בשטח ע"י המפקח ${esc(d.sup_name || '')}</b> · יומן עבודה ${fmtDate(d.log_date)}${d.sup_signed_at ? ' · נחתם ' + new Date(d.sup_signed_at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+    ${(d.sup_snapshot?.lines || []).length ? `<ul class="small" style="margin:4px 0">${d.sup_snapshot.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}${d.sup_note ? `<div class="small">הערת המפקח: ${esc(d.sup_note)}</div>` : ''}
+    <img src="${esc(d.sup_sig)}" alt="חתימת המפקח"></div>`).join('');
+}
 
 let pdfjs = null;
 async function loadPdf() {

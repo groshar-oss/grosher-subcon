@@ -10,6 +10,7 @@ import { vendorStatus, findVendor, DOC_TYPES } from '../docs.js';
 import { attachBtn, wireAttach, filesFor } from '../files.js';
 import { signBlock, signChip, signAction, fileNewSignatures } from './cosign.js';
 import { has as hasMod, latestIndex } from '../modules.js';
+import { docState, docSignBlock, docSignChip, wireDocSign, cbillSnapshot, cbillSig, fileNewDocSignatures } from './docsign.js';
 
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const has = v => v !== null && v !== undefined && v !== '';
@@ -184,12 +185,13 @@ export function devCbills(P) {
     <div class="tw"><table><thead><tr><th>קבלן / ספק</th><th>חשבון</th><th class="hide-m">התקבל</th><th>סטטוס</th><th class="n">הוגש</th><th class="n">מאושר ברוטו</th><th class="n hide-m">נטו</th><th class="n">לתשלום כולל מע"מ</th><th>ממצאי בדיקה</th><th></th></tr></thead><tbody>
     ${res.map(r => { const b = r.bill, c = r.contract; const fl = r.flags.length + (b.invoice_legal ? 0 : 1);
       return `<tr class="click" data-b="${b.id}"><td><b>${esc(c.vendor_name || '')}</b><div class="small mut">${esc(c.number || '')} ${esc(c.title)}</div></td><td><b>${b.number}</b></td><td class="hide-m">${fmtDate(b.received_date)}</td>
-        <td><span class="chip ${b.status === 'paid' ? 'green' : b.status === 'approved' ? 'blue' : b.status === 'recommended' ? 'violet' : 'amber'}">${CBILL_STATUS[b.status]}</span></td>
+        <td><span class="chip ${b.status === 'paid' ? 'green' : b.status === 'approved' ? 'blue' : b.status === 'recommended' ? 'violet' : 'amber'}">${CBILL_STATUS[b.status]}</span>${docSignChip(docState(P, 'cbill', b.id, cbillSig(r)))}</td>
         <td class="n">${money(r.claimed)}</td><td class="n">${money(r.gross)}${r.cut > 0.5 ? `<div class="small neg">קוצץ ${money(r.cut)}</div>` : ''}</td><td class="n hide-m">${money(r.net)}</td><td class="n"><b>${money(r.total)}</b></td>
         <td>${fl ? `<span class="chip ${r.flags.length ? 'red' : 'amber'}">${fl}</span>` : '<span class="chip green">תקין</span>'}</td>
         <td style="white-space:nowrap">${can.edit() ? attachBtn(P.data.files, 'cbills', b.id, { projectId: P.id, docType: 'invoice', label: `${c.vendor_name || ''} חשבון ${b.number}` }) : ''}</td></tr>`; }).join('')
       || '<tr><td colspan="10" class="empty">אין חשבונות קבלנים עדיין</td></tr>'}</tbody></table></div></div>`);
   wireAttach(el, P.data.files || [], render);
+  fileNewDocSignatures(P, 'cbill').then(k => k && render()).catch(() => {});
   $$('[data-b]', el).forEach(tr => tr.onclick = e => { if (e.target.closest('button,a')) return; location.hash = `#/project/${P.id}/cbill/${tr.dataset.b}`; });
   $('#add', el)?.addEventListener('click', () => newCbill(P, cById));
   return el;
@@ -211,7 +213,7 @@ async function newCbill(P) {
 }
 
 // בדיקות על חשבון אחד: ממצאי השורות + חשבונית כפולה + מסמכים
-function billChecks(P, R, head) {
+export function billChecks(P, R, head) {
   const c = R.contract, out = R.flags.map(f => ({ ...f }));
   const dup = dupInvoice(head, c, P.pd.cbills || [], P.pd.contracts || [], P.pd.expenses || []);
   if (dup) out.push({ type: 'dup_invoice', text: dup });
@@ -220,7 +222,7 @@ function billChecks(P, R, head) {
   const gate = docGate(head, vstat);
   return { list: out, gate, vendor, vstat };
 }
-const checkText = f => {
+export const checkText = f => {
   const r = f.row;
   if (f.type === 'over_qty') return `${FLAG_TEXT.over_qty}: ${esc(r.description)} · מוגש ${num(r.cumSub)} מתוך ${num(r.qty)} ${esc(r.unit || '')}`;
   if (f.type === 'co_over') return `${FLAG_TEXT.co_over}: ${esc(r.code || '')} ${esc(r.description)} · מוגש ${num(r.cumSub)} מתוך ${num(r.qty)}`;
@@ -230,7 +232,7 @@ const checkText = f => {
   if (f.type === 'dup_invoice') return `${FLAG_TEXT.dup_invoice} (${esc(f.text)})`;
   return esc(FLAG_TEXT[f.type] || f.type);
 };
-const gateText = g => g.type === 'legal_invoice' ? FLAG_TEXT.legal_invoice : `${g.expired ? 'פג תוקף' : 'חסר'}: ${DOC_TYPES[g.doc] || g.doc}`;
+export const gateText = g => g.type === 'legal_invoice' ? FLAG_TEXT.legal_invoice : `${g.expired ? 'פג תוקף' : 'חסר'}: ${DOC_TYPES[g.doc] || g.doc}`;
 
 export async function cbillView(P, billId) {
   const bill = (P.pd.cbills || []).find(b => b.id === billId);
@@ -265,6 +267,7 @@ export async function cbillView(P, billId) {
     <div class="tw" id="lt"></div>
     <div class="cols even"><div class="card"><h2>ממצאי הבדיקה</h2><div id="chk"></div></div><div class="card"><h2>סיכום והמלצה לתשלום</h2><div id="sum"></div></div></div>
     ${area('הערות לבדיקה', 'notes', bill.notes || '').replace('<label class="fld">', '<label class="fld card">')}
+    <div class="card" id="dsign"><h2>אישור היזם בחתימה</h2><div id="dsb"></div></div>
     ${edit ? `<div class="savebar"><span id="sb"></span><span class="sp"></span>${isLast ? '<button class="btn ghost danger-t" id="del" type="button">מחיקה</button>' : ''}<button class="btn" id="save" type="button">שמירה</button></div>` : ''}</div>`);
   if (!edit) $$('input,select,textarea', el).forEach(x => x.disabled = true);
   const lt = $('#lt', el);
@@ -308,6 +311,13 @@ export async function cbillView(P, billId) {
     if ($('#sb', el)) $('#sb', el).innerHTML = `מאושר ${money(R.gross)} · לתשלום ${money(R.total)}`;
   };
   draw();
+  // אישור היזם בחתימה: נשלח מהחשבון השמור, כשהוא בסטטוס "הומלץ לתשלום"
+  const R0 = flowOf(P).byBill[billId];
+  const sctx = () => ({ kind: 'cbill', P, refId: billId, label: `${C.vendor_name || ''} חשבון ${bill.number}`, state: docState(P, 'cbill', billId, R0 ? cbillSig(R0) : null),
+    can: bill.status === 'recommended', why: bill.status === 'recommended' ? '' : ['received', 'checked'].includes(bill.status) ? 'שולחים ליזם אחרי שמסמנים סטטוס "הומלץ לתשלום" ושומרים.' : '',
+    snapshot: () => cbillSnapshot(P, R0, billChecks(P, R0, bill), { check: checkText, gate: gateText }) });
+  $('#dsb', el).innerHTML = `${bill.status === 'recommended' && !docState(P, 'cbill', billId) ? '<p class="small mut">היזם מקבל את דף הבדיקה וההמלצה לתשלום במייל או בוואטסאפ, עם קישור אישי. הוא מאשר או דוחה בחתימה. באישור, החשבון עובר ל"אושר ע"י היזם" ונכנס לתזרים, והמסמך החתום נשמר בחשבון.</p>' : ''}${docSignBlock(sctx())}`;
+  wireDocSign(el, () => sctx(), render);
   $$('.card input[name], .card select[name], textarea[name]', el).forEach(inp => inp.onchange = () => {
     st.head[inp.name] = inp.type === 'checkbox' ? inp.checked : inp.type === 'number' ? (inp.value === '' ? null : n(inp.value)) : (inp.value || null);
     draw();
@@ -350,6 +360,13 @@ export async function cbillView(P, billId) {
       if (exp) await db.update('expenses', exp.id, er); else await db.insert('expenses', { tenant_id: S.tenantId, project_id: P.id, cbill_id: billId, notes: null, ...er });
     } else if (exp) await db.remove('expenses', exp.id);
     const lbl = `${C.vendor_name || ''} חשבון ${bill.number}`;
+    // בקשת חתימה פתוחה: אם החשבון השתנה או יצא מ"הומלץ לתשלום", הקישור הישן מתבטל כדי שהיזם לא יחתום על גרסה ישנה
+    const ds = docState(P, 'cbill', billId, cbillSig(R));
+    if (ds?.status === 'pending' && (now !== 'recommended' || ds.changedPending)) {
+      await db.update('doc_signoffs', ds.last.id, { status: 'cancelled' });
+      await logChange({ project_id: P.id, entity: 'cbill', entity_id: billId, label: lbl, field: 'אישור בחתימה', old_value: 'ממתין לחתימה', new_value: 'הקישור בוטל כי החשבון השתנה' });
+      toast(now === 'recommended' ? 'החשבון השתנה, ולכן הקישור שנשלח ליזם בוטל. שולחים שוב מהחשבון.' : 'הקישור שנשלח ליזם בוטל, כי החשבון כבר לא ממתין לאישורו.', 'warn');
+    }
     if (was !== now) await logChange({ project_id: P.id, entity: 'cbill', entity_id: billId, label: lbl, field: 'סטטוס חשבון קבלן', old_value: CBILL_STATUS[was], new_value: CBILL_STATUS[now], reason: now === 'recommended' ? `מומלץ ${Math.round(R.total)} ₪` : null });
     toast('החשבון נשמר'); render();
   });
@@ -390,7 +407,7 @@ export function cbillSheet(P, billId) {
           <tr class="tot"><td>נטו לפני מע"מ</td><td class="n">${money(R.net)}</td></tr><tr><td>מע"מ ${settings().vat_pct}%</td><td class="n">${money(R.vat)}</td></tr></table></div></div>
       <div class="note" style="font-size:16px;margin-top:12px">סכום מומלץ לתשלום: <b>${money(R.total)}</b> כולל מע"מ (${money(R.net)} לפני מע"מ)${ck.gate.length && !b.doc_override ? ' · <b class="neg">בכפוף להשלמת המסמכים</b>' : ''}</div>
       <p class="small">מצטבר מאושר ${money(R.grossCum)} מתוך התקשרות ${money(R.contractAmt + R.coAmt)} (${pct(R.contractAmt + R.coAmt ? R.grossCum / (R.contractAmt + R.coAmt) * 100 : 0, { d: 0 })})${n(C.retention_pct) ? ` · עיכבון מצטבר ${money(R.retentionCum)}` : ''}${n(C.advance_amount) ? ` · יתרת מקדמה ${money(Math.max(0, n(C.advance_amount) - R.advanceCum))}` : ''}</p>
-      <table class="sumt sig" style="margin-top:24px"><tr><td>נבדק ע"י: ${esc(b.checked_by || '______________')}</td><td>תאריך: ______________</td><td>חתימה: ______________</td></tr><tr><td>אושר לתשלום ע"י היזם: ______________</td><td>תאריך: ______________</td><td>חתימה: ______________</td></tr></table>
+      <table class="sumt sig" style="margin-top:24px"><tr><td>נבדק ע"י: ${esc(b.checked_by || '______________')}</td><td>תאריך: ______________</td><td>חתימה: ______________</td></tr>${(() => { const so = docState(P, 'cbill', billId)?.signed; return so ? `<tr><td>אושר לתשלום ע"י היזם: <b>${esc(so.signer_name || '')}</b></td><td>תאריך: ${new Date(so.signed_at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td><td>חתימה: ${so.signature ? `<img src="${esc(so.signature)}" alt="חתימה" style="height:48px;vertical-align:middle">` : ''} <span class="small mut">(חתימה אלקטרונית)</span></td></tr>` : '<tr><td>אושר לתשלום ע"י היזם: ______________</td><td>תאריך: ______________</td><td>חתימה: ______________</td></tr>'; })()}</table>
     </div></div>`);
   $('#print', el).onclick = () => window.print();
   $('#gdrive', el).onclick = () => import('./reports.js').then(m => m.pdfToDrive($('.rpage', el), `בדיקת חשבון ${b.number} - ${C.vendor_name || ''}`, P.project));
