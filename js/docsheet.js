@@ -4,7 +4,7 @@ import { ils } from './cosheet.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = v => Number(v) || 0;
-const q = v => `<span dir="ltr">${num(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>`;
+const q = (v, lump) => lump ? `<span dir="ltr">${(Math.round(num(v) * 1e4) / 100).toLocaleString('en-US')}%</span>` : `<span dir="ltr">${num(v).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span>`;
 const fmtD = d => d ? new Date(d).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
 const fmtDT = d => d ? new Date(d).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 const ltr = t => `<span dir="ltr" style="unicode-bidi:isolate">${esc(t)}</span>`;
@@ -37,7 +37,7 @@ export function sigBox(so, who, okText = 'אושר בחתימה') {
 /** חשבון קבלן: דף בדיקה והמלצה לתשלום, לאישור היזם */
 export function cbillSheetHtml(snap, so = null, { logo = '' } = {}) {
   const b = snap.bill || {}, t = snap.totals || {};
-  const rows = (snap.rows || []).map(r => `<tr${r.flags?.length ? ' style="background:#fff8e1"' : ''}>${tdR(`${r.code ? `<b>${esc(r.code)}</b> ` : ''}${esc(r.description)}`, 'min-width:150px')}${tdN(q(r.qty))}${tdN(r.price != null ? ils(r.price, true) : '—')}${tdN(q(r.prev))}${tdN(q(r.cumSub))}${tdN(q(r.cumApp))}${tdN(ils(r.claimedCur))}${tdN(`<b>${ils(r.amtCur)}</b>`)}${tdR(esc((r.flags || []).join(' · ')), 'font-size:12px')}</tr>`).join('');
+  const rows = (snap.rows || []).map(r => `<tr${r.flags?.length ? ' style="background:#fff8e1"' : ''}>${tdR(`${r.code ? `<b>${esc(r.code)}</b> ` : ''}${esc(r.description)}`, 'min-width:150px')}${tdN(q(r.qty))}${tdN(r.price != null ? ils(r.price, true) : '—')}${tdN(q(r.prev, r.lump))}${tdN(q(r.cumSub, r.lump))}${tdN(q(r.cumApp, r.lump))}${tdN(ils(r.claimedCur))}${tdN(`<b>${ils(r.amtCur)}</b>`)}${tdR(esc((r.flags || []).join(' · ')), 'font-size:12px')}</tr>`).join('');
   const finds = [...(snap.checks || []), ...(snap.gate || [])];
   return `<div dir="rtl" style="font-family:Heebo,Arial,Helvetica,sans-serif;color:#13284b;background:#fff;max-width:1000px">
     ${head('בדיקת חשבון והמלצה לתשלום', snap, logo)}
@@ -46,6 +46,8 @@ export function cbillSheetHtml(snap, so = null, { logo = '' } = {}) {
     <div style="overflow-x:auto"><table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;border:1px solid #d5dbec">
       <tr>${thR('תיאור')}${thN('כמות בחוזה')}${thN('מחיר')}${thN('מצטבר קודם')}${thN('מצטבר מוגש')}${thN('מצטבר מאושר')}${thN('נוכחי מוגש')}${thN('נוכחי מאושר')}${thR('הערה')}</tr>
       ${rows}<tr style="font-weight:800">${tdR('סה"כ')}${tdN('')}${tdN('')}${tdN('')}${tdN('')}${tdN('')}${tdN(ils(t.claimed))}${tdN(ils(t.gross))}${tdR('')}</tr></table></div>
+    ${(snap.overs || []).length ? `<div style="margin-top:12px;font-size:13px;border:1px solid #f0c36d;background:#fff8e1;border-radius:8px;padding:8px 10px"><b>חריגות שאושרו</b>
+      <ul style="margin:6px 0;padding-inline-start:18px">${snap.overs.map(o => `<li><b>${esc(o.code ? o.code + ' ' : '')}${esc(o.description)}</b>: ${esc(o.what)} (מאושר ${q(o.app, o.lump)}, מוגש ${q(o.sub, o.lump)}, בחוזה ${q(o.qty, o.lump)}) · ${esc(o.why || 'ללא הסבר')}</li>`).join('')}</ul></div>` : ''}
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:12px;align-items:flex-start">
       <div style="flex:1 1 300px;font-size:13px"><b>ממצאי הבדיקה</b>${finds.length ? `<ul style="margin:6px 0;padding-inline-start:18px">${finds.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : '<div style="margin-top:4px">לא נמצאו ליקויים.</div>'}
         ${b.doc_override ? `<div><b>אושר למרות חוסר במסמכים:</b> ${esc(b.doc_override)}</div>` : ''}${b.notes ? `<div style="white-space:pre-wrap;margin-top:4px">${esc(b.notes)}</div>` : ''}</div>

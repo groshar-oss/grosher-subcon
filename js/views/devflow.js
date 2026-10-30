@@ -5,7 +5,7 @@ import { S, can, render, logChange, settings, tenant } from '../app.js';
 import { n } from '../calc.js';
 import { CONTRACT_STATUS, COMMITTED } from '../dev.js';
 import { devFlow, flowAlerts, coTotals, coPrice, needsAnalysis, contractBills, dupInvoice, docGate, FLAG_TEXT,
-  CO_STEPS, CO_STAGES, CO_MANUAL, CO_INITIATORS, CBILL_STATUS, CBILL_STEPS, CBILL_APPROVED } from '../devflow.js';
+  CO_STEPS, CO_STAGES, CO_MANUAL, CO_INITIATORS, CBILL_STATUS, CBILL_STEPS, CBILL_APPROVED, EXCEED_TEXT, isLump, coApproved } from '../devflow.js';
 import { vendorStatus, findVendor, DOC_TYPES } from '../docs.js';
 import { attachBtn, wireAttach, filesFor } from '../files.js';
 import { signBlock, signChip, signAction, fileNewSignatures } from './cosign.js';
@@ -234,6 +234,30 @@ export const checkText = f => {
 };
 export const gateText = g => g.type === 'legal_invoice' ? FLAG_TEXT.legal_invoice : `${g.expired ? 'פג תוקף' : 'חסר'}: ${DOC_TYPES[g.doc] || g.doc}`;
 
+// ===== חריגה באישור: הסבר בהערה או בקישור להוראת שינוי =====
+const qtyTxt = (r, v) => isLump(r) ? `<span dir="ltr">${(Math.round(n(v) * 1e4) / 100).toLocaleString('en-US')}%</span>` : num(v);
+const coOf = (P, id) => id && (P.pd.cos || []).find(c => c.id === id);
+export const ovrPlain = (P, L) => { const co = coOf(P, L.over_co_id); return [co ? `הוראת שינוי ${co.number || ''} ${co.title}${coApproved(co) ? '' : ' (לא מאושרת)'}` : '', L.over_reason || ''].filter(Boolean).join(' · '); };
+const ovrText = (P, L) => { const co = coOf(P, L.over_co_id); if (!co && !L.over_reason) return '';
+  return `<div class="small">${co ? `🔗 ${esc(co.number || '')} ${esc(co.title)}${coApproved(co) ? '' : ' <span class="chip amber">הוראת שינוי לא מאושרת</span>'}` : ''}${co && L.over_reason ? ' · ' : ''}${L.over_reason ? esc(L.over_reason) : ''}</div>`; };
+/** חלון הסבר לשורה אחת או לכמה. כותב ל-lines[key].over_reason / over_co_id. מחזיר true אם נשמר */
+async function ovrDialog(P, C, rows, lines) {
+  const cos = (P.pd.cos || []).filter(c => c.contract_id === C.id && c.stage !== 'rejected');
+  const opts = sel => `<option value="">בלי הוראת שינוי</option>${cos.map(c => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(`${c.number || ''} ${c.title} · ${CO_STAGES[c.stage] || ''}${coApproved(c) ? '' : ' · לא מאושרת'}`)}</option>`).join('')}`;
+  const qd = (r, v) => isLump(r) ? (Math.round(n(v) * 1e4) / 100) + '%' : num(v);
+  const v = await modal({ title: rows.length > 1 ? `חריגות בחשבון (${rows.length})` : 'הסבר חריגה', wide: rows.length > 1, ok: 'שמירת ההסבר', body: `
+    <p class="small">אפשר לאשר מעל המוגש או מעל החוזה, אבל לכל חריגה צריך הסבר: קישור להוראת שינוי או הערה. ההסבר נרשם ביומן, ומופיע בדף ההמלצה ובדף החתימה של היזם.</p>
+    ${rows.map((r, k) => { const L = lines[r.key] || {}; return `<div class="ovrbox"><b>${esc(r.code ? r.code + ' ' : '')}${esc(r.description)}</b>
+      <div class="small neg">${r.exceed.map(x => EXCEED_TEXT[x]).join(', ')}: מאושר ${qd(r, r.cumApp)} · מוגש ${qd(r, r.cumSub)} · בחוזה ${qd(r, r.qty)}</div>
+      <label class="fld"><span>קישור להוראת שינוי</span><select name="co_${k}">${opts(L.over_co_id)}</select></label>
+      <label class="fld"><span>הערה</span><input name="note_${k}" value="${esc(L.over_reason || '')}" placeholder="למשל: לפי מדידת הפיקוח"></label></div>`; }).join('')}
+    ${cos.length ? '' : '<p class="small mut">להתקשרות הזו אין הוראות שינוי, אז כותבים הערה.</p>'}`,
+    validate: d => rows.some((r, k) => !d['co_' + k] && !String(d['note_' + k] || '').trim()) ? 'לכל שורה חורגת בוחרים הוראת שינוי או כותבים הערה' : null });
+  if (!v) return false;
+  rows.forEach((r, k) => { const L = lines[r.key] ||= {}; L.over_co_id = v['co_' + k] || null; L.over_reason = String(v['note_' + k] || '').trim() || null; });
+  return true;
+}
+
 export async function cbillView(P, billId) {
   const bill = (P.pd.cbills || []).find(b => b.id === billId);
   if (!bill) return h('<div class="card empty">החשבון לא נמצא</div>');
@@ -281,18 +305,24 @@ export async function cbillView(P, billId) {
       html += `<tr class="sec${G.pend ? ' pend' : ''}"><td colspan="11">${esc(G.k)}</td></tr>`;
       for (const r of G.rows) {
         const L = st.lines[r.key] || {};
-        const i = (k, v, ph) => edit ? `<input class="cell-in" type="number" step="any" inputmode="decimal" dir="ltr" data-key="${r.key}" data-k="${k}" value="${v ?? ''}" placeholder="${ph ?? ''}">` : num(v ?? ph);
+        const lump = isLump(r), q = v => lump ? qtyTxt(r, v) : num(v);
+        // שורת קומפלט: הכמויות באחוזים (50 = חצי). המחיר נשאר בשקלים
+        const i = (k, v, ph) => { const pc = lump && k !== 'price_sub', sc = x => x == null || x === '' ? x : pc ? Math.round(n(x) * 1e6) / 1e4 : x;
+          return edit ? `<span class="${pc ? 'pctin' : ''}"><input class="cell-in" type="number" step="any" inputmode="decimal" dir="ltr" data-key="${r.key}" data-k="${k}" ${pc ? 'data-pct="1"' : ''} value="${sc(v) ?? ''}" placeholder="${sc(ph) ?? ''}">${pc ? '<b>%</b>' : ''}</span>` : (pc ? qtyTxt(r, v ?? ph) : num(v ?? ph)); };
+        const ovr = r.exceed.length ? `<div class="ovr"><span class="chip red">חריגה: ${r.exceed.map(x => EXCEED_TEXT[x]).join(', ')}</span>
+          ${edit ? `<button type="button" class="btn small ${r.explained ? 'ghost' : ''}" data-ovr="${r.key}">${r.explained ? '✓ הוסבר · עריכה' : 'הסבר חריגה'}</button>` : ''}${ovrText(P, L)}</div>` : '';
         const chips = r.flags.filter(f => f !== 'cut').map(f => `<span class="chip ${f === 'price_diff' ? 'amber' : 'red'}">${{ over_qty: 'מעל החוזה', co_over: 'מעל המאושר', price_diff: 'מחיר שונה', unapproved_co: 'לא אושר' }[f]}</span>`).join(' ');
-        html += `<tr class="${r.flags.some(f => ['over_qty', 'co_over', 'unapproved_co'].includes(f)) ? 'al-r' : r.flags.includes('price_diff') ? 'al-y' : ''}"><td>${esc(r.kind === 'c' ? r.code || '' : '')}</td><td class="wrap">${esc(r.description)} ${chips}</td><td class="hide-m">${esc(r.unit || '')}</td>
-          <td class="n hide-m">${num(r.qty)}</td><td class="n">${r.price != null ? money(r.price, { unit: true }) : '<span class="mut">—</span>'}</td><td class="n">${num(r.prev)}</td>
+        html += `<tr class="${r.flags.some(f => ['over_qty', 'co_over', 'unapproved_co'].includes(f)) || (r.exceed.length && !r.explained) ? 'al-r' : r.flags.includes('price_diff') ? 'al-y' : ''}"><td>${esc(r.kind === 'c' ? r.code || '' : '')}</td><td class="wrap">${esc(r.description)} ${chips}${ovr}</td><td class="hide-m">${esc(r.unit || '')}</td>
+          <td class="n hide-m">${num(r.qty)}</td><td class="n">${r.price != null ? money(r.price, { unit: true }) : '<span class="mut">—</span>'}</td><td class="n">${q(r.prev)}</td>
           <td class="n">${i('cum_qty_sub', L.cum_qty_sub, r.prev)}</td><td class="n">${i('price_sub', L.price_sub, r.price ?? '')}</td>
-          <td class="n">${r.blocked ? `<span class="mut small">${num(r.prev)}</span>` : i('cum_qty_app', L.cum_qty_app, L.cum_qty_sub ?? r.prev)}${r.cumApp < r.cumSub - 1e-6 && !r.blocked ? `<div class="small neg">קוצץ ${num(r.cumSub - r.cumApp)}</div>` : ''}</td>
-          <td class="n">${num(r.curApp)}</td><td class="n">${money(r.amtCur)}</td></tr>`;
+          <td class="n">${r.blocked ? `<span class="mut small">${q(r.prev)}</span>` : i('cum_qty_app', L.cum_qty_app, L.cum_qty_sub ?? r.prev)}${r.cumApp < r.cumSub - 1e-6 && !r.blocked ? `<div class="small neg">קוצץ ${q(r.cumSub - r.cumApp)}</div>` : ''}</td>
+          <td class="n">${q(r.curApp)}</td><td class="n">${money(r.amtCur)}</td></tr>`;
       }
     }
     html += `<tr class="tot"><td></td><td>סה"כ</td><td class="hide-m"></td><td class="hide-m"></td><td></td><td></td><td></td><td></td><td></td><td class="n small">הוגש ${money(R.claimed)}</td><td class="n">${money(R.gross)}</td></tr></tbody></table>`;
     lt.innerHTML = html;
-    $$('[data-k]', lt).forEach(inp => inp.onchange = () => { (st.lines[inp.dataset.key] ||= {})[inp.dataset.k] = inp.value === '' ? null : n(inp.value); draw(); });
+    $$('[data-k]', lt).forEach(inp => inp.onchange = () => { (st.lines[inp.dataset.key] ||= {})[inp.dataset.k] = inp.value === '' ? null : inp.dataset.pct ? n(inp.value) / 100 : n(inp.value); draw(); });
+    $$('[data-ovr]', lt).forEach(b => b.onclick = async () => { const r = R.rows.find(x => x.key === b.dataset.ovr); const v = await ovrDialog(P, C, [r], st.lines); if (v) draw(); });
     drawSide(R);
   };
   const drawSide = R => {
@@ -315,7 +345,7 @@ export async function cbillView(P, billId) {
   const R0 = flowOf(P).byBill[billId];
   const sctx = () => ({ kind: 'cbill', P, refId: billId, label: `${C.vendor_name || ''} חשבון ${bill.number}`, state: docState(P, 'cbill', billId, R0 ? cbillSig(R0) : null),
     can: bill.status === 'recommended', why: bill.status === 'recommended' ? '' : ['received', 'checked'].includes(bill.status) ? 'שולחים ליזם אחרי שמסמנים סטטוס "הומלץ לתשלום" ושומרים.' : '',
-    snapshot: () => cbillSnapshot(P, R0, billChecks(P, R0, bill), { check: checkText, gate: gateText }) });
+    snapshot: () => cbillSnapshot(P, R0, billChecks(P, R0, bill), { check: checkText, gate: gateText, over: L => ovrPlain(P, L) }) });
   $('#dsb', el).innerHTML = `${bill.status === 'recommended' && !docState(P, 'cbill', billId) ? '<p class="small mut">היזם מקבל את דף הבדיקה וההמלצה לתשלום במייל או בוואטסאפ, עם קישור אישי. הוא מאשר או דוחה בחתימה. באישור, החשבון עובר ל"אושר ע"י היזם" ונכנס לתזרים, והמסמך החתום נשמר בחשבון.</p>' : ''}${docSignBlock(sctx())}`;
   wireDocSign(el, () => sctx(), render);
   $$('.card input[name], .card select[name], textarea[name]', el).forEach(inp => inp.onchange = () => {
@@ -324,7 +354,10 @@ export async function cbillView(P, billId) {
   });
   $('#appall', el)?.addEventListener('click', () => { for (const k of Object.keys(st.lines)) st.lines[k].cum_qty_app = null; draw(); toast('המאושר = המוגש בכל השורות'); });
   $('#save', el)?.addEventListener('click', async () => {
-    const R = calcNow(), head = st.head;
+    let R = calcNow(); const head = st.head;
+    // חריגה בלי הסבר: לא חוסמים, אבל מבקשים הערה או קישור להוראת שינוי לכל שורה
+    const open = R.rows.filter(r => r.exceed.length && !r.explained);
+    if (open.length) { if (!(await ovrDialog(P, C, open, st.lines))) return; R = calcNow(); }
     const was = bill.status, now = head.status;
     const k0 = CBILL_STEPS.indexOf(was), k1 = CBILL_STEPS.indexOf(now);
     // אישור או תשלום כשחסרים מסמכים: רק עם סיבה מפורשת שנרשמת ביומן
@@ -347,10 +380,15 @@ export async function cbillView(P, billId) {
     await db.update('cbills', billId, row);
     const exist = Object.fromEntries((P.pd.cbLines || []).filter(l => l.cbill_id === billId).map(l => [l.contract_line_id ? 'c:' + l.contract_line_id : 'o:' + l.co_line_id, l]));
     for (const [key, L] of Object.entries(st.lines)) {
-      const lr = { cum_qty_sub: numOrNull(L.cum_qty_sub), price_sub: numOrNull(L.price_sub), cum_qty_app: numOrNull(L.cum_qty_app), note: L.note || null };
+      const rr = R.rows.find(x => x.key === key), over = !!rr?.exceed.length;
+      const lr = { cum_qty_sub: numOrNull(L.cum_qty_sub), price_sub: numOrNull(L.price_sub), cum_qty_app: numOrNull(L.cum_qty_app), note: L.note || null,
+        over_reason: over ? L.over_reason || null : null, over_co_id: over ? L.over_co_id || null : null };
       const ex = exist[key];
-      if (ex) { if (['cum_qty_sub', 'price_sub', 'cum_qty_app'].some(f => String(ex[f] ?? '') !== String(lr[f] ?? ''))) await db.update('cbill_lines', ex.id, lr); }
-      else if (lr.cum_qty_sub != null || lr.cum_qty_app != null || lr.price_sub != null) await db.insert('cbill_lines', { tenant_id: S.tenantId, project_id: P.id, cbill_id: billId, contract_line_id: key.startsWith('c:') ? key.slice(2) : null, co_line_id: key.startsWith('o:') ? key.slice(2) : null, ...lr });
+      if (over && (String(ex?.over_reason ?? '') !== String(lr.over_reason ?? '') || String(ex?.over_co_id ?? '') !== String(lr.over_co_id ?? '')))
+        await logChange({ project_id: P.id, entity: 'cbill', entity_id: billId, label: `${C.vendor_name || ''} חשבון ${bill.number}`, field: 'חריגה מוסברת', old_value: rr.description,
+          new_value: rr.exceed.map(x => EXCEED_TEXT[x]).join(', '), reason: ovrPlain(P, lr) });
+      if (ex) { if (['cum_qty_sub', 'price_sub', 'cum_qty_app', 'over_reason', 'over_co_id'].some(f => String(ex[f] ?? '') !== String(lr[f] ?? ''))) await db.update('cbill_lines', ex.id, lr); }
+      else if (lr.cum_qty_sub != null || lr.cum_qty_app != null || lr.price_sub != null || lr.over_reason || lr.over_co_id) await db.insert('cbill_lines', { tenant_id: S.tenantId, project_id: P.id, cbill_id: billId, contract_line_id: key.startsWith('c:') ? key.slice(2) : null, co_line_id: key.startsWith('o:') ? key.slice(2) : null, ...lr });
     }
     // רישום התשלום כהוצאה: נוצר באישור, מתעדכן בתשלום, נמחק אם החשבון חזר לבדיקה
     const exp = (P.pd.expenses || []).find(e => e.cbill_id === billId);
@@ -397,7 +435,7 @@ export function cbillSheet(P, billId) {
       <h3>פירוט</h3>
       <div class="tw"><table><thead><tr><th>תיאור</th><th class="n">כמות בחוזה</th><th class="n">מחיר בחוזה</th><th class="n">מצטבר קודם</th><th class="n">מצטבר מוגש</th><th class="n">מצטבר מאושר</th><th class="n">נוכחי מוגש ₪</th><th class="n">נוכחי מאושר ₪</th><th>הערה</th></tr></thead><tbody>
         ${rows.map(r => `<tr class="${r.flags.some(f => f !== 'cut') ? 'al-y' : ''}"><td class="wrap">${r.kind === 'o' ? `<b>${esc(r.co.number || '')}</b> ` : esc(r.code ? r.code + ' ' : '')}${esc(r.description)}</td><td class="n">${num(r.qty)}</td><td class="n">${r.price != null ? money(r.price, { unit: true }) : '—'}</td>
-          <td class="n">${num(r.prev)}</td><td class="n">${num(r.cumSub)}</td><td class="n">${num(r.cumApp)}</td><td class="n">${money(r.claimedCur)}</td><td class="n">${money(r.amtCur)}</td>
+          <td class="n">${qtyTxt(r, r.prev)}</td><td class="n">${qtyTxt(r, r.cumSub)}</td><td class="n">${qtyTxt(r, r.cumApp)}</td><td class="n">${money(r.claimedCur)}</td><td class="n">${money(r.amtCur)}</td>
           <td class="small">${[...r.flags.filter(f => f !== 'cut').map(f => f === 'price_diff' ? `מחיר מוגש ${money(r.priceSub, { unit: true })}` : esc({ over_qty: 'מעל החוזה', co_over: 'מעל המאושר', unapproved_co: 'שינוי לא אושר' }[f])), r.line?.note ? esc(r.line.note) : ''].filter(Boolean).join(' · ')}</td></tr>`).join('')}
         <tr class="tot"><td>סה"כ</td><td></td><td></td><td></td><td></td><td></td><td class="n">${money(R.claimed)}</td><td class="n">${money(R.gross)}</td><td></td></tr></tbody></table></div>
       <div class="cols even"><div><h3>ממצאי הבדיקה</h3>${ck.list.length || ck.gate.length ? `<ul class="small">${ck.list.map(f => `<li>${checkText(f)}</li>`).join('')}${ck.gate.map(g => `<li>${gateText(g)}</li>`).join('')}</ul>` : '<p class="small">לא נמצאו ליקויים.</p>'}
@@ -405,6 +443,7 @@ export function cbillSheet(P, billId) {
         <div><h3>חישוב</h3><table class="sumt"><tr><td>הוגש</td><td class="n">${money(R.claimed)}</td></tr>${R.cut > 0.5 ? `<tr><td>קיצוץ בבדיקה</td><td class="n">${money(-R.cut)}</td></tr>` : ''}<tr class="tot"><td>נוכחי מאושר</td><td class="n">${money(R.gross)}</td></tr>
           ${R.indexDiff ? `<tr><td>הפרשי הצמדה</td><td class="n">${money(R.indexDiff)}</td></tr>` : ''}${R.retention ? `<tr><td>עיכבון ${num(C.retention_pct)}%</td><td class="n">${money(-R.retention)}</td></tr>` : ''}${R.advance ? `<tr><td>קיזוז מקדמה</td><td class="n">${money(-R.advance)}</td></tr>` : ''}${R.other ? `<tr><td>ניכויים: ${esc(b.other_note || '')}</td><td class="n">${money(-R.other)}</td></tr>` : ''}
           <tr class="tot"><td>נטו לפני מע"מ</td><td class="n">${money(R.net)}</td></tr><tr><td>מע"מ ${settings().vat_pct}%</td><td class="n">${money(R.vat)}</td></tr></table></div></div>
+      ${(() => { const ov = R.rows.filter(r => r.exceed.length); return ov.length ? `<h3>חריגות שאושרו</h3><ul class="small">${ov.map(r => `<li><b>${esc(r.kind === 'o' ? r.co?.number || '' : r.code || '')} ${esc(r.description)}</b>: ${r.exceed.map(x => EXCEED_TEXT[x]).join(', ')} (מאושר ${qtyTxt(r, r.cumApp)}, מוגש ${qtyTxt(r, r.cumSub)}, בחוזה ${qtyTxt(r, r.qty)}) · ${esc(ovrPlain(P, r.line || {}) || 'ללא הסבר')}</li>`).join('')}</ul>` : ''; })()}
       <div class="note" style="font-size:16px;margin-top:12px">סכום מומלץ לתשלום: <b>${money(R.total)}</b> כולל מע"מ (${money(R.net)} לפני מע"מ)${ck.gate.length && !b.doc_override ? ' · <b class="neg">בכפוף להשלמת המסמכים</b>' : ''}</div>
       <p class="small">מצטבר מאושר ${money(R.grossCum)} מתוך התקשרות ${money(R.contractAmt + R.coAmt)} (${pct(R.contractAmt + R.coAmt ? R.grossCum / (R.contractAmt + R.coAmt) * 100 : 0, { d: 0 })})${n(C.retention_pct) ? ` · עיכבון מצטבר ${money(R.retentionCum)}` : ''}${n(C.advance_amount) ? ` · יתרת מקדמה ${money(Math.max(0, n(C.advance_amount) - R.advanceCum))}` : ''}</p>
       <table class="sumt sig" style="margin-top:24px"><tr><td>נבדק ע"י: ${esc(b.checked_by || '______________')}</td><td>תאריך: ______________</td><td>חתימה: ______________</td></tr>${(() => { const so = docState(P, 'cbill', billId)?.signed; return so ? `<tr><td>אושר לתשלום ע"י היזם: <b>${esc(so.signer_name || '')}</b></td><td>תאריך: ${new Date(so.signed_at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td><td>חתימה: ${so.signature ? `<img src="${esc(so.signature)}" alt="חתימה" style="height:48px;vertical-align:middle">` : ''} <span class="small mut">(חתימה אלקטרונית)</span></td></tr>` : '<tr><td>אושר לתשלום ע"י היזם: ______________</td><td>תאריך: ______________</td><td>חתימה: ______________</td></tr>'; })()}</table>

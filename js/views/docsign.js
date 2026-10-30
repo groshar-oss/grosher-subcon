@@ -11,7 +11,7 @@ import { htmlPdfBlob } from '../drivesync.js';
 import { uploadFile, fileBlob } from '../files.js';
 import { party } from '../dev.js';
 import { n, itemSale, VO_APPROVED } from '../calc.js';
-import { SIGNOFF_STATUS } from '../devflow.js';
+import { SIGNOFF_STATUS, EXCEED_TEXT, isLump } from '../devflow.js';
 
 const VALID_DAYS = 14;
 const PDF_OPT = { width: 760, orientation: 'portrait' };
@@ -27,13 +27,15 @@ const ils = v => '₪' + Math.round(n(v)).toLocaleString('en-US');
 export function cbillSnapshot(P, R, ck, texts) {
   const b = R.bill, C = R.contract, vat = n(settings().vat_pct);
   const rows = R.rows.filter(r => r.cumSub > 0 || r.prev > 0).map(r => ({ code: r.kind === 'o' ? r.co?.number || '' : r.code || '', description: r.description, qty: n(r.qty), price: r.price ?? null, prev: n(r.prev), cumSub: n(r.cumSub), cumApp: n(r.cumApp),
-    claimedCur: n(r.claimedCur), amtCur: n(r.amtCur), flags: r.flags.filter(f => f !== 'cut').map(f => ({ over_qty: 'מעל החוזה', co_over: 'מעל המאושר', price_diff: 'מחיר שונה', unapproved_co: 'שינוי לא אושר' }[f] || f)) }));
+    claimedCur: n(r.claimedCur), amtCur: n(r.amtCur), lump: isLump(r), flags: r.flags.filter(f => f !== 'cut').map(f => ({ over_qty: 'מעל החוזה', co_over: 'מעל המאושר', price_diff: 'מחיר שונה', unapproved_co: 'שינוי לא אושר' }[f] || f)) }));
   const totals = { claimed: R.claimed, cut: R.cut, gross: R.gross, indexDiff: R.indexDiff || 0, retention: R.retention || 0, retention_pct: n(C.retention_pct), advance: R.advance || 0, other: R.other || 0, other_note: b.other_note || '',
     net: R.net, vat: R.vat, vat_pct: vat, total: R.total, grossCum: R.grossCum, contractTotal: R.contractAmt + R.coAmt, retentionCum: R.retentionCum || 0 };
   return { v: 1, tenant: tenant()?.name || '', project: P.project.name, address: P.project.address || '', sender: S.user?.email || '',
     bill: { vendor: C.vendor_name || '', contract: C.title, contract_no: C.number || '', number: b.number, period_to: b.period_to || null, received_date: b.received_date || null, invoice_no: b.invoice_no || '', invoice_date: b.invoice_date || null,
       invoice_legal: !!b.invoice_legal, checked_by: b.checked_by || '', notes: b.notes || '', doc_override: b.doc_override || '' },
-    rows, checks: ck.list.map(f => txt(texts.check(f))), gate: ck.doc_override ? [] : ck.gate.map(g => txt(texts.gate(g))), totals, sig: cbillSig(R) };
+    rows, overs: R.rows.filter(r => r.exceed?.length).map(r => ({ code: r.kind === 'o' ? r.co?.number || '' : r.code || '', description: r.description, lump: isLump(r), what: r.exceed.map(x => EXCEED_TEXT[x]).join(', '),
+      app: n(r.cumApp), sub: n(r.cumSub), qty: n(r.qty), why: texts.over ? texts.over(r.line || {}) : '' })),
+    checks: ck.list.map(f => txt(texts.check(f))), gate: ck.doc_override ? [] : ck.gate.map(g => txt(texts.gate(g))), totals, sig: cbillSig(R) };
 }
 export const cbillSig = R => `${Math.round(n(R.total))}|${R.rows.map(r => `${n(r.cumSub)}~${n(r.cumApp)}`).join('#')}`;
 

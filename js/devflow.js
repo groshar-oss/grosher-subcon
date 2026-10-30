@@ -104,8 +104,10 @@ export function contractBills({ contract, cLines = [], cos = [], coLines = [], b
       if (bl && has(bl.price_sub) && r.price != null && Math.abs(priceSub - price) > 0.005) flags.push('price_diff');
       if (blocked && cumSub > prev + EPS) flags.push('unapproved_co');
       if (cumApp < cumSub - EPS && !blocked) flags.push('cut');
+      // חריגה באישור: מאושר מעל המוגש, או מצטבר מאושר מעל הכמות בחוזה / בהוראה. לא נחסם, אבל צריך הסבר
+      const exceed = blocked ? [] : [...(cumApp > cumSub + EPS ? ['app_over_sub'] : []), ...(cumApp > r.qty + EPS && cumApp > prev + EPS ? ['app_over_qty'] : [])];
       return { ...r, line: bl, prev, cumSub, curSub: cumSub - prev, priceSub, cumApp, curApp: cumApp - prev, blocked,
-        amtCum: cumApp * price, amtPrev: prev * price, amtCur: (cumApp - prev) * price, claimedCur: cumSub * priceSub - prev * price, flags };
+        amtCum: cumApp * price, amtPrev: prev * price, amtCur: (cumApp - prev) * price, claimedCur: cumSub * priceSub - prev * price, flags, exceed, explained: !!(bl && (bl.over_reason || bl.over_co_id)) };
     });
     const sum = f => rows.reduce((a, r) => a + r[f], 0);
     const gross = sum('amtCur'), grossCum = sum('amtCum'), claimed = sum('claimedCur');
@@ -128,6 +130,9 @@ export function contractBills({ contract, cLines = [], cos = [], coLines = [], b
   return { bills: out, byId: Object.fromEntries(out.map(x => [x.bill.id, x])), contractAmt, coAmt, rows: base };
 }
 
+export const EXCEED_TEXT = { app_over_sub: 'מאושר מעל המוגש', app_over_qty: 'מאושר מעל הכמות בחוזה' };
+/** שורה עם כמות 1 (קומפלט / פאושלי): מזינים ומציגים באחוזים */
+export const isLump = r => Math.abs(n(r.qty) - 1) < EPS;
 export const FLAG_TEXT = {
   over_qty: 'כמות מצטברת מעל הכמות בחוזה', price_diff: 'מחיר שונה ממחיר החוזה', unapproved_co: 'הוראת שינוי שלא אושרה בכתב',
   co_over: 'הוראת שינוי מחויבת מעבר לכמות שאושרה (חיוב כפול?)', over_contract: 'המצטבר עובר את סכום ההתקשרות כולל שינויים מאושרים',

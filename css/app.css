@@ -414,3 +414,7 @@ fieldset.mods legend{padding:0 6px}
 .docsign .actions{margin-top:6px}
 .apx-sup{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:8px 0}
 .apx-sup img{height:60px;display:block;margin-top:4px}
+/* חבילה 25: חריגה בחשבון, אחוזים בקומפלט */
+.pctin{display:inline-flex;align-items:center;gap:3px}.pctin b{font-weight:600;color:var(--mut,#6b7491)}
+.ovr{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px}.ovr .small{flex-basis:100%}
+.ovrbox{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:8px 0}
