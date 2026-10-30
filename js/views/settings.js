@@ -1,3 +1,4 @@
+import { CONFIG } from '../config.js';
 // תצוגה ומצב: ערכת צבעים, מצב חיבור, ייצוא גיבוי
 import { h, esc, $, toast, store, modal } from '../util.js';
 import { db, isCloud, uuid } from '../db.js';
@@ -40,7 +41,7 @@ function googleCard() {
     <p class="small mut">כל מסמך שעולה למערכת נשמר גם בדרייב שלך, בתיקייה לכל לקוח ופרויקט, ועם גיבוי נתונים מלא באקסל. התראות על חריגות נשלחות במייל מה-Gmail שלך. ההרשאות מצומצמות: הדרייב רואה רק קבצים שהמערכת יצרה, וב-Gmail רק שליחה.</p>
     <p>מצב: <b class="${on ? 'pos' : ''}">${on ? 'מחובר' : gEnabled() ? 'צריך להתחבר מחדש (החיבור פג אחרי שעה או בסגירת הלשונית)' : 'לא מחובר'}</b>${g.lastSync ? ` · סנכרון אחרון ${new Date(g.lastSync).toLocaleString('he-IL', { dateStyle: 'short', timeStyle: 'short' })}` : ''}${g.lastErr ? ` · <span class="neg">${esc(g.lastErr)}</span>` : ''}</p>
     <form id="gf"><div class="grid g2">
-      <label class="fld"><span>מזהה OAuth Client ID</span><input name="clientId" dir="ltr" value="${esc(g.clientId)}" placeholder="xxxx.apps.googleusercontent.com"><small>מ-Google Cloud, אותו פרויקט של מערכת התזרים. ההסבר בחוברת ההתקנה</small></label>
+      <label class="fld"><span>מזהה OAuth Client ID</span><input name="clientId" dir="ltr" value="${esc(g.clientId)}" placeholder="xxxx.apps.googleusercontent.com"${CONFIG.googleClientId ? ' readonly' : ''}><small>${CONFIG.googleClientId ? 'מוגדר באתר לכל המכשירים' : 'מ-Google Cloud, אותו פרויקט של מערכת התזרים. ההסבר בחוברת ההתקנה'}</small></label>
       <label class="fld"><span>שם תיקיית הבסיס בדרייב</span><input name="rootName" value="${esc(g.rootName)}"></label></div>
       <div class="actions"><button class="btn ghost" type="submit">שמירה</button>${on ? '<button class="btn ghost" type="button" id="gdis">ניתוק</button>' : '<button class="btn" type="button" id="gcon">התחברות ל-Google</button>'}</div></form></div>`;
 }
