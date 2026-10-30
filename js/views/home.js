@@ -135,6 +135,7 @@ export function buildActions(data, sums, devSums = []) {
   for (const { p, s } of sums) {
     for (const g of s.voGroups) {
       if (g.vo.status === 'executed_unapproved') out.push({ w: 100, color: 'var(--ri)', title: `${g.vo.number} בוצע בלי אישור`, sub: `${p.name} · ${g.vo.title}${g.vo.has_written_order ? '' : ' · אין הוראה בכתב'}`, amt: money(g.requested) + ' בסיכון', href: `#/project/${p.id}/vo` });
+      else if (g.vo.from_field && g.vo.status === 'draft') out.push({ w: 86, color: '#ff9f43', sev: 'amber', key: `fieldvo|${g.vo.id}`, title: `תוספת מהשטח לתמחור: ${g.vo.number}`, sub: `${p.name} · ${g.vo.title} · לתמחר, להגיש ולגבות`, amt: '', href: `#/project/${p.id}/vo` });
       else if (g.vo.status === 'submitted' && g.actual > 0) out.push({ w: 80, color: '#ff9f43', title: `${g.vo.number} בביצוע וממתין לאישור`, sub: `${p.name} · ${g.vo.title}`, amt: money(g.requested), href: `#/project/${p.id}/vo` });
     }
     for (const r of s.rows) {
@@ -156,6 +157,8 @@ export function buildActions(data, sums, devSums = []) {
     const warns = (s.quotas || []).filter(q => q.status === 'warn');
     if (warns.length === 1) out.push({ w: 48, color: '#ff9f43', title: `מתקרב למכסה: ${warns[0].item.code || ''} ${warns[0].line?.description || ''}`.trim(), sub: `${p.name} · ${warns[0].msgs.join(' · ')}`, amt: '', href: `#/project/${p.id}/quota` });
     else if (warns.length) out.push({ w: 48, color: '#ff9f43', title: `${warns.length} שורות תמחיר מתקרבות למכסה`, sub: `${p.name} · ${warns.slice(0, 2).map(q => q.item.code).join(', ')}…`, amt: '', href: `#/project/${p.id}/quota` });
+    const xo = (data.extras || []).filter(x => x.project_id === p.id && !x.is_vo && !x.variation_id && !x.boq_item_id && !x.handled);
+    if (xo.length) out.push({ w: 58, color: '#ff9f43', sev: 'amber', key: `extras|${p.id}|${xo.length}`, title: xo.length === 1 ? `עבודה שלא ברשימה: ${xo[0].description}` : `${xo.length} עבודות שלא ברשימה ביומן`, sub: `${p.name} · לשייך לסעיף או לפתוח הוראת שינוי`, amt: '', href: `#/project/${p.id}/worklog` });
     const noCost = s.contractRows.filter(r => r.c.noCosting);
     if (noCost.length) out.push({ w: 30, color: '#f2c400', title: `${noCost.length} סעיפים בלי תמחיר`, sub: p.name, amt: money(noCost.reduce((a, r) => a + r.c.sale, 0)), href: `#/project/${p.id}/costing` });
     if (!s.rows.length) out.push({ w: 35, color: '#f2c400', title: 'אין כתב כמויות', sub: p.name, amt: '', href: `#/project/${p.id}/boq` });
@@ -163,6 +166,7 @@ export function buildActions(data, sums, devSums = []) {
     if (noProg.length) out.push({ w: 28, color: '#f2c400', title: `${noProg.length} סעיפים עם הוצאות בלי אחוז ביצוע`, sub: `${p.name} · עדכן אחוז ביצוע כדי שהצפי יהיה נכון`, amt: '', href: `#/project/${p.id}/control` });
     if (s.unallocated) out.push({ w: 25, color: '#f2c400', title: 'הוצאות שלא שויכו', sub: p.name, amt: money(s.unallocated), href: `#/project/${p.id}/expenses` });
   }
+  for (const w of (data.workers || []).filter(w => w.pending_rate && w.active !== false)) out.push({ w: 88, color: '#ff9f43', sev: 'amber', key: `wrate|${w.id}`, title: `עובד חדש ממתין לתעריף: ${w.name}`, sub: `נוסף מהשטח${w.added_by ? ' ע"י ' + w.added_by : ''} · עד שיוזן תעריף, העלות שלו לא נספרת`, amt: '', href: '#/workers' });
   // שלב 7: מסמכים, ערבויות וסגירה
   const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
   const recent = new Set(data.expenses.filter(e => (Date.now() - new Date(e.doc_date)) / 864e5 < 120).map(e => (e.supplier_name || '').trim()));

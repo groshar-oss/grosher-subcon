@@ -9,7 +9,7 @@ export const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-x
 
 const TABLES = ['tenants', 'memberships', 'main_contractors', 'projects', 'variations', 'boq_items', 'cost_lines', 'expenses', 'change_log', 'members_demo',
   'workers', 'work_days', 'work_entries', 'work_qty', 'purchase_orders', 'po_lines', 'bills', 'bill_lines', 'bill_fines', 'bill_payments',
-  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'alert_state', 'co_signoffs', 'index_series', 'fixed_costs', 'member_invites', 'dev_units', 'project_templates', 'month_closes', 'send_log', 'project_contacts'];
+  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'alert_state', 'co_signoffs', 'index_series', 'fixed_costs', 'member_invites', 'dev_units', 'project_templates', 'month_closes', 'send_log', 'project_contacts', 'work_extras'];
 
 function match(row, q = {}) {
   for (const [k, v] of Object.entries(q.eq || {})) if (String(row[k] ?? '') !== String(v ?? '')) return false;
@@ -79,6 +79,18 @@ class LocalDB {
     const ids = this.data.tables[table].filter(r => match(r, q)).map(r => r.id);
     this.cascade(table, ids); this.save();
   }
+  // עבודה מהיומן שסומנה כתוספת: הוראת שינוי (טיוטה) עם סעיף אחד, כמו field_extra_vo בשרת
+  extraVo(xid, noSave) {
+    const T = this.data.tables, e = (T.work_extras || []).find(r => r.id === xid); if (!e) throw new Error('לא נמצא');
+    if (e.variation_id) return e.variation_id;
+    const k = T.variations.filter(v => v.project_id === e.project_id).length + 1;
+    const d = e.log_date.split('-').reverse().join('.');
+    const v = { id: crypto.randomUUID(), tenant_id: e.tenant_id, project_id: e.project_id, number: 'VO-' + String(k).padStart(2, '0'), title: e.description, source: 'field', has_written_order: false, vo_date: e.log_date,
+      status: 'draft', approved_amount: null, from_field: true, notes: ['נפתח מיומן העבודה ' + d, e.qty != null ? `${e.qty} ${e.unit || ''}`.trim() : '', e.note, e.created_by].filter(Boolean).join(' · '), created_at: new Date().toISOString() };
+    T.variations.push(v);
+    T.boq_items.push({ id: crypto.randomUUID(), tenant_id: e.tenant_id, project_id: e.project_id, variation_id: v.id, chapter: null, code: null, description: e.description, unit: e.unit, qty: e.qty, unit_price: null, billing_method: 'measure', progress_pct: 0, forecast_manual: null, forecast_note: null, sort: 0, created_at: new Date().toISOString() });
+    e.variation_id = v.id; if (!noSave) this.save(); return v.id;
+  }
   cascade(table, ids) {
     if (!ids.length) return;
     const T = this.data.tables;
@@ -86,7 +98,7 @@ class LocalDB {
     const deps = {
       tenants: [['project_contacts', 'tenant_id'], ['project_templates', 'tenant_id'], ['month_closes', 'tenant_id'], ['send_log', 'tenant_id'], ['member_invites', 'tenant_id'], ['index_series', 'tenant_id'], ['files', 'tenant_id'], ['alert_log', 'tenant_id'], ['alert_state', 'tenant_id'], ['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
       projects: [['fixed_costs', 'project_id'], ['variations', 'project_id'], ['boq_items', 'project_id'], ['cost_lines', 'project_id'], ['expenses', 'project_id'], ['change_log', 'project_id'],
-        ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id'], ['contracts', 'project_id'], ['change_orders', 'project_id'], ['cbills', 'project_id'], ['dev_income', 'project_id'], ['dev_units', 'project_id'], ['project_contacts', 'project_id'], ['alert_state', 'project_id']],
+        ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['work_extras', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id'], ['contracts', 'project_id'], ['change_orders', 'project_id'], ['cbills', 'project_id'], ['dev_income', 'project_id'], ['dev_units', 'project_id'], ['project_contacts', 'project_id'], ['alert_state', 'project_id']],
       contracts: [['contract_lines', 'contract_id'], ['cbills', 'contract_id']],
       change_orders: [['co_lines', 'co_id']],
       co_lines: [['cbill_lines', 'co_line_id']],
@@ -101,6 +113,8 @@ class LocalDB {
     }[table] || [];
     const nullify = (t, k) => T[t].forEach(r => { if (ids.includes(r[k])) r[k] = null; });
     for (const [t, k] of deps) this.cascade(t, T[t].filter(r => ids.includes(r[k])).map(r => r.id));
+    if (table === 'variations') nullify('work_extras', 'variation_id');
+    if (table === 'boq_items') nullify('work_extras', 'boq_item_id');
     if (table === 'main_contractors') { T.projects.forEach(p => { if (ids.includes(p.main_contractor_id)) p.main_contractor_id = null; }); this.cascade('documents', T.documents.filter(d => ids.includes(d.main_contractor_id)).map(d => d.id)); nullify('guarantees', 'main_contractor_id'); nullify('contacts', 'main_contractor_id'); }
     if (table === 'vendors') { nullify('contacts', 'vendor_id'); nullify('contracts', 'vendor_id'); nullify('guarantees', 'vendor_id'); }
     if (table === 'contracts') { nullify('expenses', 'contract_id'); nullify('guarantees', 'contract_id'); nullify('change_orders', 'contract_id'); }
@@ -138,7 +152,7 @@ class LocalDB {
       const same = r => r.project_id === args.p && r.log_date === args.d;
       T.work_entries = T.work_entries.filter(r => !same(r)); T.work_qty = T.work_qty.filter(r => !same(r));
       const P = args.payload || {};
-      if (P.delete) { T.work_days = T.work_days.filter(r => !same(r)); this.save(); return 'deleted'; }
+      if (P.delete) { T.work_days = T.work_days.filter(r => !same(r)); T.work_extras = (T.work_extras || []).filter(r => !(same(r) && !r.variation_id)); this.save(); return 'deleted'; }
       const day = T.work_days.find(same);
       if (day) Object.assign(day, { weather: P.weather || null, delays: P.delays || null, notes: P.notes || null });
       else T.work_days.push({ id: uuid(), tenant_id: pr.tenant_id, project_id: args.p, log_date: args.d, weather: P.weather || null, delays: P.delays || null, notes: P.notes || null, created_at: new Date().toISOString() });
@@ -146,9 +160,29 @@ class LocalDB {
       for (const e of P.entries || []) T.work_entries.push({ id: uuid(), tenant_id: pr.tenant_id, project_id: args.p, log_date: args.d, worker_id: e.worker_id, boq_item_id: e.boq_item_id || null, variation_id: e.variation_id || null,
         cost_line_id: null, days: num(e.days) ?? 1, hours: num(e.hours), ot_hours: num(e.ot_hours) ?? 0, piece_qty: num(e.piece_qty), piece_rate: null, note: e.note || null, created_at: new Date().toISOString() });
       for (const q of P.qty || []) T.work_qty.push({ id: uuid(), tenant_id: pr.tenant_id, project_id: args.p, log_date: args.d, boq_item_id: q.boq_item_id, qty: num(q.qty) ?? 0, note: q.note || null });
+      if (P.extras) {
+        T.work_extras ||= [];
+        const keep = new Set(P.extras.map(x => x.id).filter(Boolean));
+        T.work_extras = T.work_extras.filter(r => !(same(r) && !r.variation_id && !keep.has(r.id)));
+        for (const x of P.extras) {
+          if (!String(x.description || '').trim()) continue;
+          const row = { description: x.description.trim(), unit: x.unit || null, qty: num(x.qty), note: x.note || null, is_vo: !!x.is_vo };
+          let r = T.work_extras.find(y => y.id === x.id);
+          if (r) Object.assign(r, row); else { r = { id: x.id || uuid(), tenant_id: pr.tenant_id, project_id: args.p, log_date: args.d, variation_id: null, boq_item_id: null, handled: false, created_by: 'demo', created_at: new Date().toISOString(), ...row }; T.work_extras.push(r); }
+          if (r.is_vo) this.extraVo(r.id, true);
+        }
+      }
       this.save(); return 'ok';
     }
-    if (name === 'field_workers') return orderRows(T.workers.filter(w => w.tenant_id === args.t).map(({ id, name, pay_type, trade, active }) => ({ id, name, pay_type, trade, active })), ['name']);
+    if (name === 'field_workers') return orderRows(T.workers.filter(w => w.tenant_id === args.t).map(({ id, name, pay_type, trade, active, pending_rate }) => ({ id, name, pay_type, trade, active, pending_rate: !!pending_rate })), ['name']);
+    if (name === 'field_add_worker') {
+      const pr = T.projects.find(x => x.id === args.p); if (!pr) throw new Error('הפרויקט לא נמצא');
+      if (!String(args.wname || '').trim()) throw new Error('חסר שם עובד');
+      const w = { id: uuid(), tenant_id: pr.tenant_id, name: args.wname.trim(), phone: (args.wphone || '').trim() || null, pay_type: ['salary', 'daily', 'hourly', 'piece'].includes(args.wpay) ? args.wpay : 'daily',
+        trade: (args.wtrade || '').trim() || null, active: true, pending_rate: true, added_by: 'demo', is_foreign: false, created_at: new Date().toISOString() };
+      T.workers.push(w); this.save(); return w.id;
+    }
+    if (name === 'field_extra_vo') return this.extraVo(args.x);
     if (name === 'field_boq') return orderRows(T.boq_items.filter(b => b.project_id === args.p).map(({ id, chapter, code, description, unit, variation_id }) => ({ id, chapter, code, description, unit, variation_id })), ['sort', 'code']);
     // דף החתימה של היזם (במצב הדגמה: אותו דפדפן)
     if (name === 'co_signoff_get') {

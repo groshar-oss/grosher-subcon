@@ -84,7 +84,9 @@ export async function coDialog(P, co = null) {
     ${ro ? '' : `<div class="actions" style="margin-bottom:8px"><select id="pickcl" style="width:auto;max-width:320px"><option value="">הוספת שורה מהחוזה…</option></select><button class="btn small ghost" type="button" id="addfree">+ שורה חדשה (לא בחוזה)</button></div>`}
     <div class="tw" style="max-height:360px;overflow:auto"><table><thead><tr><th>תיאור</th><th>יח'</th><th class="n">כמות</th><th class="n">מחיר בכתב הכמויות</th><th class="n">מחיר בחוזה</th><th class="n">מחיר מבוקש</th><th class="n">מחיר מאושר</th><th class="n">סה"כ מאושר</th><th></th></tr></thead><tbody id="ll"></tbody></table></div>
     <div id="ltot" class="small" style="margin-top:6px"></div>
-    ${area('ניתוח מחיר (כשאין מחיר בחוזה: הצעות, מחירון, חישוב)', 'price_analysis', co?.price_analysis || '')}${area('הערות', 'notes', co?.notes || '')}`;
+    ${area('ניתוח מחיר: כותבים כאן איך נקבע המחיר (הצעות מחיר, מחירון דקל, חישוב). נדרש כשאין מחיר בחוזה ובכתב הכמויות', 'price_analysis', co?.price_analysis || '')}
+    <div class="actions" style="margin:-4px 0 12px;align-items:center;gap:8px">${co?.id && !ro ? attachBtn(P.data.files, 'change_orders', co.id, { projectId: P.id, docType: 'vo', label: `${co.number || ''} ${co.title || ''} · ניתוח מחיר`.trim() }) : ''}<span class="small mut">${co?.id ? 'קבצים לניתוח (הצעות מחיר, מחירון, חישוב) מצרפים בכפתור 📎. הם נשמרים בהוראת השינוי ובדרייב.' : 'קבצים לניתוח מצרפים אחרי השמירה הראשונה: 📎 כאן בחלון, או בשורת ההוראה ברשימה.'}</span></div>
+    ${area('הערות', 'notes', co?.notes || '')}`;
   let host, drawing = false, after = null;
   const curContract = () => $('[name=contract_id]', host)?.value || '';
   const fillPick = () => {
@@ -110,7 +112,7 @@ export async function coDialog(P, co = null) {
     $$('[data-f]', tb).forEach(i => i.onchange = () => { const l = lines[+i.dataset.k], f = i.dataset.f; l[f] = ['description', 'unit'].includes(f) ? i.value || null : (i.value === '' ? null : n(i.value)); if (!drawing) draw(); });
     $$('[data-rm]', tb).forEach(b => b.onclick = () => { lines.splice(+b.dataset.rm, 1); draw(); });
   };
-  const v = await modal({ title: co ? `הוראת שינוי ${co.number || ''}` : 'הוראת שינוי חדשה', body, wide: true, ok: ro ? null : 'שמירה', cancel: ro ? 'סגירה' : 'ביטול', onMount: el => {
+  const v = await modal({ title: co ? `הוראת שינוי ${co.number || ''}` : 'הוראת שינוי חדשה', body, wide: true, ok: ro ? null : 'שמירה', cancel: ro ? 'סגירה' : 'ביטול', onMount: el => { wireAttach(el, P.data.files || [], () => {});
     host = el; fillPick(); draw();
     $$('[data-sact]', el).forEach(b => b.onclick = () => { after = b.dataset.sact; el.closest('.ov')?.querySelector('[data-ok]')?.click(); });
     $('[name=contract_id]', el)?.addEventListener('change', fillPick);

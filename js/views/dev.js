@@ -29,7 +29,7 @@ export function devControl(P) {
       <div class="kpi"><div class="l">צפי עלות לסיום</div><div class="v">${money(t.forecast)}</div><div class="n">${pct(t.dev, { sign: true })} מול התקציב${t.devBase != null ? ` · ${pct(t.devBase, { sign: true })} מול הבסיס` : ''}</div></div>
       <div class="kpi"><div class="l">חויב / שולם</div><div class="v">${money(t.paid)}</div><div class="n">חויב ${money(t.invoiced)}</div></div>
     </div>
-    ${can.edit() ? `<div class="actions" style="margin-bottom:12px"><button class="btn ${s.hasBaseline ? 'ghost' : ''}" id="lock">${s.hasBaseline ? 'נעילת בסיס חדש' : 'נעילת בסיס'}</button><button class="btn ghost" id="xl">ייצוא לאקסל</button></div>` : ''}
+    ${can.edit() ? `<div class="actions" style="margin-bottom:12px"><button class="btn ${s.hasBaseline ? 'ghost' : ''}" id="lock">${s.hasBaseline ? 'נעילת בסיס חדש' : 'נעילת בסיס'}</button><button class="btn ghost" data-print>הדפסה / PDF</button><button class="btn ghost" id="xl">ייצוא לאקסל</button></div>` : ''}
     ${alerts.length ? `<div class="card"><h2>דורש תשומת לב (${alerts.length})</h2><ul class="small" id="al">${alerts.slice(0, 14).map(a => `<li class="${a.crit ? 'neg' : ''}"><b>${a.co || a.bill ? `<a href="#/project/${P.id}/${a.bill ? 'cbill/' + a.bill.id : 'cos'}">${esc(a.title)}</a>` : esc(a.title)}</b> · ${esc(a.detail)}${a.amount != null ? ` · ${money(a.amount)}` : ''}${a.pct != null ? ` (${pct(a.pct, { sign: true })})` : ''}</li>`).join('')}</ul></div>` : ''}
     <div class="tw" id="ctl"></div>${legend()}
     <div class="card"><h2>איך מחושב</h2><p class="small">צפי לסיום לכל סעיף = התקשרויות חתומות לסעיף. סעיף בלי התקשרות מקבל את סכום התקציב ומסומן "הערכה". צפי ידני אפשר להזין בלחיצה על הסעיף, עם הסבר. הצפי לא יורד מתחת למה שכבר חויב.</p>

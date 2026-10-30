@@ -35,7 +35,7 @@ function listView(data) {
   const draw = () => {
     const q = F.q.trim();
     const rows = data.workers.filter(w => (F.inactive || w.active !== false) && (!F.type || w.pay_type === F.type) && (!q || `${w.name} ${w.trade || ''}`.includes(q)));
-    $('#tb', el).innerHTML = rows.map(w => `<tr class="${w.active === false ? 'dim' : ''}"><td><b>${esc(w.name)}</b>${w.is_foreign ? ' <span class="chip blue">עובד זר</span>' : ''}${w.agency ? `<div class="small mut">${esc(w.agency)}</div>` : ''}</td>
+    $('#tb', el).innerHTML = rows.map(w => `<tr class="${w.active === false ? 'dim' : ''}"><td><b>${esc(w.name)}</b>${w.pending_rate ? ' <span class="chip amber">ממתין לתעריף</span>' : ''}${w.is_foreign ? ' <span class="chip blue">עובד זר</span>' : ''}${w.agency ? `<div class="small mut">${esc(w.agency)}</div>` : ''}</td>
       <td>${PAY_TYPES[w.pay_type]}</td><td class="hide-m">${esc(w.trade || '')}</td><td class="n">${rateText(w)}</td>
       <td class="n hide-m">${w.pay_type === 'piece' ? '' : num(w.cost_factor ?? (w.pay_type === 'salary' ? st.employer_factor : 1))}</td><td class="n">${num(daysThisMonth[w.id] || 0, 1)}</td>
       <td>${can.workers() ? `<button class="btn small ghost" data-ed="${w.id}">עריכה</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="empty">אין עובדים. מוסיפים עובד ואז רושמים אותו ביומן העבודה של הפרויקט.</td></tr>';
@@ -87,6 +87,8 @@ async function workerDialog(data, w) {
     ot_rate: d.pay_type === 'piece' ? null : numOrNull(d.ot_rate), is_foreign: !!d.is_foreign, notes: d.notes || null };
   if (w) {
     row.active = !!d.active;
+    // עובד שנוסף מהשטח: ברגע שיש תעריף הוא כבר לא "ממתין לתעריף"
+    if (w.pending_rate && n(row.monthly_salary || row.daily_rate || row.hourly_rate || row.piece_rate)) row.pending_rate = false;
     await db.update('workers', w.id, row);
     for (const k of ['monthly_salary', 'daily_rate', 'hourly_rate', 'piece_rate', 'cost_factor', 'pay_type']) if (String(w[k] ?? '') !== String(row[k] ?? ''))
       await logChange({ entity: 'worker', entity_id: w.id, label: `עובד: ${row.name}`, field: k, old_value: w[k], new_value: row[k] });

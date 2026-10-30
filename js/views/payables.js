@@ -32,7 +32,7 @@ export async function viewPayables(tab = 'open') {
     <div class="actions" style="margin-bottom:10px">
       <select id="fp" style="width:auto"><option value="">כל הפרויקטים</option>${data.projects.map(p => `<option value="${p.id}" ${F.p === p.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
       <div class="seg" id="fw">${[['all', 'הכול'], ['overdue', 'באיחור'], ['week', 'עד שבוע'], ['approved', 'אושר לתשלום'], ['warn', 'עם אזהרה']].map(([k, l]) => `<button type="button" data-w="${k}" class="${F.when === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-      <input id="fq" placeholder="חיפוש ספק או חשבונית" style="width:200px"><span class="sp"></span><button class="btn ghost small" id="xl">ייצוא לאקסל</button></div>
+      <input id="fq" placeholder="חיפוש ספק או חשבונית" style="width:200px"><span class="sp"></span><button class="btn ghost small" data-print>הדפסה / PDF</button><button class="btn ghost small" id="xl">ייצוא לאקסל</button></div>
     <div class="paybar" id="bar" hidden><b id="bn"></b><span id="bs"></span><span class="sp"></span><button class="btn small ghost" id="ap">אישור לתשלום</button><button class="btn small" id="pd">סימון כשולם</button><button class="btn small ghost" id="clr">ניקוי בחירה</button></div>
     <div class="tw"><table><thead><tr><th><input type="checkbox" id="all" aria-label="בחירת הכול"></th><th>מועד תשלום</th><th>ספק</th><th class="hide-m">פרויקט</th><th class="hide-m">חשבונית</th><th class="n hide-m">לפני מע"מ</th><th class="n">כולל מע"מ</th><th>סטטוס</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
     <p class="small mut">מועד התשלום: תאריך שנקבע בהוצאה, אחרת שוטף + ימים לפי כרטיס הספק (או ${st.supplier_terms_days} יום לפי הגדרות הלקוח). עלות עובדים לא מופיעה כאן, היא בדוח הנוכחות.</p></div>`));
@@ -107,7 +107,7 @@ async function dueDialog(r) {
 
 function vendorsTab(data, st) {
   const bs = vendorBalances(data, { vat: st.vat_pct });
-  const el = h(`<div><div class="actions" style="margin-bottom:10px"><input id="vq" placeholder="חיפוש ספק" style="width:200px"><span class="sp"></span><button class="btn ghost small" id="xl">ייצוא לאקסל</button></div>
+  const el = h(`<div><div class="actions" style="margin-bottom:10px"><input id="vq" placeholder="חיפוש ספק" style="width:200px"><span class="sp"></span><button class="btn ghost small" data-print>הדפסה / PDF</button><button class="btn ghost small" id="xl">ייצוא לאקסל</button></div>
     <div class="tw"><table id="vt"><thead><tr><th>ספק</th><th class="n">הוזמן</th><th class="n">חויב</th><th class="n">שולם</th><th class="n">פתוח לתשלום</th><th class="n">פתוח כולל מע"מ</th><th class="n hide-m">הוזמן ועוד לא חויב</th><th class="hide-m">תנאי תשלום</th></tr></thead><tbody id="tb"></tbody></table></div>
     <p class="small mut">סכומים לפני מע"מ, חוץ מהעמודה "פתוח כולל מע"מ". "הוזמן ועוד לא חויב" הוא התחייבות שעוד תגיע כחשבונית.</p></div>`);
   const draw = q => { $('#tb', el).innerHTML = bs.filter(b => !q || b.name.includes(q)).map(b => `<tr><td><b>${esc(b.name)}</b>${b.vendor ? '' : ' <span class="chip">אין כרטיס</span>'}<div class="small mut">${b.n} חשבוניות</div></td>

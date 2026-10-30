@@ -100,7 +100,12 @@ th{background:var(--th);color:var(--mut);font-weight:600;font-size:12px;padding:
 td{padding:8px;border-bottom:1px solid var(--line);vertical-align:middle}
 td.wrap{white-space:normal;min-width:180px}
 .nw{white-space:nowrap}th{vertical-align:bottom}
-th.n,td.n{text-align:left}
+/* עמודת מספרים: הכותרת והמספרים ממורכזים באותו ציר, כך שהכותרת יושבת בדיוק מעל המספרים */
+th.n,td.n{text-align:center;padding-inline:12px}
+th.n{white-space:nowrap}
+/* קצוות הטבלה: מרווח זהה מימין ומשמאל */
+th:first-child,td:first-child{padding-inline-start:16px}th:last-child,td:last-child{padding-inline-end:16px}
+table.gt thead tr+tr th:first-child{padding-inline-start:12px}
 tr.al-y>td{background:var(--y)}tr.al-o>td{background:var(--o)}tr.al-r>td{background:var(--r)}tr.al-dr>td{background:var(--drx,var(--dr))}
 tr.tot>td{font-weight:800;background:var(--tot);border-top:2px solid var(--line2)}
 tr.sec>td{background:var(--sec);font-weight:700;color:var(--secink)}
@@ -271,7 +276,7 @@ tr.dim>td{opacity:.55}
 /* יישור טבלאות: מספרים בעמודה אחידה, כותרות מספרים נשברות לשתי שורות במקום למתוח את הטבלה, ושם בעמודה הראשונה לא נשבר לשורות רבות */
 th{vertical-align:bottom}
 td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
-th.n{white-space:normal;min-width:64px;line-height:1.35}
+th.n{min-width:64px;line-height:1.35}
 .tw tbody td:first-child:not(:has(input,button,select)){min-width:150px}
 table.gt th.grp{text-align:center;color:var(--ink);font-size:12.5px;border-bottom:1px solid var(--line)}
 table.gt th[rowspan]{vertical-align:bottom}
@@ -382,3 +387,20 @@ fieldset.mods legend{padding:0 6px}
 .cpinfo{display:block;margin-top:3px}
 .pclist .pcrm{margin:-4px 0 8px}
 .cused{color:#2f5bea;margin-top:2px}
+/* טלפון: עמודת טקסט לא נמחצת לשורות רבות (הטבלה נגללת לצד) */
+@media (max-width:760px){.tw td:not(.n):not(:has(input,button,select,.chip)){min-width:130px}}
+.print-only{display:none}
+@media print{.print-only{display:flex!important}[data-print],#xl,#gdrive{display:none!important}.seg button:not(.on){display:none}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+@media print{.helpb{display:none!important}.tw{overflow:visible!important}.cft table{font-size:8px}.cft th,.cft td{padding:2px 3px!important;min-width:0!important}.cft .stk{position:static!important}}
+@page{size:A4 landscape;margin:10mm}
+@media print{.tw button,.tw input[type=checkbox]{display:none!important}}
+/* יומן עבודה: פירוט חופשי ועבודה שלא ברשימה */
+.wdet .wnote{flex:1 1 100%;min-width:0}.qrow .wnote{flex:1 1 180px;width:auto;min-width:0}
+.xrow{border-bottom:1px solid var(--line);padding:10px 0;display:flex;flex-direction:column;gap:8px}.xrow:last-child{border-bottom:0}
+.xrow .qrow{margin:0}.xrow .chk{font-size:14px}
+/* נספח הוראות שינוי בחשבון */
+.apx-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.apx-doc{margin:10px 0}.apx-doc img{display:block;max-width:100%;border:1px solid var(--line);border-radius:6px;margin-top:6px}
+@media print{.apx-page{break-before:page;box-shadow:none;border:0}.apx-doc img{max-height:250mm;object-fit:contain;break-inside:avoid}.apx-head{break-before:page}}
+@media print{.apx-head+.apx-page{break-before:auto}.apx-doc{break-inside:avoid}.apx-doc img{max-height:225mm;width:auto;margin-inline:auto}}
+@media print{.billv .apx-page{break-inside:auto}.apx-doc img{max-height:165mm}}

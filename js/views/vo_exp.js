@@ -12,7 +12,7 @@ import { has as hasMod } from '../modules.js';
 import { party } from '../dev.js';
 import { fixedCostsCard } from './fixedcosts.js';
 
-const SOURCES = { change_order: 'הוראת שינוי', supervisor: 'הוראת מפקח', main_request: 'בקשת הקבלן הראשי', daywork: 'עבודת רג\'י' };
+const SOURCES = { change_order: 'הוראת שינוי', supervisor: 'הוראת מפקח', main_request: 'בקשת הקבלן הראשי', daywork: 'עבודת רג\'י', field: 'מיומן העבודה (מהשטח)' };
 const srcOf = P => ({ ...SOURCES, main_request: party(P.project).req });
 const statusChip = s => `<span class="chip ${VO_APPROVED.includes(s) ? 'green' : VO_AT_RISK.includes(s) ? 'red' : s === 'rejected' ? '' : 'blue'}">${VO_STATUS[s]}</span>`;
 
@@ -36,7 +36,7 @@ export function tabVo(P) {
   for (const g of groups) {
     const v = g.vo, sale = VO_APPROVED.includes(v.status) ? g.approvedSale : g.requested;
     const d = h(`<details class="card" ${v.status === 'executed_unapproved' ? 'open' : ''}><summary style="cursor:pointer;list-style:none">
-      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div><b>${esc(v.number)}</b> ${esc(v.title)} ${statusChip(v.status)}
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div><b>${esc(v.number)}</b> ${esc(v.title)} ${statusChip(v.status)}${v.from_field ? ' <span class="chip violet">מהשטח</span>' : ''}
         <div class="small mut">${srcOf(P)[v.source]} · ${v.has_written_order ? 'יש הוראה בכתב' : '<span class="neg">אין הוראה בכתב</span>'}${v.vo_date ? ' · ' + fmtDate(v.vo_date) : ''}</div></div>
         <div class="pr" style="grid-template-columns:repeat(5,auto);gap:16px"><div>מבוקש<b>${money(g.requested)}</b></div><div>מאושר<b>${VO_APPROVED.includes(v.status) ? money(g.approvedSale) : '—'}</b></div><div>תמחיר<b>${money(g.planned)}</b></div><div>בפועל<b>${money(g.actual)}</b></div><div>רווח צפוי<b class="${sale - g.forecast < 0 ? 'neg' : ''}">${money(sale - g.forecast)}</b></div></div></div></summary>
       ${v.notes ? `<p class="small">${esc(v.notes)}</p>` : ''}

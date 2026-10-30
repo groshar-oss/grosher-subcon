@@ -55,13 +55,14 @@ export async function loadTenantData(tenantId = S.tenantId) {
   const [projects, mcs] = await Promise.all([db.select('projects', { ...q, order: 'created_at' }), can.prices() ? db.select('main_contractors', { ...q, order: 'name' }) : []]);
   if (tenantId === S.tenantId) S.projList = { t: tenantId, list: projects };
   // יומן עבודה: כל מי שרואה פרויקט (ההרשאות בשרת מגבילות מנהל עבודה לפרויקטים שלו)
-  const [entries, days, wqty] = await Promise.all([
-    db.select('work_entries', { ...q, order: ['log_date', 'created_at'] }), db.select('work_days', { ...q, order: 'log_date' }), db.select('work_qty', { ...q, order: 'log_date' })]);
+  const [entries, days, wqty, extras] = await Promise.all([
+    db.select('work_entries', { ...q, order: ['log_date', 'created_at'] }), db.select('work_days', { ...q, order: 'log_date' }), db.select('work_qty', { ...q, order: 'log_date' }),
+    db.select('work_extras', { ...q, order: ['log_date', 'created_at'] }).catch(() => [])]);
   if (!can.prices()) {
     const m = S.ctx.memberships.find(x => x.tenant_id === tenantId);
     const vis = S.role === 'foreman' ? projects.filter(p => (m?.project_ids || []).includes(p.id)) : projects;
     const workers = await db.rpc('field_workers', { t: tenantId });
-    return { projects: vis, mcs: [], items: [], lines: [], vos: [], expenses: [], workers, entries, days, wqty, pos: [], poLines: [], bills: [], billLines: [], fines: [], payments: [], vendors: [], documents: [], guarantees: [], files: [], contracts: [], cLines: [], cos: [], coLines: [], cbills: [], cbLines: [], income: [], alertStates: [], closes: await db.select('month_closes', q).catch(() => []) };
+    return { projects: vis, mcs: [], items: [], lines: [], vos: [], expenses: [], workers, entries, days, wqty, extras, pos: [], poLines: [], bills: [], billLines: [], fines: [], payments: [], vendors: [], documents: [], guarantees: [], files: [], contracts: [], cLines: [], cos: [], coLines: [], cbills: [], cbLines: [], income: [], alertStates: [], closes: await db.select('month_closes', q).catch(() => []) };
   }
   const [items, lines, vos, expenses, workers, pos, poLines, bills, billLines, fines, payments] = await Promise.all([
     db.select('boq_items', { ...q, order: ['sort', 'code'] }),
@@ -79,7 +80,7 @@ export async function loadTenantData(tenantId = S.tenantId) {
     db.select('change_orders', { ...q, order: 'created_at' }), db.select('co_lines', { ...q, order: 'sort' }), db.select('cbills', { ...q, order: 'number' }), db.select('cbill_lines', q)]);
   const [income, alertStates, signoffs] = await Promise.all([db.select('dev_income', { ...q, order: 'due_date' }), db.select('alert_state', q), db.select('co_signoffs', { ...q, order: 'sent_at' }).catch(() => [])]);
   const [indexSeries, fixedCosts, units, closes] = await Promise.all([db.select('index_series', { ...q, order: 'month' }).catch(() => []), db.select('fixed_costs', { ...q, order: 'from_month' }).catch(() => []), db.select('dev_units', { ...q, order: ['sort', 'name'] }).catch(() => []), db.select('month_closes', { eq: { tenant_id: tenantId }, order: 'month' }).catch(() => [])]);
-  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines, income, alertStates, signoffs, indexSeries, fixedCosts, units, closes };
+  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, extras, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines, income, alertStates, signoffs, indexSeries, fixedCosts, units, closes };
 }
 
 export async function logChange(e) {
@@ -101,7 +102,7 @@ const NAV = () => [
   ['#/cashflow', '≋', 'תזרים מזומנים', can.prices()],
   ['#/reports', '▦', 'דוחות', can.prices()],
   ['#/vendors', '▣', 'ספקים, מסמכים וערבויות', can.prices()],
-  ['#/contacts', '☏', 'ספר טלפונים', !!S.tenantId],
+  ['#/contacts', '☏', 'ספר טלפונים', !!S.tenantId && S.role !== 'foreman'],
   ['#/sent', '✉', 'ארכיון שליחות', can.expense()]
 ].filter(x => x[3]);
 const NAV_ADMIN = () => [
@@ -197,7 +198,7 @@ export async function render() {
     else if (route === 'guide') { view = h(guidePage()); title = 'איך עובדים'; }
     else if (route === 'collection') { view = await viewCollection(); title = 'חשבונות וגבייה'; }
     else if (route === 'vendors') { view = await viewVendors(a || 'list'); title = 'ספקים ומסמכים'; }
-    else if (route === 'contacts') { view = await viewContacts(); title = 'ספר טלפונים'; }
+    else if (route === 'contacts') { view = S.role === 'foreman' ? h('<div class="card empty">אין הרשאה</div>') : await viewContacts(); title = 'ספר טלפונים'; }
     else if (route === 'sent') { view = can.expense() ? await viewSentLog() : h('<div class="card empty">אין הרשאה</div>'); title = 'ארכיון שליחות'; }
     else if (route === 'reports') { view = await viewReports(a); title = 'דוחות'; }
     else if (route === 'cashflow') { view = can.prices() ? await viewCashflow() : h('<div class="card empty">אין הרשאה</div>'); title = 'תזרים מזומנים'; }
@@ -290,3 +291,14 @@ window.addEventListener('hashchange', render);
 window.addEventListener('online', () => { if (S.user) flushOutbox().then(k => k && render()); });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 boot();
+
+// כפתור "הדפסה / PDF" בכל מסך: חלון ההדפסה של הדפדפן, שבו בוחרים "שמירה כ-PDF".
+// במסך בלי כותרת דוח מוסיפים לזמן ההדפסה שורת כותרת עם הלוגו, הלקוח והתאריך.
+document.addEventListener('click', e => { if (e.target.closest('[data-print]')) window.print(); });
+window.addEventListener('beforeprint', () => {
+  const main = document.getElementById('main'); if (!main || main.querySelector('.rephead') || document.getElementById('printhead')) return;
+  const d = document.createElement('div'); d.id = 'printhead'; d.className = 'rephead print-only';
+  d.innerHTML = `<img src="icons/icon-192.png" alt=""><div><b>${esc(tenant()?.name || '')}</b><span>הופק ${new Date().toLocaleDateString('he-IL')}</span></div>`;
+  main.prepend(d);
+});
+window.addEventListener('afterprint', () => document.getElementById('printhead')?.remove());

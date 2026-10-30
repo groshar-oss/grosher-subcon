@@ -92,7 +92,7 @@ export function devCashBlock(data, ids, title) {
         <span class="mut small">עיכוב בלו"ז:</span><div class="seg" id="sdl">${[0, 1, 3, 6].map(k => `<button type="button" data-k="${k}" class="${o.schedDelay === k ? 'on' : ''}">${k ? `+${k} ח'` : 'בזמן'}</button>`).join('')}</div>
         ${o.schedDelay ? `<label class="small" style="display:flex;align-items:center;gap:6px">עלות לחודש עיכוב ₪ <input id="dcost" type="number" dir="ltr" step="any" value="${o.delayCost || ''}" placeholder="פיקוח, שמירה, מימון" style="width:120px"></label>` : ''}
         ${perSeg(o.per)}
-        <button class="btn ghost small" id="xl">ייצוא לאקסל</button></div>
+        <button class="btn ghost small" data-print>הדפסה / PDF</button><button class="btn ghost small" id="xl">ייצוא לאקסל</button></div>
       <div class="kpis">
         <div class="kpi"><div class="l">יתרה בתחילת ${monthLabel(r.cur)}</div><div class="v ${r.opening < 0 ? 'neg' : ''}">${money(r.opening)}</div><div class="n">יתרה בבנק ${money(st.cash_opening || 0)} נכון ל-${monthLabel(r.asof)}${can.edit() ? ` · <a href="#/client/${S.tenantId}">עדכון</a>` : ''}</div></div>
         <div class="kpi"><div class="l">נטו ב-3 החודשים הקרובים</div><div class="v ${next3 < 0 ? 'neg' : 'pos'}">${money(next3)}</div><div class="n">הכנסות פחות הוצאות</div></div>

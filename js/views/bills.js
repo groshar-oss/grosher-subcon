@@ -11,7 +11,8 @@ import { loadXLSX } from '../import.js';
 import { finalBill, GUAR_KINDS, guaranteeState } from '../docs.js';
 import { guarDialog } from './vendors.js';
 import { groupBy } from './project.js';
-import { attachBtn, wireAttach } from '../files.js';
+import { attachBtn, wireAttach, filesFor } from '../files.js';
+import { voAppendix, fillAppendixDocs } from './billapx.js';
 
 const fineChip = f => { const s = fineStatus(f); return `<span class="chip ${s === 'appeal' ? 'amber' : s === 'cancelled' ? '' : 'red'}">${FINE_STATUS[s]}${s === 'cancelled' ? ' · לא מנוכה' : ''}</span>`; };
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
@@ -124,7 +125,7 @@ export function billView(P, billId) {
 
   const el = h(`<div class="billv">
     <div class="top"><div><h1>${bill.is_final ? 'חשבון סופי' : 'חשבון חלקי'} ${bill.number}</h1><div class="sub">${esc(P.project.name)} · ${P.data.mcs.find(m => m.id === P.project.main_contractor_id)?.name ? esc(P.data.mcs.find(m => m.id === P.project.main_contractor_id).name) : ''}</div></div>
-      <div class="actions"><button class="btn ghost small" id="xl">ייצוא לאקסל</button><button class="btn ghost small" id="pr">הדפסה</button><a class="btn ghost small" href="#/project/${P.id}/bills">כל החשבונות</a></div></div>
+      <div class="actions"><button class="btn ghost small" id="xl">ייצוא לאקסל</button><button class="btn ghost small" id="pr">הדפסה / PDF</button><a class="btn ghost small" href="#/project/${P.id}/bills">כל החשבונות</a></div></div>
     ${bill.is_final ? (() => { const fb = finalBill(P.project, P.summary.billing.retentionTotal); return `<div class="note ${fb.ready ? '' : 'neg'}"><b>חשבון סופי.</b> ${fb.ready ? `עיכבון לשחרור: <b>${money(fb.toRelease)}</b> · סוף תקופת הבדק: <b>${fmtDate(fb.warrantyEnd)}</b>. כדאי לצרף ערבות בדק במקום העיכבון.` : `אי אפשר להגיש עד שיושלם: ${fb.missing.join(' · ')} (בלשונית החשבונות, "סגירה וחשבון סופי").`}</div>`; })() : ''}
     <div class="card"><div class="grid g4">
       ${field('עד תאריך (תקופה)', 'period_to', bill.period_to, { type: 'date' })}${field('תאריך החשבון', 'bill_date', bill.bill_date, { type: 'date' })}
@@ -140,6 +141,7 @@ export function billView(P, billId) {
     <div class="cols even"><div class="card" ${hasMod(P.project, 'fines') || st.fines.length ? '' : 'hidden'}><h2>קנסות ${edit ? '<button class="btn small" id="addf" type="button">+ קנס</button>' : ''}</h2><div id="fl"></div><p class="small mut" id="ft"></p></div>
       <div class="card"><h2>סיכום החשבון</h2><div id="sum"></div></div></div>
     <div class="card"><h2>תקבולים ${edit && bill.status !== 'draft' ? '<button class="btn small" id="addp" type="button">+ תקבול</button>' : ''}</h2><div id="pl"></div></div>
+    ${voAppendix(P, r0, filesFor)}
     ${edit ? `<div class="savebar"><span id="sb"></span><span class="sp"></span>${bill.status === 'draft' || isLast ? '<button class="btn ghost danger-t" id="del" type="button">מחיקת החשבון</button>' : ''}<button class="btn ghost" id="prog" type="button">עדכון אחוזי ביצוע לפי החשבון</button><button class="btn" id="save" type="button">שמירה</button></div>` : ''}</div>`);
   if (!edit) $$('input,select', el).forEach(x => x.disabled = true);
 
@@ -279,6 +281,8 @@ export function billView(P, billId) {
   });
   $('#pr', el).onclick = () => window.print();
   $('#xl', el).onclick = () => exportBill(P, calcNow(), items);
+  wireAttach(el, P.data.files || [], render);
+  fillAppendixDocs(el, P.data.files || []);
   return el;
 }
 
