@@ -331,7 +331,9 @@ export async function viewCollection() {
   const soon = open.filter(x => x.r.due >= today && (new Date(x.r.due) - new Date(today)) / 864e5 <= 30);
   const sum = xs => xs.reduce((a, x) => a + x.r.outstanding, 0);
   const notSubmitted = all.filter(x => x.r.bill.status === 'draft');
-  const el = h(`<div><div class="top"><div><h1>חשבונות וגבייה</h1><div class="sub">כל החשבונות החלקיים שהוגשו לקבלנים הראשיים · סכומים כולל מע"מ</div><div class="small mut" style="margin-top:4px">חשבון חדש פותחים בתוך הפרויקט: פרויקטים > הפרויקט > לשונית "חשבונות" > "+ חשבון חלקי"</div></div></div>
+  const { navFlags } = await import('../app.js'); const lbl = navFlags().collLabel;
+  const el = h(`<div><div class="top"><div><h1>${esc(lbl)}</h1><div class="sub">חשבונות שהגשת ומחכים לתשלום · כל הפרויקטים · סכומים כולל מע"מ</div></div>
+    ${can.edit() ? '<div class="actions"><button class="btn" id="newbill">+ חשבון חלקי חדש</button></div>' : ''}</div>
     <div class="kpis"><div class="kpi"><div class="l">יתרה לגבייה</div><div class="v">${money(sum(open))}</div><div class="n">${open.length} חשבונות</div></div>
       <div class="kpi"><div class="l">באיחור</div><div class="v ${overdue.length ? 'neg' : 'pos'}">${money(sum(overdue))}</div><div class="n">${overdue.length} חשבונות</div></div>
       <div class="kpi"><div class="l">צפוי ב-30 יום</div><div class="v">${money(sum(soon))}</div><div class="n">${soon.length} חשבונות</div></div>
@@ -341,5 +343,15 @@ export async function viewCollection() {
       <td class="n">${money(r.expectedWithVat)}</td><td class="n">${money(r.paid)}</td><td class="n"><b>${money(r.outstanding)}</b></td><td>${statusChip(r, today)}</td></tr>`).join('') || '<tr><td colspan="8" class="empty">אין חשבונות פתוחים לגבייה</td></tr>'}
     </tbody></table></div><p class="small mut">מועד תשלום מחושב משוטף+X של הפרויקט (סוף חודש ההגשה + X ימים), אלא אם הוזן מועד אחר בחשבון.</p></div>`);
   $$('[data-h]', el).forEach(tr => tr.onclick = () => location.hash = tr.dataset.h);
+  // חשבון חדש ישר מכאן: בוחרים פרויקט, והחשבון נפתח בתוכו
+  $('#newbill', el)?.addEventListener('click', async () => {
+    const ps = data.projects.filter(p => p.status !== 'closed');
+    if (!ps.length) return toast('אין פרויקט קבלן משנה או ביצוע פעיל. פותחים פרויקט במסך "פרויקטים"', 'bad');
+    const v = await modal({ title: 'חשבון חלקי חדש', ok: 'פתיחת החשבון', body: `${select('פרויקט', 'pid', Object.fromEntries(ps.map(p => [p.id, p.name])), ps[0].id)}
+      <p class="small mut">החשבון נפתח כטיוטה בתוך הפרויקט, וממשיך מהמצטבר של החשבון הקודם.</p>` });
+    if (!v) return;
+    const pd = projData(data, v.pid);
+    await newBill({ data, pd, project: pd.project, summary: summarize(pd), id: v.pid });
+  });
   return el;
 }

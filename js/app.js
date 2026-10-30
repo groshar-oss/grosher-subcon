@@ -92,12 +92,22 @@ export async function logChange(e) {
 
 // ===== ניווט =====
 // כללי (לכל הפרויקטים) למעלה, הפרויקט הפתוח מתחת, וניהול מקופל בתחתית
+// מסכים לפי סוג הפרויקטים של הלקוח (גבייה ועובדים רק כשיש קבלן משנה / ביצוע). בהגדרות הלקוח אפשר "תמיד להציג" או "להסתיר"
+export function navFlags() {
+  const st = tenant()?.settings || {}, list = S.projList?.t === S.tenantId ? S.projList.list : null;
+  const work = (list || []).filter(p => p.project_type !== 'dev');
+  const auto = !list || !list.length || work.length > 0;
+  const pick = k => st['nav_' + k] === 'show' ? true : st['nav_' + k] === 'hide' ? false : auto;
+  const exec = work.filter(p => p.project_type === 'exec').length;
+  const collLabel = !work.length || !exec ? 'גבייה מקבלנים ראשיים' : exec === work.length ? 'גבייה ממזמינים' : 'גבייה מקבלנים ראשיים ומזמינים';
+  return { collection: pick('collection'), workers: pick('workers'), collLabel };
+}
 const NAV = () => [
   ['#/', '◧', 'מה דורש טיפול', true],
   ['#/projects', '▤', 'פרויקטים', true],
   ['#/inbox', '⇪', 'תיבת מסמכים', can.expense()],
-  ['#/workers', '☺', 'עובדים ונוכחות', can.workers()],
-  ['#/collection', '₪', 'חשבונות וגבייה', can.prices()],
+  ['#/workers', '☺', 'עובדים ונוכחות', can.workers() && navFlags().workers],
+  ['#/collection', '₪', navFlags().collLabel, can.prices() && navFlags().collection],
   ['#/payables', '⇄', 'תשלומים לספקים', can.expense()],
   ['#/cashflow', '≋', 'תזרים מזומנים', can.prices()],
   ['#/reports', '▦', 'דוחות', can.prices()],
@@ -176,6 +186,8 @@ function refreshRole() {
   S.role = S.ctx.memberships.find(m => m.tenant_id === S.tenantId)?.role || null;
 }
 
+// מסך שהוסתר בהגדרות הלקוח (או אוטומטית, כשאין ללקוח פרויקט מתאים)
+const hiddenScreen = () => h(`<div class="card empty"><p>המסך הזה מוסתר אצל הלקוח הזה, כי אין לו פרויקט קבלן משנה או ביצוע.</p>${can.edit() ? `<p class="small">אפשר להציג אותו בכל זאת: <a href="#/client/${S.tenantId}">הגדרות לקוח</a> ← "מסכים בתפריט".</p>` : ''}</div>`);
 let renderSeq = 0;
 export async function render() {
   const seq = ++renderSeq;
@@ -187,6 +199,7 @@ export async function render() {
     return;
   }
   const [, route, a, b, c] = (location.hash || '#/').split('/');
+  if (S.tenantId) { try { await projList(); } catch { /* התפריט יוצג מלא */ } }
   if (route === 'project' && a) setOpenProject(a);
   let view, title;
   try {
@@ -196,13 +209,13 @@ export async function render() {
     else if (route === 'inbox') { view = await viewInbox(); title = 'תיבת מסמכים'; }
     else if (route === 'payables') { view = await viewPayables(a || 'open'); title = 'תשלומים לספקים'; }
     else if (route === 'guide') { view = h(guidePage()); title = 'איך עובדים'; }
-    else if (route === 'collection') { view = await viewCollection(); title = 'חשבונות וגבייה'; }
+    else if (route === 'collection') { await projList(); view = navFlags().collection ? await viewCollection() : hiddenScreen(); title = navFlags().collLabel; }
     else if (route === 'vendors') { view = await viewVendors(a || 'list'); title = 'ספקים ומסמכים'; }
     else if (route === 'contacts') { view = S.role === 'foreman' ? h('<div class="card empty">אין הרשאה</div>') : await viewContacts(); title = 'ספר טלפונים'; }
     else if (route === 'sent') { view = can.expense() ? await viewSentLog() : h('<div class="card empty">אין הרשאה</div>'); title = 'ארכיון שליחות'; }
     else if (route === 'reports') { view = await viewReports(a); title = 'דוחות'; }
     else if (route === 'cashflow') { view = can.prices() ? await viewCashflow() : h('<div class="card empty">אין הרשאה</div>'); title = 'תזרים מזומנים'; }
-    else if (route === 'workers') { view = await viewWorkers(a || 'list'); title = 'עובדים ונוכחות'; }
+    else if (route === 'workers') { view = navFlags().workers ? await viewWorkers(a || 'list') : hiddenScreen(); title = 'עובדים ונוכחות'; }
     else if (route === 'clients') { view = await viewClients(); title = 'לקוחות'; }
     else if (route === 'client') { view = await viewClient(a); title = 'הגדרות לקוח'; }
     else if (route === 'settings') { view = await viewSettings(); title = 'תצוגה ומצב'; }
