@@ -8,6 +8,7 @@ import { GUAR_KINDS, guaranteeState } from '../docs.js';
 import { cashflow, monthLabel, mkey, addMonths } from '../cashflow.js';
 import { projData, summarize, STATUS } from './common.js';
 import { loadXLSX } from '../import.js';
+import { viewDevReports, reportNav } from './devreports.js';
 
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const m0 = v => money(v, { sym: false });
@@ -25,7 +26,7 @@ export const REPORTS = [
 
 // טבלה גנרית. cols: [[כותרת, מספרי?]], rows: מערכי תאים (מחרוזות HTML). foot: שורת סיכום.
 // groups: כותרת עליונה לקבוצות עמודות [[שם, כמה עמודות]], העמודה הראשונה תופסת את שתי שורות הכותרת
-const T = (cols, rows, foot, empty = 'אין נתונים', groups = null) => {
+export const T = (cols, rows, foot, empty = 'אין נתונים', groups = null) => {
   const gs = new Set(); if (groups) { let k = 1; for (const [, span] of groups) { gs.add(k); k += span; } }
   const c = (i, isN) => [isN ? 'n' : '', gs.has(i) ? 'gs' : ''].filter(Boolean).join(' ');
   const head = groups
@@ -40,17 +41,21 @@ const inPeriod = (d, o) => d && d.slice(0, 7) >= o.from && d.slice(0, 7) <= o.to
 const periodText = o => `${monthLabel(o.from)} עד ${monthLabel(o.to)}`;
 
 export async function viewReports(kind = 'profit') {
+  // פרויקטי יזם: דוחות נפרדים (d-...). לקוח שיש לו רק פרויקטי יזם נכנס ישר אליהם
+  if (String(kind || '').startsWith('d-')) return viewDevReports(kind);
+  const all = await loadTenantData();
+  if (!all.projects.some(p => p.project_type !== 'dev') && all.projects.some(p => p.project_type === 'dev')) return viewDevReports(kind);
   const list = REPORTS.filter(r => r[2]());
   if (!list.length) return h('<div class="card empty">אין הרשאה</div>');
   if (!list.some(r => r[0] === kind)) kind = list[0][0];
-  const data = await loadTenantData();
+  const data = { ...all, projects: all.projects.filter(p => p.project_type !== 'dev') };
   const o = opt();
   if (o.pid && !data.projects.some(p => p.id === o.pid)) o.pid = '';
   const projects = o.pid ? data.projects.filter(p => p.id === o.pid) : data.projects.filter(p => p.status !== 'closed');
   const sums = projects.map(p => { const pd = projData(data, p.id); return { p, pd, s: summarize(pd) }; });
   const usesPeriod = ['labor', 'expenses'].includes(kind);
   const el = h(`<div><div class="top no-print"><div><h1>דוחות</h1><div class="sub">כל דוח לפרויקט אחד או לכל הפרויקטים הפעילים · הדפסה ו-Excel</div></div></div>
-    <nav class="tabs">${list.map(([k, l]) => `<a href="#/reports/${k}" class="${k === kind ? 'on' : ''}">${l}</a>`).join('')}</nav>
+    ${reportNav(all, kind)}
     <div class="actions" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">
       <select id="pid" aria-label="פרויקט"><option value="">כל הפרויקטים הפעילים</option>${data.projects.map(p => `<option value="${p.id}" ${p.id === o.pid ? 'selected' : ''}>${esc(p.name)}${p.status === 'closed' ? ' (סגור)' : ''}</option>`).join('')}</select>
       ${usesPeriod ? `<label class="small mut">מחודש <input type="month" id="from" value="${o.from}"></label><label class="small mut">עד <input type="month" id="to" value="${o.to}"></label>` : ''}
@@ -72,7 +77,7 @@ export async function viewReports(kind = 'profit') {
   return el;
 }
 
-async function exportTables(root, name) {
+export async function exportTables(root, name) {
   const XLSX = await loadXLSX();
   const wb = XLSX.utils.book_new(); wb.Workbook = { Views: [{ RTL: true }] };
   $$('table', root).forEach((t, i) => {

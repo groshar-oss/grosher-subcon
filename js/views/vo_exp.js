@@ -94,7 +94,7 @@ export function tabExpenses(P) {
       <input id="q" placeholder="חיפוש ספק, מסמך או תיאור" style="width:220px">
       <select id="fk" style="width:auto"><option value="">כל הסוגים</option>${Object.entries(EXPENSE_KINDS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select>
       <select id="fs" style="width:auto"><option value="">כל הסטטוסים</option>${Object.entries(EXPENSE_STATUS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
-    <div class="note small">עלות עובדים נרשמת ביומן העבודה ולא כאן, כדי שלא תיספר פעמיים. חשבונית של ספק מקשרים להזמנת הרכש שלה (לשונית רכש).</div>
+    ${P.project.project_type === 'dev' ? '<div class="note small">כל הוצאה משייכים לסעיף תקציב ולהתקשרות, כדי שהבקרה תראה כמה חויב ושולם מול כל חוזה.</div>' : '<div class="note small">עלות עובדים נרשמת ביומן העבודה ולא כאן, כדי שלא תיספר פעמיים. חשבונית של ספק מקשרים להזמנת הרכש שלה (לשונית רכש).</div>'}
     <div class="tw"><table><thead><tr><th>תאריך</th><th>ספק</th><th class="hide-m">מסמך</th><th>שיוך</th><th>סוג</th><th class="n">לפני מע"מ</th><th class="n hide-m">כולל מע"מ</th><th>סטטוס</th>${can.expense() ? '<th></th>' : ''}</tr></thead><tbody id="tb"></tbody></table></div></div>`);
   const draw = () => {
     const q = F.q.trim();
@@ -129,14 +129,16 @@ export async function expenseDialog(P, e, preset = {}) {
   const v0 = { ...preset, ...(e || {}) };
   const cur = v0.boq_item_id ? 'i:' + v0.boq_item_id : v0.variation_id ? 'v:' + v0.variation_id : 'g';
   const contract = P.pd.items.filter(i => !i.variation_id);
-  const opts = `<option value="g">כללי לפרויקט (מתחלק לפי משקל התמחיר)</option>
-    <optgroup label="סעיפי חוזה">${contract.map(i => `<option value="i:${i.id}" ${cur === 'i:' + i.id ? 'selected' : ''}>${esc(`${i.code || ''} ${i.description}`.slice(0, 70))}</option>`).join('')}</optgroup>
+  const dev = P.project.project_type === 'dev';
+  const opts = `<option value="g">${dev ? 'בלי סעיף תקציב' : 'כללי לפרויקט (מתחלק לפי משקל התמחיר)'}</option>
+    <optgroup label="${dev ? 'סעיפי תקציב' : 'סעיפי חוזה'}">${contract.map(i => `<option value="i:${i.id}" ${cur === 'i:' + i.id ? 'selected' : ''}>${esc(`${i.code || ''} ${i.description}`.slice(0, 70))}</option>`).join('')}</optgroup>
     ${P.pd.variations.map(v => `<optgroup label="${esc(v.number + ' ' + v.title)}"><option value="v:${v.id}" ${cur === 'v:' + v.id ? 'selected' : ''}>${esc(v.number)}: כל ההוראה</option>${P.pd.items.filter(i => i.variation_id === v.id).map(i => `<option value="i:${i.id}" ${cur === 'i:' + i.id ? 'selected' : ''}>${esc(`${i.code || ''} ${i.description}`.slice(0, 70))}</option>`).join('')}</optgroup>`).join('')}`;
   const pos = (P.pd.pos || []).filter(p => p.status !== 'cancelled' || p.id === v0.po_id);
   const body = `<datalist id="sup">${suppliers.map(s => `<option value="${esc(s)}">`).join('')}</datalist>
     <div class="grid g2">${field('תאריך מסמך', 'doc_date', v0.doc_date || new Date().toISOString().slice(0, 10), { type: 'date', req: true })}${field('ספק / נותן שירות', 'supplier_name', v0.supplier_name, { attrs: 'list="sup"' })}
     ${field('מספר מסמך', 'doc_no', v0.doc_no)}${select('סוג', 'kind', EXPENSE_KINDS, v0.kind || 'material')}</div>
     ${pos.length ? `<label class="fld"><span>הזמנת רכש (התאמה)</span><select name="po_id"><option value="">בלי הזמנה</option>${pos.map(p => `<option value="${p.id}" ${p.id === v0.po_id ? 'selected' : ''}>${esc(`${p.number || ''} · ${p.supplier_name}`)}</option>`).join('')}</select></label>` : ''}
+    ${(P.pd.contracts || []).length ? `<label class="fld"><span>התקשרות</span><select name="contract_id" id="ctr"><option value="">בלי התקשרות</option>${P.pd.contracts.filter(c => c.status !== 'cancelled' || c.id === v0.contract_id).map(c => `<option value="${c.id}" ${c.id === v0.contract_id ? 'selected' : ''}>${esc(`${c.number ? c.number + ' · ' : ''}${c.vendor_name || ''} · ${c.title}`.slice(0, 80))}</option>`).join('')}</select></label>` : ''}
     <label class="fld"><span>שיוך לסעיף</span><select name="link" id="lnk">${opts}</select></label>
     <div class="grid g3" id="matq"><label class="fld"><span>שורת חומר בתמחיר</span><select name="cost_line_id" id="cl"></select></label>${field('כמות (למכסת חומר)', 'qty', v0.qty ?? '', { type: 'number' })}${field('יחידה', 'unit', v0.unit || '')}</div>
     ${field('תיאור', 'description', v0.description)}
@@ -157,13 +159,17 @@ export async function expenseDialog(P, e, preset = {}) {
       if (ml.length && !$('[name=unit]', el).value) $('[name=unit]', el).value = ml[0].unit || '';
     };
     $('#lnk', el).onchange = sync; $('[name=kind]', el).onchange = sync; sync();
+    $('#ctr', el)?.addEventListener('change', () => { const c = P.pd.contracts.find(x => x.id === $('#ctr', el).value); const sn = $('[name=supplier_name]', el);
+      if (c && !sn.value.trim()) { sn.value = c.vendor_name || ''; vchk(); }
+      const ls = c ? (P.pd.cLines || []).filter(l => l.contract_id === c.id && l.boq_item_id) : [];
+      if (ls.length && $('#lnk', el).value === 'g') { $('#lnk', el).value = 'i:' + ls[0].boq_item_id; sync(); } });
   }, validate: x => (!n(x.amount) ? 'חסר סכום' : !x.doc_date ? 'חסר תאריך' : null) });
   if (!d) return;
   const [t, lid] = d.link.split(':');
   const isMat = d.kind === 'material' && t === 'i';
   const row = { doc_date: d.doc_date, supplier_name: d.supplier_name.trim(), doc_no: d.doc_no.trim(), kind: d.kind, description: d.description, amount: n(d.amount), vat_pct: n(d.vat_pct), status: d.status, pay_date: nullIfEmpty(d.pay_date), notes: d.notes,
     boq_item_id: t === 'i' ? lid : null, variation_id: t === 'v' ? lid : (t === 'i' ? P.pd.items.find(i => i.id === lid)?.variation_id || null : null),
-    po_id: d.po_id || null, cost_line_id: isMat ? (d.cost_line_id || null) : null, qty: isMat ? numOrNull(d.qty) : null, unit: isMat ? (d.unit || null) : null };
+    po_id: d.po_id || null, contract_id: d.contract_id || null, cost_line_id: isMat ? (d.cost_line_id || null) : null, qty: isMat ? numOrNull(d.qty) : null, unit: isMat ? (d.unit || null) : null };
   if (row.kind === 'general') { row.boq_item_id = null; }
   if (e) {
     await db.update('expenses', e.id, row);

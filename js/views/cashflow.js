@@ -5,6 +5,7 @@ import { n } from '../calc.js';
 import { cashflow, CF_ROWS, CF_IN, CF_OUT, monthLabel } from '../cashflow.js';
 import { projData, summarize } from './common.js';
 import { loadXLSX } from '../import.js';
+import { devCashBlock } from './devcash.js';
 
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const opt = () => ({ ahead: 12, delay: 0, pid: '', ...(store('subcon-cf') || {}) });
@@ -18,7 +19,11 @@ export function cfFor(data, ids, o = opt()) {
 
 // עמוד תזרים מרוכז (#/cashflow) עם סינון לפרויקט
 export async function viewCashflow() {
-  const data = await loadTenantData();
+  const all = await loadTenantData();
+  // פרויקטי יזם: תזרים הכנסות מול הוצאות בנפרד (כולל מע"מ)
+  const devs = all.projects.filter(p => p.project_type === 'dev' && p.status !== 'closed');
+  const data = { ...all, projects: all.projects.filter(p => p.project_type !== 'dev') };
+  if (devs.length && !data.projects.length) return h(`<div><div class="top"><div><h1>תזרים מזומנים</h1><div class="sub">פרויקטי יזם (${devs.length}) · הכנסות מול הוצאות, כולל מע"מ</div></div></div></div>`).appendChild(devCashBlock(all, devs.map(p => p.id), 'כל פרויקטי היזם')).parentElement;
   const o = opt();
   const live = data.projects.filter(p => p.status !== 'closed');
   if (o.pid && !data.projects.some(p => p.id === o.pid)) o.pid = '';
@@ -27,6 +32,7 @@ export async function viewCashflow() {
     <div id="cf"></div></div>`);
   $('#pid', el).onchange = e => { store('subcon-cf', { ...opt(), pid: e.target.value }); viewCashflow().then(v => el.replaceWith(v)); };
   $('#cf', el).appendChild(cashflowBlock(data, o.pid ? [o.pid] : live.map(p => p.id), o.pid ? data.projects.find(p => p.id === o.pid).name : 'כל הפרויקטים'));
+  if (devs.length && !o.pid) { el.appendChild(h(`<h2 style="margin:24px 0 0">פרויקטי יזם (${devs.length})</h2>`)); el.appendChild(devCashBlock(all, devs.map(p => p.id), 'פרויקטי יזם')); }
   return el;
 }
 
@@ -97,7 +103,7 @@ function cashflowBlock(data, ids, title) {
 const row = (k, label, view) => `<tr><td class="stk">${label}</td>${view.map(m => m.rows[k] ? `<td class="n click" data-cell="${m.m}|${k}">${m0(m.rows[k])}</td>` : '<td></td>').join('')}</tr>`;
 
 // גרף: עמודות נטו לחודש וקו יתרה מצטברת, וקו מינימום
-function chart(view, min) {
+export function chart(view, min) {
   const W = 760, H = 190, pad = 34, bw = (W - pad * 2) / view.length;
   const vals = view.flatMap(m => [m.net, m.cum, 0, min]);
   const hi = Math.max(...vals), lo = Math.min(...vals);

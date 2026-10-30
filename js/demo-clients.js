@@ -1,11 +1,12 @@
-// לקוחות דמו לטעינה במערכת החיה: קבלן גבס (4 פרויקטים), קבלן צבע (3) וקבלן ריצוף (5).
+// לקוחות דמו לטעינה במערכת החיה: קבלן גבס (4 פרויקטים), קבלן צבע (3), קבלן ריצוף (5) ויזם (פרויקט מגורים אחד).
 // כל השמות, החברות והמספרים מומצאים. כל לקוח מסומן is_demo ונמחק בלחיצה אחת.
 import { computeBills } from './bills.js';
 import { demoData } from './demo.js';
+import { devDemo } from './demo-dev.js';
 
 // סדר הטבלאות לטעינה (הורה לפני ילד)
-export const DEMO_TABLES = ['tenants', 'main_contractors', 'projects', 'variations', 'boq_items', 'cost_lines', 'workers', 'purchase_orders', 'po_lines', 'expenses',
-  'work_days', 'work_entries', 'work_qty', 'bills', 'bill_lines', 'bill_fines', 'bill_payments', 'vendors', 'documents', 'guarantees', 'contacts'];
+export const DEMO_TABLES = ['tenants', 'main_contractors', 'projects', 'variations', 'boq_items', 'cost_lines', 'workers', 'vendors', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'purchase_orders', 'po_lines', 'expenses',
+  'work_days', 'work_entries', 'work_qty', 'bills', 'bill_lines', 'bill_fines', 'bill_payments', 'documents', 'guarantees', 'contacts', 'change_log', 'alert_state'];
 
 const SETTINGS = { employer_factor: 1.3, crit_pct: 15, vat_pct: 18, overhead_pct: 0, work_days_month: 22, day_hours: 9, quota_warn_pct: 80, quota_gap_pct: 10, cash_asof: '2026-10', supplier_terms_days: 60 };
 
@@ -66,6 +67,9 @@ const OCT = workdays('2026-10-01', '2026-10-22');
 function gypsum(T, uuid) {
   const G = demoData(uuid);
   delete G.members_demo; delete G.memberships; delete G.change_log;
+  // רק לקוח הגבס (הדמו כולל גם לקוח יזם, שנטען בנפרד)
+  const gt = G.tenants[0].id;
+  for (const k of Object.keys(G)) G[k] = G[k].filter(r => (k === 'tenants' ? r.id : r.tenant_id) === gt);
   for (const k of Object.keys(G)) T[k] = (T[k] || []).concat(G[k]);
   const t = G.tenants[0].id;
   const B = builder(T, uuid, t);
@@ -334,7 +338,7 @@ function tiling(T, uuid) {
 // כל שלושת הלקוחות, מוכנים לטעינה
 export function demoClients(uuid) {
   const T = Object.fromEntries(DEMO_TABLES.map(k => [k, []]));
-  gypsum(T, uuid); paint(T, uuid); tiling(T, uuid);
+  gypsum(T, uuid); paint(T, uuid); tiling(T, uuid); devDemo(T, uuid);
   for (const k of Object.keys(T)) if (!DEMO_TABLES.includes(k)) delete T[k];
   return T;
 }

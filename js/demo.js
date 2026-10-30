@@ -1,4 +1,5 @@
 import { computeBills } from './bills.js';
+import { devDemo } from './demo-dev.js';
 // נתוני דמו: קבלן גבס ותקרות עם 3 פרויקטים בשלבים שונים. כל השמות והמספרים מומצאים.
 export function demoData(uuid) {
   const T = { tenants: [], memberships: [], main_contractors: [], projects: [], variations: [], boq_items: [], cost_lines: [], expenses: [], change_log: [], members_demo: [],
@@ -157,5 +158,6 @@ export function demoData(uuid) {
     ['משה (דמו)', C, 'מנהל לקוחות', '03-0000002', null], ['סלים (דמו)', K, 'ראש צוות', '050-0000003', null], ['יוסי (דמו)', 'ש.ד. בנייה (דמו)', 'מנהל פרויקט', '052-0000005', 'pm1@example.com'],
     ['דנה (דמו)', 'ש.ד. בנייה (דמו)', 'מפקחת', '052-0000006', null], ['עמית (דמו)', 'א.מ. הנדסה (דמו)', 'מהנדס ביצוע', '054-0000007', 'pm2@example.com'], ['שירן (דמו)', 'י.ח. ביצוע (דמו)', 'הנהלת חשבונות', '03-0000008', 'acc3@example.com']])
     T.contacts.push({ id: uuid(), tenant_id: t, name, company, role, phone, phone2: null, email, vendor_id: null, main_contractor_id: null, notes: null });
+  devDemo(T, uuid); // לקוח שני: יזם
   return T;
 }

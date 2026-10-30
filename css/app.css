@@ -289,3 +289,28 @@ tr.sec.pend td{background:#fff4e0;color:#8a5a00}
 :root[data-theme=dark] tr.sec.pend td{background:#3a2c12;color:#ffcf7a}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]) tr.sec.pend td{background:#3a2c12;color:#ffcf7a}}
 .sumt.sum3{margin-bottom:10px}.sumt.sum3 th{background:none;position:static;padding:4px;font-weight:600}
+/* חבילה 13: פס שלבים (הוראת שינוי / חשבון קבלן) */
+.stepper{display:flex;gap:4px;margin:0 0 12px;padding:0;list-style:none;flex-wrap:wrap}
+.stepper li{flex:1 1 110px;display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:8px;background:var(--th);color:var(--mut);font-size:13px}
+.stepper li span{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--line);color:var(--ink);font-size:11px;font-weight:700;flex:none}
+.stepper li.ok{background:var(--g);color:var(--gi)}.stepper li.ok span{background:var(--gi);color:#fff}
+.stepper li.cur{background:#e4ebff;color:#2f5bea;font-weight:700}.stepper li.cur span{background:#2f5bea;color:#fff}
+.stepper li.warn{outline:2px solid #c62828}
+.sumt.sig td{padding:14px 6px;border:0}
+@media (max-width:760px){.stepper li{flex:1 1 45%}}
+/* חבילה 14: התרעה עם החלטה, מצב וכפתורי שליחה */
+.actx{align-items:flex-start}
+.actx .atxt{flex:1 1 auto;min-width:0;text-decoration:none;color:inherit}
+.actx .dec{color:var(--ink)!important;opacity:.8;margin-top:2px}
+.actx .aside{display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex:none}
+.actx .abtn{display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.actx .abtn .btn{padding:4px 8px;min-height:30px}
+.act.dim{opacity:.55}
+.dgv{max-height:50vh;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fff;color:#13284b}
+@media (max-width:760px){.actx{flex-wrap:wrap}.actx .aside{flex-direction:row;width:100%;justify-content:space-between;padding-inline-start:18px}}
+/* חבילה 15: דוחות יזם */
+span.warn,.small.warn{color:#b26a00}
+tr.grp td{background:var(--sec);color:var(--secink);font-weight:600}
+.tabs .tsep{align-self:center;color:var(--mut);padding:0 6px}
+.repnote{margin:-6px 0 12px}
+@media print{.repnote{margin:0 0 6px}tr.al-r td,tr.al-y td{-webkit-print-color-adjust:exact;print-color-adjust:exact}}

@@ -1,10 +1,10 @@
 // שלב 7: מסמכים עם תוקף, ערבויות וחשבון סופי. פונקציות טהורות.
 import { n } from './calc.js';
 
-export const VENDOR_KINDS = { supplier: 'ספק חומרים', contractor: 'קבלן / קבלן משנה', service: 'נותן שירות' };
+export const VENDOR_KINDS = { supplier: 'ספק חומרים', contractor: 'קבלן / קבלן משנה', service: 'נותן שירות', consultant: 'יועץ / מתכנן' };
 export const DOC_TYPES = { insurance: 'ביטוח', license: 'רישיון קבלן', books: 'אישור ניהול ספרים', tax: 'אישור ניכוי מס במקור', safety: 'בטיחות / הדרכה', other: 'אחר' };
 // מסמכים שחובה לפי סוג (מסמך שפג תוקפו נחשב חסר)
-export const REQUIRED = { supplier: ['books', 'tax'], contractor: ['insurance', 'license', 'books', 'tax'], service: ['books', 'tax'] };
+export const REQUIRED = { supplier: ['books', 'tax'], contractor: ['insurance', 'license', 'books', 'tax'], service: ['books', 'tax'], consultant: ['insurance', 'books', 'tax'] };
 export const OWN_REQUIRED = ['insurance', 'license', 'books', 'tax'];
 export const GUAR_KINDS = { performance: 'ביצוע', advance: 'מקדמה', warranty: 'בדק / טיב', tender: 'מכרז', other: 'אחר' };
 export const SOON_DAYS = 30;

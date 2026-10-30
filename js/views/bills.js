@@ -306,6 +306,7 @@ async function exportBill(P, r, items) {
 // ===== גבייה לכל הפרויקטים =====
 export async function viewCollection() {
   const data = await loadTenantData();
+  data.projects = data.projects.filter(p => p.project_type !== 'dev'); // פרויקטי יזם: בחבילות 14-15
   const today = todayStr();
   const all = [];
   for (const p of data.projects) {

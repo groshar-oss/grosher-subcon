@@ -11,25 +11,26 @@ const BILLING = { measure: 'מדידה', lump: 'פאושלי', percent: 'אחו�
 const UNITS = ['מ"ר', 'מ"א', "יח'", "קומפ'", 'מ"ק', 'טון', 'ק"ג', 'יום', 'שעה', 'ליטר'];
 
 // ===== כתב כמויות =====
-export function tabBoq(P, variationId = null) {
+export function tabBoq(P, variationId = null, { dev = false } = {}) {
   const items = P.pd.items.filter(i => (i.variation_id || null) === variationId);
+  const word = dev ? 'תקציב' : 'כתב כמויות';
   const total = items.reduce((s, i) => s + itemSale(i), 0);
   const el = h(`<div>
-    ${can.edit() ? `<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ סעיף</button>${variationId ? '' : '<button class="btn ghost" id="imp">קליטה מאקסל</button><input type="file" id="file" accept=".xlsx,.xls,.csv" hidden>'}<button class="btn ghost" id="exp">ייצוא לאקסל</button></div>` : ''}
-    <div class="tw"><table><thead><tr><th>קוד</th><th>תיאור</th><th>יח'</th><th class="n">כמות</th><th class="n">מחיר יח'</th><th class="n">סה"כ</th><th class="hide-m">חיוב</th>${can.edit() ? '<th></th>' : ''}</tr></thead><tbody id="tb"></tbody></table></div></div>`);
+    ${can.edit() ? `<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ סעיף</button>${variationId ? '' : `<button class="btn ghost" id="imp">${dev ? 'קליטת תקציב מאקסל' : 'קליטה מאקסל'}</button>`}${variationId ? '' : '<input type="file" id="file" accept=".xlsx,.xls,.csv" hidden>'}<button class="btn ghost" id="exp">ייצוא לאקסל</button></div>` : ''}
+    <div class="tw"><table><thead><tr><th>קוד</th><th>תיאור</th><th>יח'</th><th class="n">כמות</th><th class="n">${dev ? 'מחיר תקציב' : "מחיר יח'"}</th><th class="n">סה"כ</th><th class="hide-m">${dev ? '' : 'חיוב'}</th>${can.edit() ? '<th></th>' : ''}</tr></thead><tbody id="tb"></tbody></table></div></div>`);
   const tb = $('#tb', el);
   const cols = can.edit() ? 8 : 7;
-  if (!items.length) tb.innerHTML = `<tr><td colspan="${cols}" class="empty">אין סעיפים. ${variationId ? '' : 'אפשר להוסיף ידנית או לקלוט קובץ אקסל של כתב הכמויות.'}</td></tr>`;
+  if (!items.length) tb.innerHTML = `<tr><td colspan="${cols}" class="empty">אין סעיפים. ${variationId ? '' : `אפשר להוסיף ידנית או לקלוט קובץ אקסל של ה${word}${dev ? ' (למשל מתוכנת התמחור)' : ''}.`}</td></tr>`;
   for (const [ch, rs] of groupBy(items, i => i.chapter || 'ללא פרק')) {
     if (!variationId) tb.insertAdjacentHTML('beforeend', `<tr class="sec"><td colspan="${cols}">${esc(ch)} <span class="mut small">· ${money(rs.reduce((s, i) => s + itemSale(i), 0))}</span></td></tr>`);
     for (const i of rs) {
       const miss = !n(i.qty) || !n(i.unit_price);
       tb.insertAdjacentHTML('beforeend', `<tr${miss ? ' class="al-r"' : ''}><td>${esc(i.code || '')}</td><td class="wrap">${esc(i.description)}${miss ? ' <span class="chip red">חסר מחיר או כמות</span>' : ''}</td><td>${esc(i.unit || '')}</td>
-        <td class="n">${num(i.qty)}</td><td class="n">${money(i.unit_price, { unit: true })}</td><td class="n">${money(itemSale(i))}</td><td class="hide-m">${BILLING[i.billing_method] || ''}</td>
+        <td class="n">${num(i.qty)}</td><td class="n">${money(i.unit_price, { unit: true })}</td><td class="n">${money(itemSale(i))}</td><td class="hide-m">${dev ? '' : BILLING[i.billing_method] || ''}</td>
         ${can.edit() ? `<td><button class="btn small ghost" data-ed="${i.id}">עריכה</button> <button class="btn small ghost" data-del="${i.id}" aria-label="מחיקה">✕</button></td>` : ''}</tr>`);
     }
   }
-  if (items.length) tb.insertAdjacentHTML('beforeend', `<tr class="tot"><td></td><td>סה"כ ${variationId ? 'הוראת שינוי' : 'כתב כמויות'} (${items.length} סעיפים)</td><td></td><td></td><td></td><td class="n">${money(total)}</td><td class="hide-m"></td>${can.edit() ? '<td></td>' : ''}</tr>`);
+  if (items.length) tb.insertAdjacentHTML('beforeend', `<tr class="tot"><td></td><td>סה"כ ${variationId ? 'הוראת שינוי' : word} (${items.length} סעיפים)</td><td></td><td></td><td></td><td class="n">${money(total)}</td><td class="hide-m"></td>${can.edit() ? '<td></td>' : ''}</tr>`);
 
   $('#add', el)?.addEventListener('click', () => itemDialog(P, null, variationId));
   $$('[data-ed]', el).forEach(b => b.onclick = () => itemDialog(P, items.find(i => i.id === b.dataset.ed), variationId));

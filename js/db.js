@@ -9,7 +9,7 @@ export const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-x
 
 const TABLES = ['tenants', 'memberships', 'main_contractors', 'projects', 'variations', 'boq_items', 'cost_lines', 'expenses', 'change_log', 'members_demo',
   'workers', 'work_days', 'work_entries', 'work_qty', 'purchase_orders', 'po_lines', 'bills', 'bill_lines', 'bill_fines', 'bill_payments',
-  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log'];
+  'vendors', 'documents', 'guarantees', 'contacts', 'files', 'alert_log', 'contracts', 'contract_lines', 'change_orders', 'co_lines', 'cbills', 'cbill_lines', 'dev_income', 'alert_state'];
 
 function match(row, q = {}) {
   for (const [k, v] of Object.entries(q.eq || {})) if (String(row[k] ?? '') !== String(v ?? '')) return false;
@@ -82,9 +82,14 @@ class LocalDB {
     const T = this.data.tables;
     T[table] = T[table].filter(r => !ids.includes(r.id));
     const deps = {
-      tenants: [['files', 'tenant_id'], ['alert_log', 'tenant_id'], ['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
+      tenants: [['files', 'tenant_id'], ['alert_log', 'tenant_id'], ['alert_state', 'tenant_id'], ['memberships', 'tenant_id'], ['main_contractors', 'tenant_id'], ['projects', 'tenant_id'], ['change_log', 'tenant_id'], ['workers', 'tenant_id'], ['vendors', 'tenant_id'], ['documents', 'tenant_id'], ['guarantees', 'tenant_id'], ['contacts', 'tenant_id']],
       projects: [['variations', 'project_id'], ['boq_items', 'project_id'], ['cost_lines', 'project_id'], ['expenses', 'project_id'], ['change_log', 'project_id'],
-        ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id']],
+        ['work_days', 'project_id'], ['work_entries', 'project_id'], ['work_qty', 'project_id'], ['purchase_orders', 'project_id'], ['bills', 'project_id'], ['documents', 'project_id'], ['guarantees', 'project_id'], ['contracts', 'project_id'], ['change_orders', 'project_id'], ['cbills', 'project_id'], ['dev_income', 'project_id'], ['alert_state', 'project_id']],
+      contracts: [['contract_lines', 'contract_id'], ['cbills', 'contract_id']],
+      change_orders: [['co_lines', 'co_id']],
+      co_lines: [['cbill_lines', 'co_line_id']],
+      contract_lines: [['cbill_lines', 'contract_line_id']],
+      cbills: [['cbill_lines', 'cbill_id']],
       vendors: [['documents', 'vendor_id']],
       bills: [['bill_lines', 'bill_id'], ['bill_fines', 'bill_id'], ['bill_payments', 'bill_id']],
       variations: [['boq_items', 'variation_id']],
@@ -94,8 +99,11 @@ class LocalDB {
     const nullify = (t, k) => T[t].forEach(r => { if (ids.includes(r[k])) r[k] = null; });
     for (const [t, k] of deps) this.cascade(t, T[t].filter(r => ids.includes(r[k])).map(r => r.id));
     if (table === 'main_contractors') { T.projects.forEach(p => { if (ids.includes(p.main_contractor_id)) p.main_contractor_id = null; }); this.cascade('documents', T.documents.filter(d => ids.includes(d.main_contractor_id)).map(d => d.id)); nullify('guarantees', 'main_contractor_id'); nullify('contacts', 'main_contractor_id'); }
-    if (table === 'vendors') nullify('contacts', 'vendor_id');
-    if (table === 'boq_items') ['expenses', 'work_entries', 'po_lines'].forEach(t => nullify(t, 'boq_item_id'));
+    if (table === 'vendors') { nullify('contacts', 'vendor_id'); nullify('contracts', 'vendor_id'); nullify('guarantees', 'vendor_id'); }
+    if (table === 'contracts') { nullify('expenses', 'contract_id'); nullify('guarantees', 'contract_id'); nullify('change_orders', 'contract_id'); }
+    if (table === 'contract_lines') nullify('co_lines', 'contract_line_id');
+    if (table === 'cbills') nullify('expenses', 'cbill_id');
+    if (table === 'boq_items') ['expenses', 'work_entries', 'po_lines', 'contract_lines', 'change_orders'].forEach(t => nullify(t, 'boq_item_id'));
     if (table === 'variations') ['expenses', 'work_entries', 'po_lines'].forEach(t => nullify(t, 'variation_id'));
     if (table === 'cost_lines') ['expenses', 'work_entries', 'po_lines'].forEach(t => nullify(t, 'cost_line_id'));
     if (table === 'purchase_orders') nullify('expenses', 'po_id');

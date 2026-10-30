@@ -16,7 +16,8 @@ import { viewVendors, viewContacts } from './views/vendors.js';
 import { flushOutbox } from './views/worklog.js';
 import { viewInbox } from './views/inbox.js';
 import { viewPayables } from './views/payables.js';
-import { helpBtn, guidePage } from './guide.js';
+import { helpBtn, guidePage, HELP } from './guide.js';
+const HELP_KEYS = Object.keys(HELP);
 
 export const S = { user: null, ctx: null, tenants: [], tenantId: null, role: null, mode: 'approved' };
 
@@ -56,7 +57,7 @@ export async function loadTenantData(tenantId = S.tenantId) {
     const m = S.ctx.memberships.find(x => x.tenant_id === tenantId);
     const vis = S.role === 'foreman' ? projects.filter(p => (m?.project_ids || []).includes(p.id)) : projects;
     const workers = await db.rpc('field_workers', { t: tenantId });
-    return { projects: vis, mcs: [], items: [], lines: [], vos: [], expenses: [], workers, entries, days, wqty, pos: [], poLines: [], bills: [], billLines: [], fines: [], payments: [], vendors: [], documents: [], guarantees: [], files: [] };
+    return { projects: vis, mcs: [], items: [], lines: [], vos: [], expenses: [], workers, entries, days, wqty, pos: [], poLines: [], bills: [], billLines: [], fines: [], payments: [], vendors: [], documents: [], guarantees: [], files: [], contracts: [], cLines: [], cos: [], coLines: [], cbills: [], cbLines: [], income: [], alertStates: [] };
   }
   const [items, lines, vos, expenses, workers, pos, poLines, bills, billLines, fines, payments] = await Promise.all([
     db.select('boq_items', { ...q, order: ['sort', 'code'] }),
@@ -68,9 +69,12 @@ export async function loadTenantData(tenantId = S.tenantId) {
     db.select('po_lines', { ...q, order: 'sort' }),
     db.select('bills', { ...q, order: 'number' }), db.select('bill_lines', q), db.select('bill_fines', q), db.select('bill_payments', { ...q, order: 'pay_date' })
   ]);
-  const [vendors, documents, guarantees, files] = await Promise.all([db.select('vendors', { ...q, order: 'name' }), db.select('documents', { ...q, order: 'expiry' }), db.select('guarantees', { ...q, order: 'expiry' }),
-    can.expense() ? db.select('files', { ...q, order: 'created_at desc' }) : []]);
-  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files };
+  const [vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines] = await Promise.all([db.select('vendors', { ...q, order: 'name' }), db.select('documents', { ...q, order: 'expiry' }), db.select('guarantees', { ...q, order: 'expiry' }),
+    can.expense() ? db.select('files', { ...q, order: 'created_at desc' }) : [],
+    db.select('contracts', { ...q, order: 'created_at' }), db.select('contract_lines', { ...q, order: 'sort' }),
+    db.select('change_orders', { ...q, order: 'created_at' }), db.select('co_lines', { ...q, order: 'sort' }), db.select('cbills', { ...q, order: 'number' }), db.select('cbill_lines', q)]);
+  const [income, alertStates] = await Promise.all([db.select('dev_income', { ...q, order: 'due_date' }), db.select('alert_state', q)]);
+  return { projects, mcs, items, lines, vos, expenses, workers, entries, days, wqty, pos, poLines, bills, billLines, fines, payments, vendors, documents, guarantees, files, contracts, cLines, cos, coLines, cbills, cbLines, income, alertStates };
 }
 
 export async function logChange(e) {
@@ -95,15 +99,17 @@ const NAV = () => [
   ['#/contacts', '☏', 'ספר טלפונים', !!S.tenantId]
 ].filter(x => x[3]);
 const NAV_ADMIN = () => [
-  ['#/clients', '◎', 'לקוחות (קבלני משנה)', can.admin()],
+  ['#/clients', '◎', 'לקוחות', can.admin()],
   ['#/client/' + S.tenantId, '⚙', 'הגדרות לקוח ומשתמשים', S.tenantId && can.edit()],
   ['#/guide', '?', 'איך עובדים', can.prices()],
   ['#/settings', '☼', 'תצוגה ומצב', true]
 ].filter(x => x[3]);
 
 // לשוניות הפרויקט (בתפריט הצד במחשב, ובפס למעלה בטלפון)
+// פרויקט יזם: תקציב, התקשרויות, הוצאות ותשלומים
+const PROJECT_TABS_DEV = [['control', 'בקרה תקציבית', '◔'], ['boq', 'תקציב', '☰'], ['contracts', 'התקשרויות', '✍'], ['cos', 'הוראות שינוי', '±'], ['cbills', 'חשבונות קבלנים', '₪'], ['cashflow', 'הכנסות ותזרים', '≋'], ['expenses', 'הוצאות ותשלומים', '−'], ['docs', 'מסמכים', '⇪'], ['log', 'יומן שינויים', '↺'], ['settings', 'הגדרות פרויקט', '⚙']];
 const PROJECT_TABS = [['control', 'בקרה ורווחיות', '◔'], ['boq', 'כתב כמויות', '☰'], ['costing', 'תמחיר', '∑'], ['quota', 'מכסות', '◫'], ['vo', 'הוראות שינוי', '±'], ['worklog', 'יומן עבודה', '✎'], ['purchase', 'רכש', '⛟'], ['expenses', 'הוצאות', '−'], ['bills', 'חשבונות', '₪'], ['cashflow', 'תזרים', '≋'], ['docs', 'מסמכים', '⇪'], ['log', 'יומן שינויים', '↺'], ['settings', 'הגדרות פרויקט', '⚙']];
-export const projectTabs = () => !can.prices() ? [['control', 'יומן עבודה', '✎']] : PROJECT_TABS.filter(([k]) => (!['costing', 'quota'].includes(k) || can.costing()) && (k !== 'log' || can.edit()) && (k !== 'docs' || can.expense()) && (k !== 'settings' || can.edit()));
+export const projectTabs = (pr = null) => !can.prices() ? [['control', 'יומן עבודה', '✎']] : (pr?.project_type === 'dev' ? PROJECT_TABS_DEV : PROJECT_TABS).filter(([k]) => (!['costing', 'quota'].includes(k) || can.costing()) && (k !== 'log' || can.edit()) && (k !== 'docs' || can.expense()) && (k !== 'settings' || can.edit()));
 // הפרויקט הפתוח נשמר לכל לקוח, גם אחרי רענון
 const PKEY = () => 'subcon-proj-' + (S.tenantId || '');
 export const openProjectId = () => store(PKEY());
@@ -120,11 +126,11 @@ function projectSection(hash, content) {
   const pr = list.find(p => p.id === pid); if (!pr) return '';
   const [, route, a, b] = hash.split('/');
   const here = route === 'project' && a === pid;
-  const cur = !here ? '' : !b ? 'control' : b === 'day' ? 'worklog' : b === 'bill' ? 'bills' : b;
+  const cur = !here ? '' : !b ? 'control' : b === 'day' ? 'worklog' : b === 'bill' ? 'bills' : ['cbill', 'cbillpdf'].includes(b) ? 'cbills' : b;
   const qo = +(content?.dataset?.qover || 0), qw = +(content?.dataset?.qwarn || 0);
   return `<div class="nsec">פרויקט</div>
     <div class="pbox"><select id="psel" aria-label="החלפת פרויקט">${list.map(p => `<option value="${p.id}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select><button type="button" id="pclose" title="סגירת הפרויקט" aria-label="סגירת הפרויקט">✕</button></div>
-    <nav class="nav pnav">${projectTabs().map(([k, l, ico]) => `<a href="#/project/${pid}/${k}" class="${here && cur === k ? 'on' : ''}"><span class="ico">${ico}</span>${l}${k === 'quota' && here && qo + qw ? ` <span class="badge ${qo ? 'red' : 'amber'}">${qo + qw}</span>` : ''}</a>`).join('')}</nav>`;
+    <nav class="nav pnav">${projectTabs(pr).map(([k, l, ico]) => `<a href="#/project/${pid}/${k}" class="${here && cur === k ? 'on' : ''}"><span class="ico">${ico}</span>${l}${k === 'quota' && here && qo + qw ? ` <span class="badge ${qo ? 'red' : 'amber'}">${qo + qw}</span>` : ''}</a>`).join('')}</nav>`;
 }
 
 function shell(content, title) {
@@ -136,7 +142,7 @@ function shell(content, title) {
   const root = h(`<div class="app">
     <div class="mobile-top"><button id="mnav" aria-label="תפריט">☰</button><b>${esc(title || CONFIG.appName)}</b><span></span></div>
     <aside class="side" id="side">
-      <div class="brand"><img src="icons/logo-neg.png" alt=""><div><b>גרושר פרויקטים</b><span>בקרת עלויות לקבלני משנה</span></div></div>
+      <div class="brand"><img src="icons/logo-neg.png" alt=""><div><b>גרושר פרויקטים</b><span>בקרת עלויות ותזרים</span></div></div>
       ${tenantBox}
       <div class="nsec">כללי</div>
       <nav class="nav">${navLinks(NAV(), hash)}</nav>
@@ -159,7 +165,7 @@ function wireShell() {
   $('#mnav')?.addEventListener('click', () => $('#side').classList.toggle('open'));
   $$('#side a').forEach(a => a.addEventListener('click', () => $('#side').classList.remove('open')));
   $('#tsel')?.addEventListener('change', e => { S.tenantId = e.target.value; store('subcon-tenant', S.tenantId); refreshRole(); location.hash = '#/'; render(); });
-  $('#psel')?.addEventListener('change', e => { const [, route, a, b] = (location.hash || '#/').split('/'); const tab = route === 'project' && b && !['day', 'bill'].includes(b) ? b : 'control';
+  $('#psel')?.addEventListener('change', e => { const [, route, a, b] = (location.hash || '#/').split('/'); const tab = route === 'project' && b && !['day', 'bill', 'cbill', 'cbillpdf'].includes(b) ? b : 'control';
     setOpenProject(e.target.value); location.hash = `#/project/${e.target.value}/${tab}`; });
   $('#pclose')?.addEventListener('click', () => { const here = (location.hash || '').startsWith('#/project/'); setOpenProject(null); if (here) location.hash = '#/projects'; else render(); });
   $('#logout')?.addEventListener('click', async () => { await db.signOut(); location.reload(); });
@@ -181,7 +187,7 @@ export async function render() {
   const root = $('#root');
   if (!S.user) return renderLogin();
   if (!S.tenants.length && !can.admin()) {
-    root.replaceChildren(h(`<div class="login"><div class="box"><h2>עדיין אין לך גישה ללקוח</h2><p class="mut">המשתמש ${esc(S.user.email)} רשום, אבל עוד לא שויך לאף קבלן משנה. מנהלת השירות צריכה להוסיף אותו בהגדרות הלקוח.</p>${isCloud() ? '<button class="btn" id="lo">יציאה</button>' : ''}</div></div>`));
+    root.replaceChildren(h(`<div class="login"><div class="box"><h2>עדיין אין לך גישה ללקוח</h2><p class="mut">המשתמש ${esc(S.user.email)} רשום, אבל עוד לא שויך לאף לקוח. מנהל השירות צריכה להוסיף אותו בהגדרות הלקוח.</p>${isCloud() ? '<button class="btn" id="lo">יציאה</button>' : ''}</div></div>`));
     $('#lo')?.addEventListener('click', async () => { await db.signOut(); location.reload(); });
     return;
   }
@@ -191,7 +197,7 @@ export async function render() {
   try {
     if (!route) { view = await viewHome(); title = 'מה דורש טיפול'; }
     else if (route === 'projects') { view = await viewProjects(); title = 'פרויקטים'; }
-    else if (route === 'project') { view = await viewProject(a, b || 'control', c); title = b === 'day' ? 'יומן עבודה' : b === 'bill' ? 'חשבון חלקי' : 'פרויקט'; }
+    else if (route === 'project') { view = await viewProject(a, b || 'control', c); title = b === 'day' ? 'יומן עבודה' : b === 'bill' ? 'חשבון חלקי' : b === 'cbill' ? 'חשבון קבלן' : b === 'cbillpdf' ? 'בדיקת חשבון והמלצה לתשלום' : 'פרויקט'; }
     else if (route === 'inbox') { view = await viewInbox(); title = 'תיבת מסמכים'; }
     else if (route === 'payables') { view = await viewPayables(a || 'open'); title = 'תשלומים לספקים'; }
     else if (route === 'guide') { view = h(guidePage()); title = 'איך עובדים'; }
@@ -212,7 +218,8 @@ export async function render() {
   try { if (openProjectId()) { const l = await projList(); if (!l.some(p => p.id === openProjectId())) setOpenProject(null); } } catch { /* */ }
   if (seq !== renderSeq) return;
   // כפתור "?" ליד כותרת המסך
-  const hk = !route ? 'home' : route === 'project' ? (b && !['day', 'bill', 'field'].includes(b) ? 'p-' + b : !b ? 'p-control' : '') : route;
+  let hk = !route ? 'home' : route === 'project' ? (b && !['day', 'bill', 'field', 'cbillpdf'].includes(b) ? 'p-' + (b === 'cbill' ? 'cbills' : b) : !b ? 'p-control' : '') : route;
+  if (route === 'project' && S.projList?.list?.find(x => x.id === a)?.project_type === 'dev' && hk && HELP_KEYS.includes('d-' + hk.slice(2))) hk = 'd-' + hk.slice(2);
   const h1 = view.querySelector?.('.top h1');
   if (h1 && hk && !h1.querySelector('.helpb') && can.prices()) h1.insertAdjacentHTML('beforeend', ' ' + helpBtn(hk));
   root.replaceChildren(shell(view, title));
@@ -224,7 +231,7 @@ export async function render() {
 function renderLogin() {
   const root = $('#root');
   const el = h(`<div class="login"><div class="box">
-    <div class="logo"><img src="icons/logo-neg.png" alt=""><div><b>גרושר פרויקטים</b><div class="mut small">בקרת עלויות לקבלני משנה</div></div></div>
+    <div class="logo"><img src="icons/logo-neg.png" alt=""><div><b>גרושר פרויקטים</b><div class="mut small">בקרת עלויות ותזרים</div></div></div>
     <form id="lf">${field('אימייל', 'email', '', { type: 'email', req: true, attrs: 'autocomplete="username" dir="ltr"' })}
     ${field('סיסמה', 'password', '', { type: 'password', req: true, attrs: 'autocomplete="current-password" dir="ltr"' })}
     <div class="err" id="lerr" hidden></div>

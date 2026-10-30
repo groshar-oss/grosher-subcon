@@ -13,7 +13,7 @@ const tenantForm = (t = {}) => `<div class="grid g2">
 export async function viewClients() {
   if (!can.admin()) return h('<div class="empty">אין הרשאה</div>');
   const projects = await db.select('projects', {});
-  const el = h(`<div><div class="top"><div><h1>לקוחות (קבלני משנה)</h1><div class="sub">כל לקוח הוא חברה נפרדת. הנתונים של לקוח אחד לא נראים ללקוח אחר.</div></div>
+  const el = h(`<div><div class="top"><div><h1>לקוחות</h1><div class="sub">כל לקוח הוא חברה נפרדת. הנתונים של לקוח אחד לא נראים ללקוח אחר.</div></div>
     <div class="actions"><button class="btn" id="add">+ לקוח חדש</button></div></div>
     <div class="tw"><table><thead><tr><th>שם</th><th>ח"פ</th><th>מקצועות</th><th>איש קשר</th><th class="n">פרויקטים</th><th></th></tr></thead><tbody>
     ${S.tenants.map(t => `<tr><td><b>${esc(t.name)}</b></td><td>${esc(t.company_no || '')}</td><td>${esc(t.trades || '')}</td><td>${esc(t.contact_name || '')} ${esc(t.phone || '')}</td>
@@ -57,6 +57,8 @@ export async function viewClient(id) {
         <label class="chk"><input type="checkbox" name="alert_email_on" ${st.alert_email_on ? 'checked' : ''}> לשלוח במייל כל התראה אדומה חדשה (חריגה, איחור תשלום, מסמך שפג)</label>
         <input name="alert_emails" dir="ltr" value="${esc(st.alert_emails || '')}" placeholder="name@example.com, other@example.com">
         <small>נמענים, מופרדים בפסיק. המייל נשלח מה-Gmail של מי שמחובר ל-Google במערכת, כשהוא פותח את המסך הראשי. כל התראה נשלחת פעם אחת.</small></div>
+      <div class="grid g2" style="margin-top:6px"><label class="fld"><span>סיכום התרעות ללקוח</span><select name="digest">${[['off', 'כבוי'], ['daily', 'יומי'], ['weekly', 'שבועי']].map(([k, l]) => `<option value="${k}" ${(st.digest || 'off') === k ? 'selected' : ''}>${l}</option>`).join('')}</select><small>כל הנושאים הפתוחים, עם החלטה נדרשת ומצב. נשלח לנמענים שלמעלה.</small></label>
+        <label class="chk" style="align-self:center"><input type="checkbox" name="alert_links" ${st.alert_links ? 'checked' : ''}> קישור למערכת במיילים (רק לנמענים פנימיים. ללקוח להשאיר כבוי)</label></div>
       <p class="small mut">צבעי חריגה: עד 3% צהוב, 3%-5% כתום, 5%-10% אדום, מעל 10% אדום שמתכהה. מעל הסף הקריטי השורה מסומנת "קריטי".</p>
       <button class="btn">שמירת הגדרות</button></form></div>
   </div>
@@ -82,7 +84,7 @@ export async function viewClient(id) {
     e.preventDefault(); const v = Object.fromEntries(new FormData(e.target));
     const ns = { ...st, employer_factor: n(v.employer_factor) || 1.3, crit_pct: n(v.crit_pct) || 15, vat_pct: n(v.vat_pct), overhead_pct: n(v.overhead_pct),
       work_days_month: n(v.work_days_month) || 22, day_hours: n(v.day_hours) || 9, quota_warn_pct: n(v.quota_warn_pct) || 80, quota_gap_pct: n(v.quota_gap_pct) || 10,
-      cash_opening: n(v.cash_opening), cash_asof: v.cash_asof || '', cash_min: n(v.cash_min), alert_email_on: !!v.alert_email_on, alert_emails: String(v.alert_emails || '').trim(), supplier_terms_days: v.supplier_terms_days === '' ? 60 : Math.round(n(v.supplier_terms_days)) };
+      cash_opening: n(v.cash_opening), cash_asof: v.cash_asof || '', cash_min: n(v.cash_min), alert_email_on: !!v.alert_email_on, alert_emails: String(v.alert_emails || '').trim(), digest: v.digest || 'off', alert_links: !!v.alert_links, supplier_terms_days: v.supplier_terms_days === '' ? 60 : Math.round(n(v.supplier_terms_days)) };
     await db.update('tenants', id, { settings: ns });
     for (const k of Object.keys(ns)) if (String(ns[k]) !== String(st[k])) await logChange({ entity: 'tenant', entity_id: id, label: 'הגדרות לקוח', field: k, old_value: st[k], new_value: ns[k] });
     await reloadTenants(); toast('ההגדרות נשמרו'); render();

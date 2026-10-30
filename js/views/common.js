@@ -13,7 +13,8 @@ export function projData(data, projectId) {
   return { project: data.projects.find(p => p.id === projectId), items: f(data.items), lines: f(data.lines), variations: f(data.vos), expenses: f(data.expenses),
     entries: f(data.entries), days: f(data.days), wqty: f(data.wqty), pos: f(data.pos), poLines: f(data.poLines),
     bills: f(data.bills), billLines: f(data.billLines), fines: f(data.fines), payments: f(data.payments),
-    workers: data.workers || [], allEntries: data.entries || [] };
+    workers: data.workers || [], allEntries: data.entries || [], contracts: f(data.contracts), cLines: f(data.cLines),
+    cos: f(data.cos), coLines: f(data.coLines), cbills: f(data.cbills), cbLines: f(data.cbLines), income: f(data.income) };
 }
 
 // סיכום פרויקט: הוצאות + עלות עבודה מהיומן + התקשרויות רכש פתוחות, ומכסות

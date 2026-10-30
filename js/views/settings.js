@@ -55,14 +55,14 @@ function wireGoogle(el) {
   $('#gdis', el)?.addEventListener('click', () => { gDisconnect(); toast('נותק'); render(); });
 }
 
-// לקוחות דמו: שלושה קבלנים לדוגמה (גבס, צבע, ריצוף), למנהלת השירות בלבד
+// לקוחות דמו: שלושה קבלנים לדוגמה (גבס, צבע, ריצוף) ויזם אחד, למנהל השירות בלבד
 const TBL = { tenants: 'לקוחות', main_contractors: 'קבלנים ראשיים', projects: 'פרויקטים', variations: 'הוראות שינוי', boq_items: 'כתבי כמויות', cost_lines: 'תמחור', workers: 'עובדים',
   purchase_orders: 'הזמנות רכש', po_lines: 'הזמנות רכש', expenses: 'הוצאות', work_days: 'יומן עבודה', work_entries: 'יומן עבודה', work_qty: 'יומן עבודה', bills: 'חשבונות', bill_lines: 'חשבונות',
-  bill_fines: 'קנסות', bill_payments: 'תקבולים', vendors: 'ספקים', documents: 'מסמכים', guarantees: 'ערבויות', contacts: 'אנשי קשר' };
+  bill_fines: 'קנסות', bill_payments: 'תקבולים', vendors: 'ספקים', documents: 'מסמכים', guarantees: 'ערבויות', contacts: 'אנשי קשר', contracts: 'התקשרויות', contract_lines: 'התקשרויות', change_log: 'יומן שינויים' };
 function demoCard() {
   const n = S.tenants.filter(t => t.is_demo).length;
   return `<div class="card" id="democ"><h2>לקוחות דמו</h2>
-    <p class="small mut">שלושה קבלני משנה לדוגמה, כדי לראות את המערכת מלאה ולהציג אותה: קבלן גבס (4 פרויקטים), קבלן צבע (3) וקבלן ריצוף (5), בשלבים שונים מהצעת מחיר ועד חשבון סופי. כל השמות והמספרים מומצאים, וכל לקוח מסומן "(דמו)". הלקוחות האמיתיים לא מושפעים.</p>
+    <p class="small mut">ארבעה לקוחות לדוגמה, כדי לראות את המערכת מלאה ולהציג אותה: קבלן גבס (4 פרויקטים), קבלן צבע (3), קבלן ריצוף (5), ויזם עם פרויקט מגורים אחד (תקציב, בסיס נעול והתקשרויות). כל השמות והמספרים מומצאים, וכל לקוח דמו נמחק בלחיצה אחת בלי לגעת בלקוחות אמיתיים.</p>
     <p>מצב: <b>${n ? `${n} לקוחות דמו במערכת` : 'אין לקוחות דמו'}</b></p>
     <p class="small" id="dmsg" hidden></p>
     <div class="actions"><button class="btn" type="button" id="dload">${n ? 'טעינה מחדש' : 'טעינת לקוחות דמו'}</button>${n ? '<button class="btn ghost danger" type="button" id="ddel">מחיקת נתוני הדמו</button>' : ''}</div></div>`;
@@ -72,13 +72,13 @@ function wireDemo(el) {
   const busy = on => el.querySelectorAll('#dload, #ddel').forEach(b => b.disabled = on);
   $('#dload', el)?.addEventListener('click', async () => {
     const had = S.tenants.some(t => t.is_demo);
-    if (!(await modal({ title: 'טעינת לקוחות דמו', ok: 'טעינה', body: `<p>ייווצרו 3 לקוחות דמו עם 12 פרויקטים.${had ? ' <b>לקוחות הדמו הקיימים יימחקו קודם</b>, כולל שינויים שעשית בהם.' : ''}</p><p class="small mut">לקוחות אמיתיים לא נמחקים ולא משתנים. הטעינה לוקחת כחצי דקה.</p>` }))) return;
+    if (!(await modal({ title: 'טעינת לקוחות דמו', ok: 'טעינה', body: `<p>ייווצרו 4 לקוחות דמו עם 13 פרויקטים.${had ? ' <b>לקוחות הדמו הקיימים יימחקו קודם</b>, כולל שינויים שעשית בהם.' : ''}</p><p class="small mut">לקוחות אמיתיים לא נמחקים ולא משתנים. הטעינה לוקחת כחצי דקה.</p>` }))) return;
     busy(true);
     try {
       const T = await loadDemoClients(db, uuid, k => msg('טוען: ' + (TBL[k] || k) + '…'));
       await reloadTenants();
       if (!tenant()?.is_demo || !S.tenantId) { S.tenantId = T.tenants[0].id; store('subcon-tenant', S.tenantId); await reloadTenants(); }
-      toast('נטענו 3 לקוחות דמו. בוחרים ביניהם בתיבת "לקוח" בתפריט'); render();
+      toast('נטענו 4 לקוחות דמו. בוחרים ביניהם בתיבת "לקוח" בתפריט'); render();
     } catch (e) { msg(''); busy(false); toast('הטעינה נכשלה: ' + e.message + '. אפשר ללחוץ על מחיקה ולנסות שוב', 'bad'); await reloadTenants(); render(); }
   });
   $('#ddel', el)?.addEventListener('click', async () => {

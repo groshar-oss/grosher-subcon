@@ -14,6 +14,10 @@ import { tabBills, billView } from './bills.js';
 import { tabCashflow } from './cashflow.js';
 import { viewInbox } from './inbox.js';
 import { projectSteps, stepsCard } from '../guide.js';
+import { isDev, PROJECT_TYPES } from '../dev.js';
+import { devControl, devContracts } from './dev.js';
+import { devCos, devCbills, cbillView, cbillSheet } from './devflow.js';
+import { devCashTab } from './devcash.js';
 
 
 export async function viewProject(id, tab, extra) {
@@ -26,6 +30,7 @@ export async function viewProject(id, tab, extra) {
     if (tab === 'day') return dayView(P, extra);
     return fieldProject(P, await db.rpc('field_boq', { p: id }));
   }
+  if (isDev(project)) return devProject({ data, pd, project, mcs: data.mcs, id }, tab, extra);
   const P = { data, pd, project, mcs: data.mcs, summary: summarize(pd), id };
   if (tab === 'day') return can.log() ? dayView(P, extra) : h('<div class="card empty">אין הרשאה לרשום ביומן</div>');
   if (tab === 'bill') return billView(P, extra);
@@ -40,6 +45,21 @@ export async function viewProject(id, tab, extra) {
   const body = $('#tab', el);
   const fn = { control: tabControl, boq: tabBoq, costing: tabCosting, quota: tabQuota, vo: tabVo, worklog: tabWorkLog, purchase: tabPurchase, expenses: tabExpenses, bills: tabBills, cashflow: tabCashflow, docs: P => viewInbox(P.id, P), log: tabLog, settings: tabSettings }[tab] || tabControl;
   body.appendChild(await fn(P));
+  return el;
+}
+
+// ===== פרויקט יזם =====
+async function devProject(P, tab, extra) {
+  if (tab === 'cbillpdf') return cbillSheet(P, extra);
+  const tabs = projectTabs(P.project);
+  const p = P.project;
+  const el = h(`<div><div class="top"><div><h1>${esc(p.name)}</h1>
+    <div class="sub">${PROJECT_TYPES.dev}${p.owner_name ? ' · ' + esc(p.owner_name) : ''} · ${STATUS[p.status]}${p.address ? ' · ' + esc(p.address) : ''}</div></div>
+    <div class="actions"><a class="btn ghost small" href="#/projects">כל הפרויקטים</a></div></div>
+    <nav class="tabs ptabs">${tabs.map(([k, l]) => `<a href="#/project/${P.id}/${k}" class="${k === tab || (tab === 'cbill' && k === 'cbills') ? 'on' : ''}">${l}</a>`).join('')}</nav><div id="tab"></div></div>`);
+  if (tab === 'cbill') { $('#tab', el).appendChild(await cbillView(P, extra)); return el; }
+  const fn = { control: devControl, boq: P => tabBoq(P, null, { dev: true }), contracts: devContracts, cos: devCos, cbills: devCbills, cashflow: devCashTab, expenses: tabExpenses, docs: P => viewInbox(P.id, P), log: tabLog, settings: tabSettings }[tab] || devControl;
+  $('#tab', el).appendChild(await fn(P));
   return el;
 }
 

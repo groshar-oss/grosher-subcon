@@ -1,5 +1,6 @@
 // מסך בית: מה דורש טיפול, לכל הפרויקטים של הלקוח
-import { h, esc, money, pct, $, plainMoney, toast } from '../util.js';
+const n0 = v => Number(v) || 0;
+import { h, esc, money, pct, $, $$, plainMoney, toast, modal } from '../util.js';
 import { S, can, loadTenantData, modeSwitch, tenant, render, settings } from '../app.js';
 import { portfolio, VO_AT_RISK, VO_STATUS } from '../calc.js';
 import { projData, summarize, level, levelColor, levelBg, STATUS, CONTRACT, modeLine } from './common.js';
@@ -7,6 +8,11 @@ import { collection } from '../bills.js';
 import { cashflow, monthLabel } from '../cashflow.js';
 import { maybeSendAlerts, sendAlerts, recipients } from '../alerts.js';
 import { gEnabled, gReady, gConnect } from '../google.js';
+import { isDev, devSummary, devAlerts } from '../dev.js';
+import { filesFor } from '../files.js';
+import { devCashflow, devCashAlerts } from '../devcash.js';
+import { actionRow, stateMap, editAlert, sendOne, defaultDecision, digestList, digestText, digestHtml, maybeSendDigest, targetsFor, waLink, mailLink } from '../alertsui.js';
+import { actKey } from '../alerts.js';
 import { vendorStatus, docStatus, OWN_REQUIRED, DOC_TYPES, GUAR_KINDS, guaranteeState, daysLeft, finalBill } from '../docs.js';
 
 export async function viewHome() {
@@ -15,29 +21,49 @@ export async function viewHome() {
   const data = await loadTenantData();
   if (!can.prices()) return fieldHome(data);
 
-  const live = data.projects.filter(p => p.status !== 'closed');
+  const all = data.projects.filter(p => p.status !== 'closed');
+  const live = all.filter(p => !isDev(p)), devLive = all.filter(isDev);
   const mcName = id => data.mcs.find(m => m.id === id)?.name || '';
   const sums = live.map(p => ({ p, s: summarize(projData(data, p.id)) }));
+  const devSums = devLive.map(p => { const pd = projData(data, p.id); return { p, s: devSummary({ project: p, items: pd.items, contracts: pd.contracts, cLines: pd.cLines, expenses: pd.expenses, cos: pd.cos, coLines: pd.coLines, cbills: pd.cbills, cbLines: pd.cbLines, vatPct: settings().vat_pct }) }; });
   const T = portfolio(sums.map(x => x.s));
   const riskTotal = sums.reduce((a, x) => a + x.s.riskAmount, 0);
-  const actions = buildActions(data, sums);
+  const actions = buildActions(data, sums, devSums);
+  const states = stateMap(data.alertStates);
+  const isHandled = a => states.get(actKey(a))?.status === 'handled';
+  let open = actions.filter(a => !isHandled(a));
+  const onlyDev = !sums.length && devSums.length;
+  const DT = devSums.reduce((a, { s }) => ({ budget: a.budget + s.total.budget, forecast: a.forecast + s.total.forecast, committed: a.committed + s.total.committed + s.total.outside, paid: a.paid + s.total.paid, invoiced: a.invoiced + s.total.invoiced }), { budget: 0, forecast: 0, committed: 0, paid: 0, invoiced: 0 });
 
   const el = h(`<div>
-    <div class="top"><div><h1>מה דורש טיפול</h1><div class="sub">${esc(tenant()?.name || '')} · ${live.length} פרויקטים פעילים · סכומים לפני מע"מ</div></div>
+    <div class="top"><div><h1>מה דורש טיפול</h1><div class="sub">${esc(tenant()?.name || '')} · ${all.length} פרויקטים פעילים · סכומים לפני מע"מ</div></div>
       <div class="actions" id="modeBox"></div></div>
-    <div class="kpis">
+    ${onlyDev ? `<div class="kpis">
+      <div class="kpi"><div class="l">תקציב מאושר</div><div class="v">${money(DT.budget)}</div><div class="n">${devSums.length} פרויקטים</div></div>
+      <div class="kpi"><div class="l">צפי עלות לסיום</div><div class="v">${money(DT.forecast)}</div><div class="n">${pct(DT.budget ? (DT.forecast - DT.budget) / DT.budget * 100 : 0, { sign: true })} מול התקציב</div></div>
+      <div class="kpi"><div class="l">התקשרויות</div><div class="v">${money(DT.committed)}</div><div class="n">${pct(DT.budget ? DT.committed / DT.budget * 100 : 0, { d: 0 })} מהתקציב</div></div>
+      <div class="kpi"><div class="l">שולם עד היום</div><div class="v">${money(DT.paid)}</div><div class="n">חויב ${money(DT.invoiced)}</div></div></div>` : `<div class="kpis">
       <div class="kpi"><div class="l">היקף מכירה</div><div class="v">${money(T.sale)}</div><div class="n">חוזים ${money(T.contractSale)} · הוראות שינוי ${money(T.voSale)}</div></div>
       <div class="kpi"><div class="l">צפי עלות לסיום</div><div class="v">${money(T.forecast)}</div><div class="n">תמחיר ${money(T.planned)} · חריגה ${pct(T.overrun, { sign: true })}</div></div>
       <div class="kpi"><div class="l">רווח צפוי</div><div class="v ${T.profit >= 0 ? 'pos' : 'neg'}">${money(T.profit)}</div><div class="n">${pct(T.profitPct)} מהמכירה · תוכנן ${pct(T.plannedProfitPct)}</div></div>
       <div class="kpi"><div class="l">עלות בפועל עד היום</div><div class="v">${money(T.actual)}</div><div class="n">${pct(T.planned ? T.actual / T.planned * 100 : 0)} מהתמחיר</div></div>
       <div class="kpi"><div class="l">לגבייה מהקבלנים הראשיים</div><div class="v">${money(sums.reduce((a, x) => a + collection(x.s.billing.byBill).outstanding, 0))}</div><div class="n">${(() => { const o = sums.flatMap(x => collection(x.s.billing.byBill).overdue); return o.length ? `<span class="neg">${o.length} באיחור · ${money(o.reduce((a, r) => a + r.outstanding, 0))}</span>` : 'אין חשבונות באיחור'; })()}</div></div>
       <div class="kpi"><div class="l">הוראות שינוי שטרם אושרו</div><div class="v ${riskTotal ? 'neg' : ''}">${money(riskTotal)}</div><div class="n">${S.mode === 'all' ? 'כלולים בתצוגה' : 'לא כלולים בתצוגה'}</div></div>
-    </div>
-    <div class="cols"><div class="card"><h2>פרויקטים ${modeLine()}</h2><div id="plist"></div></div>
-    <div class="card"><h2>פעולות פתוחות <span class="chip ${actions.length ? 'red' : 'green'}">${actions.length}</span>${can.expense() ? '<button class="btn small ghost" id="mailnow" title="שליחת ההתראות האדומות החדשות במייל">שליחת התראות במייל</button>' : ''}</h2><div id="alist"></div></div></div></div>`);
-  $('#modeBox', el).appendChild(modeSwitch());
+    </div>`}
+    <div class="cols"><div class="card"><h2>פרויקטים ${onlyDev ? '' : modeLine()}</h2><div id="plist"></div></div>
+    <div class="card"><h2>פעולות פתוחות <span class="chip ${open.length ? 'red' : 'green'}" id="acount">${open.length}</span>${can.expense() ? '<button class="btn small ghost" id="mailnow" title="שליחת ההתראות האדומות החדשות במייל">שליחת התראות במייל</button><button class="btn small ghost" id="digest" title="סיכום כל הנושאים הפתוחים, לשליחה ללקוח">סיכום ללקוח</button>' : ''}</h2>
+      <div id="alist"></div><div class="small mut" id="handled"></div></div></div></div>`);
+  if (!onlyDev) $('#modeBox', el).appendChild(modeSwitch());
   const pl = $('#plist', el);
-  if (!sums.length) pl.innerHTML = `<div class="empty">אין פרויקטים פעילים. <a href="#/projects">הוספת פרויקט</a></div>`;
+  if (!sums.length && !devSums.length) pl.innerHTML = `<div class="empty">אין פרויקטים פעילים. <a href="#/projects">הוספת פרויקט</a></div>`;
+  for (const { p, s } of devSums) {
+    const t = s.total, l = level(t.dev);
+    pl.insertAdjacentHTML('beforeend', `<a class="proj" href="#/project/${p.id}/control" style="border-inline-start-color:${levelColor(l.cls)}">
+      <div class="hd"><span>${esc(p.name)}</span><span class="chip" style="background:${levelBg(l.cls)}">סטייה ${pct(t.dev, { sign: true })}</span></div>
+      <div class="meta">פרויקט יזם${p.owner_name ? ' · ' + esc(p.owner_name) : ''} · ${STATUS[p.status]}${s.baselineAt ? ' · בסיס נעול' : ' · בסיס לא ננעל'}</div>
+      <div class="pr"><div>תקציב<b>${money(t.budget)}</b></div><div>צפי לסיום<b>${money(t.forecast)}</b></div><div>התקשרויות<b>${money(t.committed + t.outside)}</b></div><div>שולם<b>${money(t.paid)}</b></div></div>
+      <div class="bar" title="שולם מתוך הצפי"><i style="width:${Math.min(100, t.forecast ? t.paid / t.forecast * 100 : 0)}%;background:${levelColor(l.cls)}"></i></div></a>`);
+  }
   for (const { p, s } of sums) {
     const t = s.total, l = level(t.overrun);
     pl.insertAdjacentHTML('beforeend', `<a class="proj" href="#/project/${p.id}/control" style="border-inline-start-color:${levelColor(l.cls)}">
@@ -49,26 +75,59 @@ export async function viewHome() {
       ${s.excludedActual ? `<div class="small neg" style="margin-top:6px">עלות שכבר הוצאה על הוראות שינוי שלא נכללות בתצוגה: ${money(s.excludedActual)}</div>` : ''}</a>`);
   }
   const al = $('#alist', el);
-  const drawActs = k => { al.innerHTML = actions.length ? actions.slice(0, k).map(a => `<a class="act" href="${a.href}"><span class="dot" style="background:${a.color}"></span><div><b>${esc(a.title)}</b><small>${esc(a.sub)}</small></div><span class="amt">${a.amt || ''}</span></a>`).join('')
-    + (actions.length > k ? `<button class="btn ghost small" id="moreacts" style="margin-top:8px">הצגת כל ${actions.length} הפעולות</button>` : '')
-    : '<div class="empty">אין פעולות פתוחות</div>';
-    $('#moreacts', al)?.addEventListener('click', () => drawActs(actions.length)); };
-  drawActs(12);
-  // התראות במייל: נשלחות אוטומטית כשנכנסים למסך, אם Google מחובר וההתראות פעילות
-  if (can.expense()) setTimeout(() => maybeSendAlerts(actions).then(r => { if (r?.sent) toast(`נשלחו במייל ${r.sent} התראות חדשות`); }), 300);
+  let showHandled = false, shown = 12;
+  const edit = can.expense();
+  const drawActs = () => {
+    open = actions.filter(a => !isHandled(a));
+    const list = showHandled ? actions : open;
+    $('#acount', el).textContent = open.length; $('#acount', el).className = 'chip ' + (open.length ? 'red' : 'green');
+    al.innerHTML = list.length ? list.slice(0, shown).map(a => actionRow(a, states.get(actKey(a)), actions.indexOf(a), { canEdit: edit })).join('')
+      + (list.length > shown ? `<button class="btn ghost small" id="moreacts" style="margin-top:8px">הצגת כל ${list.length} הפעולות</button>` : '')
+      : '<div class="empty">אין פעולות פתוחות</div>';
+    const nh = actions.length - open.length;
+    $('#handled', el).innerHTML = nh ? `<button class="btn ghost small" id="tgh" type="button">${showHandled ? 'הסתרת מה שטופל' : `הצגת מה שטופל (${nh})`}</button>` : '';
+    $('#moreacts', al)?.addEventListener('click', () => { shown = 1e4; drawActs(); });
+    $('#tgh', el)?.addEventListener('click', () => { showHandled = !showHandled; drawActs(); });
+    $$('[data-ed]', al).forEach(b => b.onclick = async () => { const r = await editAlert(actions[+b.dataset.ed], states).catch(e => toast(e.message, 'bad')); if (r) { toast('נשמר'); drawActs(); } });
+    $$('[data-wa],[data-ml]', al).forEach(b => b.onclick = async () => { await sendOne(actions[+(b.dataset.wa ?? b.dataset.ml)], b.dataset.wa != null ? 'wa' : 'mail', states, data.projects); drawActs(); });
+  };
+  drawActs();
+  const decisionOf = a => states.get(actKey(a))?.decision || defaultDecision(a);
+  // התראות במייל: נשלחות אוטומטית כשנכנסים למסך, אם Google מחובר וההתראות פעילות. סיכום תקופתי לפי ההגדרה
+  if (edit) setTimeout(() => maybeSendAlerts(open, { decisionOf }).then(r => { if (r?.sent) toast(`נשלחו במייל ${r.sent} התראות חדשות`); })
+    .then(() => maybeSendDigest(actions, states)).then(r => { if (r?.sent) toast(`נשלח סיכום של ${r.sent} נושאים`); }).catch(e => console.warn('digest', e)), 300);
+  $('#digest', el)?.addEventListener('click', () => digestDialog(actions, states, data));
   $('#mailnow', el)?.addEventListener('click', async () => {
     if (!recipients().length) return toast('אין נמענים להתראות. מוסיפים אותם בהגדרות הלקוח', 'warn');
     try {
       if (!gEnabled() || !gReady()) await gConnect();
-      const r = await sendAlerts(actions, { force: true });
+      const r = await sendAlerts(open, { force: true, decisionOf });
       toast(r.sent ? `נשלחו ${r.sent} התראות ל-${r.to.join(', ')}` : r.skipped === 'google' ? 'צריך להתחבר ל-Google' : 'אין התראות אדומות חדשות. כל מה שאדום כבר נשלח');
     } catch (e) { toast(e.message, 'bad'); }
   });
   return el;
 }
 
-export function buildActions(data, sums) {
+// משקל להתרעות של מסלול השינויים והחשבונות (מה שדורש פעולה עולה למעלה)
+const DEV_W = { co_exec_unapproved: 92, co_over_billed: 90, cbill_recommended: 66, cbill_open: 62, co_not_billed: 56, co_needs_analysis: 50, co_no_doc: 44 };
+export function buildActions(data, sums, devSums = []) {
   const out = [];
+  for (const { p, s } of devSums) {
+    for (const a of devAlerts(s, { critPct: settings().crit_pct, vendorsWithContracts: new Set((data.contracts || []).filter(c => c.project_id === p.id && c.status !== 'cancelled').map(c => (c.vendor_name || '').trim())), today: new Date().toISOString().slice(0, 10), filesFor: id => filesFor(data.files, id) })) {
+      const l = a.pct != null ? level(a.pct) : { cls: ['outside_budget', 'invoiced_over_contract', 'co_exec_unapproved', 'co_over_billed'].includes(a.type) ? 'al-r' : 'al-o' };
+      const red = ['al-r', 'al-dr'].includes(l.cls) || a.crit;
+      out.push({ w: DEV_W[a.type] ?? (red ? 70 + Math.min(n0(a.pct), 25) : 45), color: levelColor(l.cls), sev: red ? 'red' : 'amber', key: `dev|${p.id}|${a.type}|${a.item?.id || a.co?.id || a.bill?.id || a.title}`,
+        dtype: a.type, pid: p.id, title: a.title, sub: `${p.name} · ${a.detail}`, amt: a.amount != null ? money(a.amount) : '', href: `#/project/${p.id}/${a.bill ? 'cbill/' + a.bill.id : a.co ? 'cos' : a.type === 'expense_no_item' || a.type === 'vendor_no_contract' ? 'expenses' : a.type === 'invoiced_over_contract' || a.type === 'outside_budget' ? 'contracts' : 'control'}` });
+    }
+    if (!s.hasBaseline && s.rows.length) out.push({ w: 40, color: '#2f5bea', dtype: 'baseline_missing', title: 'התקציב עוד לא ננעל כבסיס', sub: p.name, amt: money(s.total.budget), href: `#/project/${p.id}/control` });
+    if (!s.rows.length) out.push({ w: 35, color: '#f2c400', title: 'אין תקציב', sub: p.name, amt: '', href: `#/project/${p.id}/boq` });
+  }
+  // תזרים יזם: הוצאות מעל הכנסות, יתרה מתחת למינימום, תקבול באיחור (6 חודשים קדימה)
+  if (devSums.length) {
+    const cf = devCashflow(devSums.map(({ p, s }) => ({ project: p, s, pd: projData(data, p.id) })), { settings: settings(), back: 0, ahead: 6 });
+    for (const a of devCashAlerts(cf)) out.push({ w: a.type === 'cash_below_min' ? 97 : a.type === 'cash_out_over_in' ? 74 : 68, color: a.crit || a.type === 'income_overdue' ? 'var(--ri)' : '#ff9f43', sev: a.crit ? 'red' : 'amber', dtype: a.type,
+      pid: a.projectId || (devSums.length === 1 ? devSums[0].p.id : null), key: `devcash|${a.type}|${a.title}`, title: a.title, sub: a.detail, amt: money(a.amount), href: a.projectId || devSums.length === 1 ? `#/project/${a.projectId || devSums[0].p.id}/cashflow` : '#/cashflow' });
+  }
   for (const { p, s } of sums) {
     for (const g of s.voGroups) {
       if (g.vo.status === 'executed_unapproved') out.push({ w: 100, color: 'var(--ri)', title: `${g.vo.number} בוצע בלי אישור`, sub: `${p.name} · ${g.vo.title}${g.vo.has_written_order ? '' : ' · אין הוראה בכתב'}`, amt: money(g.requested) + ' בסיכון', href: `#/project/${p.id}/vo` });
@@ -124,6 +183,23 @@ export function buildActions(data, sums) {
       out.push({ w: 99, color: 'var(--ri)', title: `תזרים: היתרה יורדת מתחת למינימום ב${monthLabel(b[0].m)}`, sub: `${b.length} חודשים מתחת ל-${plainMoney(cf.settings.cash_min)} · הנמוך ב${monthLabel(low.m)}`, amt: money(low.cum), href: '#/cashflow' }); }
   }
   return out.sort((a, b) => b.w - a.w);
+}
+
+// סיכום ללקוח: תצוגה מקדימה, העתקה, וואטסאפ, מייל, או שליחה מה-Gmail המחובר
+async function digestDialog(actions, states, data) {
+  const st = settings(), freq = st.digest === 'daily' ? 'daily' : 'weekly';
+  const list = digestList(actions, states);
+  const name = tenant()?.name || '';
+  const text = digestText(list, name, freq);
+  const one = data.projects.filter(p => p.status !== 'closed');
+  const tg = targetsFor({ pid: one.length === 1 ? one[0].id : null }, data.projects);
+  await modal({ title: `סיכום ${freq === 'daily' ? 'יומי' : 'שבועי'} ללקוח`, wide: true, ok: null, cancel: 'סגירה', body: `<p class="small mut">${list.length} נושאים פתוחים ובטיפול. מה שסומן "טופל" לא נכלל. הסיכום יוצא בלי קישור למערכת.${st.digest && st.digest !== 'off' ? ` נשלח אוטומטית ${st.digest === 'daily' ? 'כל יום' : 'פעם בשבוע'} ל: ${esc(recipients().join(', ') || 'אין נמענים')} (כש-Google מחובר).` : ' שליחה אוטומטית כבויה (בהגדרות הלקוח).'}</p>
+    <div class="dgv">${digestHtml(list, name, freq)}</div>
+    <div class="actions" style="margin-top:10px"><button type="button" class="btn small" id="dcopy">העתקת הטקסט</button><a class="btn small ghost" id="dwa" target="_blank" rel="noopener" href="${esc(waLink(tg.phone, text))}">💬 וואטסאפ</a><a class="btn small ghost" id="dml" href="${esc(mailLink(tg.emails, `סיכום ${freq === 'daily' ? 'יומי' : 'שבועי'} · ${name}`, text))}">✉ מייל</a><button type="button" class="btn small ghost" id="dgm">שליחה מ-Gmail</button></div>`,
+    onMount: el => {
+      $('#dcopy', el).onclick = async () => { try { await navigator.clipboard.writeText(text); toast('הטקסט הועתק'); } catch { toast('לא הצלחתי להעתיק', 'bad'); } };
+      $('#dgm', el).onclick = async () => { try { if (!gEnabled() || !gReady()) await gConnect(); const r = await maybeSendDigest(actions, states, { force: true }); toast(r.sent ? `הסיכום נשלח ל-${r.to.join(', ')}` : r.skipped === 'no_recipients' ? 'אין נמענים. מוסיפים בהגדרות הלקוח' : 'אין מה לשלוח'); } catch (e) { toast(e.message, 'bad'); } };
+    } });
 }
 
 function fieldHome(data) {
