@@ -1,5 +1,6 @@
 // חשבונות חלקיים: רשימה, מסך חשבון (מצטבר קודם / נוכחי / מצטבר, מוגש מול מאושר), ניכויים, קנסות, תקבולים וגבייה
 import { has as hasMod, latestIndex } from '../modules.js';
+import { party } from '../dev.js';
 import { h, esc, $, $$, modal, field, select, toast, money, num, pct, fmtDate, nullIfEmpty, numOrNull, confirmBox } from '../util.js';
 import { db } from '../db.js';
 import { S, can, render, logChange, settings, loadTenantData } from '../app.js';
@@ -183,7 +184,7 @@ export function billView(P, billId) {
       ${l3('הגשה לפי חוזה', G.c.cumSub, G.c.curSub)}
       ${l3('עם הוראות שינוי מאושרות', G.c.cumSub + G.a.cumSub, G.c.curSub + G.a.curSub)}
       ${l3('עם הוראות שינוי שטרם אושרו', G.c.cumSub + G.a.cumSub + G.p.cumSub, G.c.curSub + G.a.curSub + G.p.curSub, 'tot')}</table>
-      ${G.p.n ? `<p class="small mut">הוראות שינוי שטרם אושרו מוגשות בחשבון, אבל נספרות לגבייה ולתזרים רק אחרי שהקבלן הראשי מאשר אותן${r.approvedStage ? ' (בעמודת "מצטבר מאושר")' : ''}.</p>` : ''}
+      ${G.p.n ? `<p class="small mut">הוראות שינוי שטרם אושרו מוגשות בחשבון, אבל נספרות לגבייה ולתזרים רק אחרי ש${party(P.project).the} מאשר אותן${r.approvedStage ? ' (בעמודת "מצטבר מאושר")' : ''}.</p>` : ''}
       <table class="sumt">${line(r.approvedStage ? 'נוכחי מאושר' : 'נוכחי מוגש', r.base)}
       ${r.indexDiff ? line('הפרשי הצמדה', r.indexDiff) : ''}${line('סה"כ ברוטו', r.gross, 'tot')}
       ${line(`עיכבון ${P.project.retention_pct}%`, -r.retention)}${n(P.project.insurance_pct) ? line(`ביטוח ${P.project.insurance_pct}%`, -r.insurance) : ''}${n(P.project.shared_pct) ? line(`הוצאות משותפות ${P.project.shared_pct}%`, -r.shared) : ''}

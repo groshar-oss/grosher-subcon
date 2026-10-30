@@ -4,7 +4,7 @@
 // מע"מ מוצג בנפרד: נגבה מהקבלן הראשי, שולם לספקים, והתשלום (או ההחזר) לרשות בחודש שאחרי.
 import { n, lineCost } from './calc.js';
 import { dueDate } from './bills.js';
-import { has, indexRate, fixedMonths } from './modules.js';
+import { has, indexRate, fixedMonths, spreadWeights, spreadEnd } from './modules.js';
 
 const DEF = { cash_opening: 0, cash_asof: '', cash_min: 0, supplier_terms_days: 60, vat_pct: 18 };
 export const mkey = d => String(d).slice(0, 7);
@@ -69,11 +69,14 @@ export function cashflow(projects, opts = {}) {
     const billed = lastBill ? lastBill.cumEffTotal : 0;
     const remaining = Math.max(0, sale - billed);
     const ded = (n(P.retention_pct) + n(P.insurance_pct) + n(P.shared_pct)) / 100;
-    const endM = P.end_date && mkey(P.end_date) > cur ? mkey(P.end_date) : addMonths(cur, 2);
+    const se = spreadEnd(P);
+    const endM = [P.end_date && mkey(P.end_date) > cur ? mkey(P.end_date) : addMonths(cur, 2), se && se > cur ? se : ''].sort().pop();
     const workMonths = []; for (let m = cur; m <= endM; m = addMonths(m, 1)) workMonths.push(m);
+    // פריסה: שווה בכל חודש, או לפי עקומת S / שלבים כשמודול הפריסה דלוק
+    const W = spreadWeights(P, workMonths);
     const idxRate = has(P, 'index') ? indexRate(P.base_index, opts.indexSeries || pd.indexSeries || [], cur) : 0;
-    if (remaining > 1 && P.status !== 'closed') for (const wm of workMonths) {
-      const amt = remaining / workMonths.length;
+    if (remaining > 1 && P.status !== 'closed') for (const [wi, wm] of workMonths.entries()) {
+      const amt = remaining * W[wi];
       const due = mkey(dueDate(addMonths(wm, 1) + '-05', terms));
       put(addMonths(due, delay), 'in_future', amt * (1 - ded), true, `חשבון עתידי על ${monthLabel(wm)}`, P.id);
       // הצמדה: לפי המדד האחרון שפורסם מול מדד הבסיס. לא מנחשים מדד עתידי
@@ -114,8 +117,8 @@ export function cashflow(projects, opts = {}) {
     }
     const lines = pd.lines || [];
     const laborShare = (() => { const t = lines.reduce((a, l) => a + lineCost(l), 0); const lab = lines.filter(l => ['labor', 'piece'].includes(l.kind)).reduce((a, l) => a + lineCost(l), 0); return t ? lab / t : 0.4; })();
-    if (rest > 1 && P.status !== 'closed') for (const wm of workMonths) {
-      const amt = rest / workMonths.length;
+    if (rest > 1 && P.status !== 'closed') for (const [wi, wm] of workMonths.entries()) {
+      const amt = rest * W[wi];
       const pm = addMonths(wm, 1);
       put(pm, 'out_future', amt * (1 - laborShare), true, `עלויות חומר וספקים (${monthLabel(wm)})`, P.id);
       put(pm, 'out_future', amt * laborShare, false, `עבודה (${monthLabel(wm)})`, P.id);

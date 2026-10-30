@@ -10,10 +10,10 @@ import { collection } from '../bills.js';
 import { cashflow, monthLabel } from '../cashflow.js';
 import { maybeSendAlerts, sendAlerts, recipients } from '../alerts.js';
 import { gEnabled, gReady, gConnect } from '../google.js';
-import { isDev, devSummary, devAlerts } from '../dev.js';
+import { isDev, party, devSummary, devAlerts } from '../dev.js';
 import { filesFor } from '../files.js';
 import { devCashflow, devCashAlerts } from '../devcash.js';
-import { actionRow, stateMap, editAlert, sendOne, defaultDecision, digestList, digestText, digestHtml, maybeSendDigest, targetsFor, waLink, mailLink } from '../alertsui.js';
+import { rememberProjects, actionRow, stateMap, editAlert, sendOne, defaultDecision, digestList, digestText, digestHtml, maybeSendDigest, targetsFor, waLink, mailLink } from '../alertsui.js';
 import { actKey } from '../alerts.js';
 import { vendorStatus, docStatus, OWN_REQUIRED, DOC_TYPES, GUAR_KINDS, guaranteeState, daysLeft, finalBill } from '../docs.js';
 
@@ -21,6 +21,7 @@ export async function viewHome() {
   if (!S.tenantId) return h(`<div><div class="top"><div><h1>ברוכה הבאה</h1><div class="sub">עדיין אין לקוחות במערכת.</div></div></div>
     <div class="card"><p>השלב הראשון הוא להקים לקוח (קבלן משנה), ואחר כך פרויקט וכתב כמויות.</p><a class="btn" href="#/clients">הקמת לקוח</a></div></div>`);
   const data = await loadTenantData();
+  rememberProjects(data.projects); // שם הפרויקט בכל הודעת וואטסאפ ומייל
   if (!can.prices()) return fieldHome(data);
 
   const all = data.projects.filter(p => p.status !== 'closed');
@@ -70,7 +71,7 @@ export async function viewHome() {
     const t = s.total, l = level(t.overrun);
     pl.insertAdjacentHTML('beforeend', `<a class="proj" href="#/project/${p.id}/control" style="border-inline-start-color:${levelColor(l.cls)}">
       <div class="hd"><span>${esc(p.name)}</span><span class="chip" style="background:${levelBg(l.cls)}">חריגה ${pct(t.overrun, { sign: true })}</span></div>
-      <div class="meta">${esc(mcName(p.main_contractor_id) || 'ללא קבלן ראשי')} · ${CONTRACT[p.contract_type] || ''} · שוטף+${p.pay_terms_days} · ${STATUS[p.status]}</div>
+      <div class="meta">${esc(mcName(p.main_contractor_id) || party(p).none)} · ${CONTRACT[p.contract_type] || ''} · שוטף+${p.pay_terms_days} · ${STATUS[p.status]}</div>
       <div class="pr"><div>מכירה<b>${money(t.sale)}</b></div><div>צפי עלות<b>${money(t.forecast)}</b></div><div>רווח צפוי<b class="${t.profit >= 0 ? '' : 'neg'}">${money(t.profit)} <small class="mut">${pct(t.profitPct)}</small></b></div>
       <div>בפועל עד היום<b>${money(t.actual)}</b></div><div>ביצוע / הוצאה<b>${pct(t.progress, { d: 0 })} / ${pct(t.spentPct, { d: 0 })}</b></div></div>
       <div class="bar" title="כחול: אחוז ביצוע. רקע: אחוז הוצאה מהתמחיר"><i style="width:${Math.min(100, t.spentPct)}%;background:${levelColor(l.cls)};opacity:.35"></i><i style="width:${Math.min(100, t.progress)}%;background:#2f5bea"></i></div>

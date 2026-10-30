@@ -4,7 +4,15 @@ import { devFlow, flowAlerts, CBILL_APPROVED } from './devflow.js';
 import { has, fixedTotal } from './modules.js';
 
 export const isDev = p => p?.project_type === 'dev';
-export const PROJECT_TYPES = { sub: 'קבלן משנה', dev: 'יזם / בעלים' };
+export const PROJECT_TYPES = { sub: 'קבלן משנה', exec: 'ביצוע (מול מזמין)', dev: 'יזם / בעלים' };
+// פרויקט ביצוע: החברה היא הקבלן מול מזמין. החישוב כמו קבלן משנה, רק הצד השני נקרא "מזמין"
+export const isExec = p => p?.project_type === 'exec';
+const PARTY = { exec: { name: 'מזמין', the: 'המזמין', from: 'מהמזמין', to: 'למזמין', none: 'ללא מזמין', req: 'בקשת המזמין' },
+  sub: { name: 'קבלן ראשי', the: 'הקבלן הראשי', from: 'מהקבלן הראשי', to: 'לקבלן הראשי', none: 'ללא קבלן ראשי', req: 'בקשת הקבלן הראשי' },
+  mix: { name: 'קבלן ראשי / מזמין', the: 'הקבלן הראשי / המזמין', from: 'מהקבלן הראשי / מהמזמין', to: 'לקבלן הראשי / למזמין', none: 'ללא', req: 'בקשת הקבלן הראשי / המזמין' } };
+/** שם הצד השני בפרויקט: party(p).name / the / from / to / none. לרשימת פרויקטים: partyOfMany */
+export const party = p => PARTY[isExec(p) ? 'exec' : 'sub'];
+export const partyOfMany = ps => { const e = ps.filter(isExec).length; return PARTY[!e ? 'sub' : e === ps.length ? 'exec' : 'mix']; };
 export const CONTRACT_KINDS = { contractor: 'קבלן', supplier: 'ספק', consultant: 'יועץ / מתכנן', other: 'אחר' };
 export const CONTRACT_STATUS = { draft: 'טיוטה', signed: 'חתום', closed: 'סגור', cancelled: 'בוטל' };
 // התקשרות שנכנסת לצפי: חתומה או סגורה. טיוטה מוצגת בנפרד

@@ -39,13 +39,20 @@ export const stateMap = list => new Map((list || []).map(s => [s.key, s]));
 const clean = s => String(s || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
 
 // טקסט ללקוח (וואטסאפ / מייל): בלי קישור למערכת
+// שם הפרויקט של כל התרעה (ללקוח עם כמה פרויקטים במקביל). המסך הראשי שומר את הרשימה
+let PN = {};
+export const rememberProjects = list => { for (const p of list || []) PN[p.id] = p.name; };
+export const projectNameOf = a => PN[projectIdOf(a)] || a.projectName || '';
+// התרעה בלי פרויקט אחד (תזרים מרוכז, מסמכים כלליים): כתוב שזה על כל הפרויקטים
+const scopeOf = a => projectNameOf(a) || (Object.keys(PN).length > 1 ? 'כל הפרויקטים (מרוכז)' : Object.values(PN)[0] || '');
+
 export function alertText(a, st) {
-  const amt = clean(a.amt);
-  return [`*${clean(a.title)}*`, clean(a.sub), amt ? `סכום: ${amt}` : '', `החלטה נדרשת: ${st?.decision || defaultDecision(a)}`, st && st.status !== 'open' ? `מצב: ${ALERT_STATUS[st.status]}` : '', '', 'גרושר פרויקטים בע"מ']
-    .filter((x, i) => x || i === 5).join('\n');
+  const amt = clean(a.amt), pn = scopeOf(a);
+  return [`*${clean(a.title)}*`, pn ? `פרויקט: ${pn}` : '', clean(a.sub), amt ? `סכום: ${amt}` : '', `החלטה נדרשת: ${st?.decision || defaultDecision(a)}`, st && st.status !== 'open' ? `מצב: ${ALERT_STATUS[st.status]}` : '', '', 'גרושר פרויקטים בע"מ']
+    .filter((x, i) => x || i === 6).join('\n');
 }
 export const phoneIntl = p => { const d = String(p || '').replace(/\D/g, ''); return !d ? '' : d.startsWith('972') ? d : d.startsWith('0') ? '972' + d.slice(1) : d; };
-export const waLink = (phone, text) => `https://wa.me/${phoneIntl(phone)}?text=${encodeURIComponent(text)}`;
+export const waLink = (phone, text) => `https://wa.me/${phoneIntl(phone)}?text=${encodeURIComponent(String(text).replace(/&#34;|&quot;/g, '"').replace(/(\p{L})"(\p{L})/gu, '$1״$2'))}`;
 export const emailsOf = s => String(s || '').split(/[\s,;]+/).map(x => x.trim()).filter(x => /^\S+@\S+\.\S+$/.test(x));
 export const mailLink = (to, subject, body) => `mailto:${to.map(encodeURIComponent).join(',')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body.replace(/\*/g, ''))}`;
 
@@ -88,6 +95,7 @@ export async function editAlert(a, states) {
 // שליחה מיידית: וואטסאפ נפתח עם הנוסח; מייל נשלח ישירות מה-Gmail המחובר (חלון עם נמענים ונוסח לעריכה). מסמן "בטיפול" אם היה פתוח
 export async function sendOne(a, how, states, projects) {
   const st = states.get(actKey(a)), tg = targetsFor(a, projects);
+  rememberProjects(projects);
   const text = alertText(a, st);
   const subject = `${clean(a.title)} · ${tg.project?.name || tenant()?.name || ''}`;
   if (how === 'wa') {
@@ -117,7 +125,7 @@ export function digestList(actions, states) {
 export function digestHtml(list, name, freq) {
   const red = list.filter(x => x.a.sev === 'red' || x.a.color === 'var(--ri)').length;
   const rows = list.map(({ a, st }) => `<tr><td style="padding:8px 10px;border-bottom:1px solid #e5e8ef;width:6px;background:${a.color && a.color.startsWith('#') ? a.color : '#c62828'}"></td>
-    <td style="padding:8px 10px;border-bottom:1px solid #e5e8ef"><b>${esc(clean(a.title))}</b><div style="color:#5b6577;font-size:13px">${esc(clean(a.sub))}</div>
+    <td style="padding:8px 10px;border-bottom:1px solid #e5e8ef"><b>${esc(clean(a.title))}</b>${scopeOf(a) ? `<div style="font-size:13px"><b>פרויקט:</b> ${esc(scopeOf(a))}</div>` : ''}<div style="color:#5b6577;font-size:13px">${esc(clean(a.sub))}</div>
     <div style="font-size:13px;margin-top:3px"><b>החלטה נדרשת:</b> ${esc(st?.decision || defaultDecision(a))}</div></td>
     <td style="padding:8px 10px;border-bottom:1px solid #e5e8ef;white-space:nowrap">${ALERT_STATUS[st?.status || 'open']}</td>
     <td style="padding:8px 10px;border-bottom:1px solid #e5e8ef;white-space:nowrap;direction:ltr;text-align:left">${esc(clean(a.amt))}</td></tr>`).join('');
@@ -128,7 +136,7 @@ export function digestHtml(list, name, freq) {
     <p style="color:#8a93a3;font-size:12px;margin-top:16px">גרושר פרויקטים בע"מ · בקרת עלויות ותזרים</p></div>`;
 }
 export const digestText = (list, name, freq) => [`*סיכום ${freq === 'daily' ? 'יומי' : 'שבועי'} · ${name}*`, `${list.length} נושאים פתוחים`, '',
-  ...list.map(({ a, st }, i) => `${i + 1}. ${clean(a.title)}${clean(a.amt) ? ' · ' + clean(a.amt) : ''}\n   ${clean(a.sub)}\n   החלטה נדרשת: ${st?.decision || defaultDecision(a)}${st && st.status !== 'open' ? ` (${ALERT_STATUS[st.status]})` : ''}`), '', 'גרושר פרויקטים בע"מ'].join('\n');
+  ...list.map(({ a, st }, i) => `${i + 1}. ${clean(a.title)}${clean(a.amt) ? ' · ' + clean(a.amt) : ''}${scopeOf(a) ? `\n   פרויקט: ${scopeOf(a)}` : ''}\n   ${clean(a.sub)}\n   החלטה נדרשת: ${st?.decision || defaultDecision(a)}${st && st.status !== 'open' ? ` (${ALERT_STATUS[st.status]})` : ''}`), '', 'גרושר פרויקטים בע"מ'].join('\n');
 
 // שליחה אוטומטית של הסיכום פעם ביום / בשבוע (מה-Gmail המחובר), נרשם ב-alert_log כדי לא לשלוח פעמיים
 export async function maybeSendDigest(actions, states, { force = false } = {}) {

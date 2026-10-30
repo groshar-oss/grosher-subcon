@@ -359,3 +359,9 @@ fieldset.mods legend{padding:0 6px}
 .modrow small{font-size:12px;color:var(--mut);line-height:1.45}
 .modrow:has(input:checked){border-color:var(--acc);background:color-mix(in srgb,var(--acc) 6%,transparent)}
 .mtag{font-size:11px;padding:1px 7px}
+/* חבילה 19: פריסה ארוכה */
+.spbars{display:flex;align-items:flex-end;gap:2px;height:78px;overflow-x:auto;padding-bottom:16px}
+.spbars>div{flex:1 0 8px;max-width:34px;position:relative;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:60px}
+.spbars i{display:block;width:100%;background:var(--acc);opacity:.75;border-radius:3px 3px 0 0}
+.spbars span{position:absolute;top:62px;font-size:9px;color:var(--mut);white-space:nowrap}
+.spreadonly input[type=month]{padding:6px}

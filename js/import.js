@@ -78,6 +78,13 @@ export function parseBoq(rows, mapOverride) {
 
 // קריאת קובץ אקסל לשורות טקסט (XLSX גלובלי מ-SheetJS)
 export async function readWorkbook(file) {
+  // קובץ פרויקט מתוכנת התמחיר
+  if (/\.json$/i.test(file.name || '')) {
+    let d; try { d = JSON.parse(await file.text()); } catch { throw new Error('קובץ JSON לא תקין'); }
+    const { isFitout, fitoutSheet } = await import('./fitout.js');
+    if (!isFitout(d)) throw new Error('זה לא קובץ פרויקט של תוכנת התמחיר (.fitout.json)');
+    return [fitoutSheet(d)];
+  }
   const XLSX = await loadXLSX();
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array', cellDates: false });

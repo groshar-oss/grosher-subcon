@@ -7,6 +7,7 @@ import { PAY_TYPES } from '../quota.js';
 import { collection, dueDate } from '../bills.js';
 import { GUAR_KINDS, guaranteeState } from '../docs.js';
 import { cashflow, monthLabel, mkey, addMonths } from '../cashflow.js';
+import { party } from '../dev.js';
 import { projData, summarize, STATUS } from './common.js';
 import { loadXLSX } from '../import.js';
 import { viewDevReports, reportNav } from './devreports.js';
@@ -259,7 +260,7 @@ function repClient({ data, sums, o }) {
           ['+ לא מאושרות (בסיכון)', m0(s.contract.sale + s.approved.sale + s.atRisk.sale), cls(prof(s.contract) + prof(s.approved) + prof(s.atRisk)), (() => { const sl = s.contract.sale + s.approved.sale + s.atRisk.sale; return pct(sl ? (prof(s.contract) + prof(s.approved) + prof(s.atRisk)) / sl * 100 : 0); })()]])}</div>
         <div><h3>החודש</h3>${T([['נושא'], ['סכום', 1]], [
           [`חשבונות שהוגשו (${billsMonth.map(r => r.bill.number).join(', ') || 'אין'})`, m0(sum(billsMonth, r => r.curSub))],
-          ['תקבולים מהקבלן הראשי (כולל מע"מ)', m0(paidMonth)], ['עלות עבודה מהיומן', m0(labMonth)], ['הוצאות (לפי תאריך מסמך)', m0(expMonth)],
+          [`תקבולים ${party(p).from} (כולל מע"מ)`, m0(paidMonth)], ['עלות עבודה מהיומן', m0(labMonth)], ['הוצאות (לפי תאריך מסמך)', m0(expMonth)],
           [`לגבייה כעת${c.overdue.length ? ` · <span class="neg">${c.overdue.length} באיחור</span>` : ''}`, m0(c.outstanding)],
           ['תזרים נטו צפוי ב-3 החודשים הקרובים', cls(sum(pcf.months, m => m.net))]])}</div></div>
       <h3>סעיפים בחריגה (5 הגדולים)</h3>${T([['סעיף'], ['תמחיר', 1], ['צפי', 1], ['חריגה', 1], ['ביצוע / הוצאה', 1]],

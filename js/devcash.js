@@ -2,7 +2,7 @@
 import { n } from './calc.js';
 import { mkey, addMonths, monthLabel } from './cashflow.js';
 import { COMMITTED } from './dev.js';
-import { has, indexRate, fixedMonths } from './modules.js';
+import { has, indexRate, fixedMonths, spreadWeights, spreadEnd } from './modules.js';
 
 export const INCOME_SOURCES = { buyer: 'רוכשים', bank: 'בנק מלווה', equity: 'הון עצמי', other: 'אחר' };
 export const DCF_ROWS = {
@@ -37,10 +37,14 @@ export function devCashflow(projects, opts = {}) {
 
   for (const { project: P, s, pd } of projects) {
     budgetTotal += s.total.budget * vat; costTotal += s.total.forecast * vat;
-    const endM0 = P.end_date && mkey(P.end_date) > cur ? mkey(P.end_date) : addMonths(cur, 3);
+    const se = spreadEnd(P);
+    const endM0 = [P.end_date && mkey(P.end_date) > cur ? mkey(P.end_date) : addMonths(cur, 3), se && se > cur ? se : ''].sort().pop();
     const endM = addMonths(endM0, sched);
     const workMonths = []; for (let m = cur; m <= endM; m = addMonths(m, 1)) workMonths.push(m);
-    const spread = (total, key, label, terms) => { if (total <= 1) return; for (const wm of workMonths) put(addMonths(wm, terms), key, total / workMonths.length, `${label} (${monthLabel(wm)})`, P.id); };
+    // עיכוב בלו"ז מותח את העקומה; בלי מודול פריסה: שווה בכל חודש
+    const W = sched && has(P, 'spread') ? (() => { const base = []; for (let m = cur; m <= endM0; m = addMonths(m, 1)) base.push(m); const b = spreadWeights(P, base);
+      return workMonths.map((_, i) => { const x = i * (base.length / workMonths.length), j = Math.floor(x); return (b[Math.min(j, b.length - 1)] || 0); }).map((v, _, a) => v / a.reduce((s, y) => s + y, 0)); })() : spreadWeights(P, workMonths);
+    const spread = (total, key, label, terms) => { if (total <= 1) return; for (const [wi, wm] of workMonths.entries()) put(addMonths(wm, terms), key, total * W[wi], `${label} (${monthLabel(wm)})`, P.id); };
     // --- הכנסות ---
     for (const i of pd.income || []) {
       const key = 'in_' + (i.source || 'other');

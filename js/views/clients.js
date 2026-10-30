@@ -44,7 +44,7 @@ export async function viewClient(id) {
   const ser = [...series].sort((a, b) => b.month.localeCompare(a.month));
   const mLabel = m => `${['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'][+m.slice(5, 7) - 1]} ${m.slice(0, 4)}`;
   const pname = pid => projects.find(p => p.id === pid)?.name || '';
-  const el = h(`<div><div class="top"><div><h1>${esc(t.name)}</h1><div class="sub">הגדרות לקוח, משתמשים וקבלנים ראשיים</div></div></div>
+  const el = h(`<div><div class="top"><div><h1>${esc(t.name)}</h1><div class="sub">הגדרות לקוח, משתמשים, קבלנים ראשיים ומזמינים</div></div></div>
   <div class="cols even">
     <div class="card"><h2>פרטי הלקוח</h2><form id="tf">${tenantForm(t)}<button class="btn">שמירת פרטים</button></form></div>
     <div class="card"><h2>הגדרות חישוב</h2><form id="sf"><div class="grid g2">
@@ -83,10 +83,11 @@ export async function viewClient(id) {
     ${members.map(m => `<tr><td dir="ltr" style="text-align:right">${esc(m.email)}</td><td>${roleName(m.role)}</td><td class="wrap">${m.role === 'foreman' ? esc((m.project_ids || []).map(pname).join(', ') || 'אין') : '<span class="mut">כולם</span>'}</td>
       <td><button class="btn small ghost" data-em="${esc(m.email)}" data-role="${m.role}" data-pids="${(m.project_ids || []).join(',')}">עריכה</button> <button class="btn small ghost" data-rm="${m.id}">הסרה</button></td></tr>`).join('') || '<tr><td colspan="4" class="empty">אין משתמשים מלבד מנהל השירות</td></tr>'}
     </tbody></table></div></div>
-  <div class="card"><h2>קבלנים ראשיים <button class="btn small" id="addmc">+ קבלן ראשי</button></h2>
+  <div class="card"><h2>קבלנים ראשיים ומזמינים <button class="btn small" id="addmc">+ קבלן ראשי / מזמין</button></h2>
+    <p class="small mut">בפרויקט קבלן משנה זה הקבלן הראשי. בפרויקט ביצוע זה המזמין.</p>
     <div class="tw"><table><thead><tr><th>שם</th><th>ח"פ</th><th>איש קשר</th><th>טלפון</th><th class="n">תנאי תשלום</th><th></th></tr></thead><tbody>
     ${mcs.map(m => `<tr><td><b>${esc(m.name)}</b></td><td>${esc(m.company_no || '')}</td><td>${esc(m.contact_name || '')}</td><td dir="ltr" style="text-align:right">${esc(m.phone || '')}</td><td class="n">שוטף+${m.pay_terms_days}</td>
-      <td><button class="btn small ghost" data-mc="${m.id}">עריכה</button></td></tr>`).join('') || '<tr><td colspan="6" class="empty">אין קבלנים ראשיים</td></tr>'}
+      <td><button class="btn small ghost" data-mc="${m.id}">עריכה</button></td></tr>`).join('') || '<tr><td colspan="6" class="empty">אין קבלנים ראשיים או מזמינים</td></tr>'}
     </tbody></table></div></div>
   ${can.admin() ? `<div class="card"><h2>מחיקת לקוח</h2><p class="small mut">מוחקת את הלקוח וכל הפרויקטים והנתונים שלו. אי אפשר לשחזר.</p><button class="btn danger" id="del">מחיקת הלקוח</button></div>` : ''}</div>`);
 
@@ -136,7 +137,7 @@ export async function viewClient(id) {
   $$('[data-em]', el).forEach(b => b.onclick = () => memberDlg({ email: b.dataset.em, role: b.dataset.role, pids: b.dataset.pids }));
   $$('[data-rm]', el).forEach(b => b.onclick = async () => { if (await confirmBox('הסרת משתמש', 'המשתמש לא יוכל לראות יותר את נתוני הלקוח.', 'הסרה', true)) { await db.rpc('remove_member', { id: b.dataset.rm }); render(); } });
   const mcDlg = async (m = {}) => {
-    const v = await modal({ title: m.id ? 'עריכת קבלן ראשי' : 'קבלן ראשי חדש', body: mcForm(m), validate: d => !d.name.trim() && 'חסר שם' });
+    const v = await modal({ title: m.id ? 'עריכת קבלן ראשי / מזמין' : 'קבלן ראשי / מזמין חדש', body: mcForm(m), validate: d => !d.name.trim() && 'חסר שם' });
     if (!v) return;
     const row = { ...v, pay_terms_days: Math.round(n(v.pay_terms_days)) };
     if (m.id) await db.update('main_contractors', m.id, row); else await db.insert('main_contractors', { tenant_id: id, ...row });

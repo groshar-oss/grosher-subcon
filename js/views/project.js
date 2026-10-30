@@ -4,7 +4,7 @@ import { db } from '../db.js';
 import { S, can, loadTenantData, modeSwitch, render, logChange, settings, projectTabs } from '../app.js';
 import { n, COST_KINDS, VO_STATUS, PROFIT_MODES, itemPlanned, lineCost, EXPENSE_KINDS } from '../calc.js';
 import { STATUS, CONTRACT, projData, summarize, rowAttr, legend, modeLine } from './common.js';
-import { projectForm, projectRow, wireModules } from './projects.js';
+import { projectForm, projectRow, wireModules, wireProjectType } from './projects.js';
 import { mods, MODULES } from '../modules.js';
 import { tabBoq, tabCosting } from './boq.js';
 import { tabVo, tabExpenses } from './vo_exp.js';
@@ -15,7 +15,7 @@ import { tabBills, billView } from './bills.js';
 import { tabCashflow } from './cashflow.js';
 import { viewInbox } from './inbox.js';
 import { projectSteps, stepsCard } from '../guide.js';
-import { isDev, PROJECT_TYPES } from '../dev.js';
+import { isDev, PROJECT_TYPES, party } from '../dev.js';
 import { devControl, devContracts } from './dev.js';
 import { devCos, devCbills, cbillView, cbillSheet } from './devflow.js';
 import { devCashTab } from './devcash.js';
@@ -49,7 +49,7 @@ export async function viewProject(id, tab, extra) {
   const mc = data.mcs.find(m => m.id === project.main_contractor_id);
   const qc = quotaCounts(P.summary.quotas || []);
   const tabs = projectTabs(project);
-  const el = h(`<div>${projTop(P, `${esc(mc?.name || 'ללא קבלן ראשי')} · ${CONTRACT[project.contract_type]} · שוטף+${project.pay_terms_days} · ${STATUS[project.status]}${project.address ? ' · ' + esc(project.address) : ''}`)}
+  const el = h(`<div>${projTop(P, `${esc(mc?.name || party(project).none)} · ${CONTRACT[project.contract_type]} · שוטף+${project.pay_terms_days} · ${STATUS[project.status]}${project.address ? ' · ' + esc(project.address) : ''}`)}
     <nav class="tabs ptabs">${tabs.map(([k, l]) => `<a href="#/project/${id}/${k}" class="${k === tab ? 'on' : ''}">${l}${k === 'quota' && qc.over + qc.warn ? ` <span class="badge ${qc.over ? 'red' : 'amber'}">${qc.over + qc.warn}</span>` : ''}</a>`).join('')}</nav><div id="tab"></div></div>`);
   el.dataset.qover = qc.over; el.dataset.qwarn = qc.warn;
   wirePsel(el, tab);
@@ -192,14 +192,15 @@ async function tabLog(P) {
 function tabSettings(P) {
   const el = h(`<div><div class="card"><form id="pf">${projectForm(P.project, P.mcs)}<button class="btn">שמירה</button></form></div>
     <div class="card"><h2>מחיקת פרויקט</h2><p class="small mut">מוחקת את הפרויקט עם כתב הכמויות, התמחיר, הוראות השינוי וההוצאות. אי אפשר לשחזר.</p><button class="btn danger" id="del">מחיקת הפרויקט</button></div></div>`);
-  wireModules(el);
+  wireProjectType(el);
   $('#pf', el).onsubmit = async e => {
     e.preventDefault();
     const f = e.target; const v = {}; for (const x of f.elements) if (x.name) v[x.name] = x.type === 'checkbox' ? x.checked : x.value;
     if (!v.name.trim()) return toast('חסר שם', 'bad');
     const row = await projectRow(v, P.mcs, P.project.project_type === 'dev' ? 'dev' : 'sub');
     if (row.modules) { const before = mods(P.project); for (const [k, on] of Object.entries(row.modules)) if (!!before[k] !== on) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'מודולים בפרויקט', field: MODULES[k].label, old_value: before[k] ? 'דלוק' : 'כבוי', new_value: on ? 'דלוק' : 'כבוי' }); }
-    for (const [k, nv] of Object.entries(row)) { if (k === 'modules') continue; const ov = P.project[k]; if (String(ov ?? '') !== String(nv ?? '')) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'הגדרות פרויקט', field: k, old_value: ov, new_value: nv }); }
+    if (row.spread && JSON.stringify(row.spread) !== JSON.stringify(P.project.spread || null)) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'פריסה לאורך הפרויקט', field: row.spread.floors.length ? `${row.spread.floors.length} שלבים` : (row.spread.curve === 's' ? 'עקומת S' : 'שווה בכל חודש'), old_value: P.project.spread ? 'הוגדר' : '', new_value: 'עודכן' });
+    for (const [k, nv] of Object.entries(row)) { if (k === 'modules' || k === 'spread') continue; const ov = P.project[k]; if (String(ov ?? '') !== String(nv ?? '')) await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'הגדרות פרויקט', field: k, old_value: ov, new_value: nv }); }
     await db.update('projects', P.id, row); toast('נשמר'); render();
   };
   $('#del', el).onclick = async () => {

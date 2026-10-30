@@ -16,7 +16,7 @@ export function tabBoq(P, variationId = null, { dev = false } = {}) {
   const word = dev ? 'תקציב' : 'כתב כמויות';
   const total = items.reduce((s, i) => s + itemSale(i), 0);
   const el = h(`<div>
-    ${can.edit() ? `<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ סעיף</button>${variationId ? '' : `<button class="btn ghost" id="imp">${dev ? 'קליטת תקציב מאקסל' : 'קליטה מאקסל'}</button>`}${variationId ? '' : '<input type="file" id="file" accept=".xlsx,.xls,.csv" hidden>'}<button class="btn ghost" id="exp">ייצוא לאקסל</button></div>` : ''}
+    ${can.edit() ? `<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ סעיף</button>${variationId ? '' : `<button class="btn ghost" id="imp">${dev ? 'קליטת תקציב (אקסל / תמחיר)' : 'קליטה (אקסל / תמחיר)'}</button>`}${variationId ? '' : '<input type="file" id="file" accept=".xlsx,.xls,.csv,.json" hidden>'}<button class="btn ghost" id="exp">ייצוא לאקסל</button></div>` : ''}
     <div class="tw"><table><thead><tr><th>קוד</th><th>תיאור</th><th>יח'</th><th class="n">כמות</th><th class="n">${dev ? 'מחיר תקציב' : "מחיר יח'"}</th><th class="n">סה"כ</th><th class="hide-m">${dev ? '' : 'חיוב'}</th>${can.edit() ? '<th></th>' : ''}</tr></thead><tbody id="tb"></tbody></table></div></div>`);
   const tb = $('#tb', el);
   const cols = can.edit() ? 8 : 7;
@@ -86,11 +86,19 @@ async function exportBoq(P, items) {
 }
 
 // ===== קליטה מאקסל =====
+// הערה בחלון הקליטה לקובץ מתוכנת התמחיר
+const fitoutNote = (fo, P) => { const dev = P.project.project_type === 'dev';
+  return `<div class="note small"><b>קובץ מתוכנת התמחיר.</b> מחירי היחידה הם מחירי ההגשה (עלות × מקדם העמסה ${fo.K.toFixed(3)}, או מחיר נעול). סה"כ ${money(fo.sellTotal)} לפני מע"מ.${fo.K > 2.5 ? ` <span class="neg"><b>מקדם ההעמסה חריג (${fo.K.toFixed(2)}).</b> כדאי לבדוק את התקורות בתוכנת התמחיר לפני הקליטה.</span>` : ''}
+    ${fo.options.length ? ` ${fo.options.length} חלופות לא נקלטות (אפשר להוסיף אותן כהוראת שינוי).` : ''}
+    ${dev ? '' : `<label class="chk" style="margin:6px 0 0"><input type="checkbox" name="fo_cost" checked> <span>להעביר גם את העלויות לתמחיר של כל סעיף. עלות ישירה: ${money(fo.direct)}</span></label>
+    ${fo.siteOH ? `<label class="chk" style="margin:4px 0 0"><input type="checkbox" name="fo_oh" checked> <span>לעדכן את תקורת הפרויקט ל-${(Math.round(fo.siteOHPct * 10) / 10)}%. תקורות אתר: ${money(fo.siteOH)}<br><small class="mut">${esc(fo.overheads.filter(o => o.total).map(o => o.name).join(' · '))}</small></span></label>` : ''}`}</div>`; };
+
 async function importFlow(P, file) {
   let sheets;
   try { sheets = await readWorkbook(file); } catch (e) { return toast('לא הצלחנו לקרוא את הקובץ: ' + e.message, 'bad'); }
   let cur = bestSheet(sheets) || { ...sheets[0], parsed: parseBoq(sheets[0].rows) };
   let map = cur.parsed.ok ? { ...cur.parsed.map, headerRow: cur.parsed.headerRow } : { headerRow: 0 };
+  const fo = sheets[0].fitout || null; // קובץ מתוכנת התמחיר: יש גם עלויות ותקורות
   const existing = P.pd.items.filter(i => !i.variation_id);
   const v = await modal({ title: `קליטת כתב כמויות: ${file.name}`, wide: true, ok: 'קליטה', body: '<div id="impbox"></div>', onMount: el => {
     const box = $('#impbox', el);
@@ -110,6 +118,7 @@ async function importFlow(P, file) {
           <div class="kpi"><div class="l">סה"כ מחושב (כמות × מחיר)</div><div class="v">${money(p.calcTotal)}</div></div>
           <div class="kpi"><div class="l">סה"כ לפי הקובץ</div><div class="v">${p.hasFileTotal ? money(p.fileTotal) : '<span class="mut small">אין עמודת סה"כ</span>'}</div><div class="n ${Math.abs(diff) > 1 ? 'neg' : 'pos'}">${p.hasFileTotal ? (Math.abs(diff) > 1 ? 'פער ' + money(diff) : 'תואם') : ''}</div></div>
           <div class="kpi"><div class="l">חסר מחיר או כמות</div><div class="v ${miss.length ? 'neg' : 'pos'}">${miss.length}</div></div></div>
+        ${fo ? fitoutNote(fo, P) : ''}
         ${miss.length ? `<div class="note"><b>${miss.length} סעיפים בלי מחיר או כמות:</b> ${miss.slice(0, 8).map(i => esc(`${i.code} ${i.description}`.trim()) + ` (${i.missing.join(', ')}, שורה ${i.row})`).join(' · ')}${miss.length > 8 ? ' …' : ''}
           <label class="chk" style="margin:8px 0 0"><input type="checkbox" name="force"> לקלוט בכל זאת (הסעיפים יסומנו באדום)</label></div>` : ''}
         ${existing.length ? `<label class="fld"><span>כבר יש ${existing.length} סעיפים בפרויקט</span><select name="how"><option value="append">להוסיף לקיימים</option><option value="replace">להחליף את כתב הכמויות הקיים (כולל התמחיר שלו)</option></select></label>` : ''}
@@ -136,7 +145,15 @@ async function importFlow(P, file) {
   }
   let sort = v.how === 'replace' ? 0 : Math.max(0, ...P.pd.items.map(i => n(i.sort))) + 1;
   const rows = p.items.map(i => ({ tenant_id: S.tenantId, project_id: P.id, variation_id: null, chapter: i.chapter || null, code: i.code || null, description: i.description, unit: i.unit || null, qty: i.qty, unit_price: i.unit_price, billing_method: 'measure', progress_pct: 0, sort: sort++ }));
-  await db.insert('boq_items', rows);
+  const ins = await db.insert('boq_items', rows);
+  // מתוכנת התמחיר: העלויות נכנסות לתמחיר של כל סעיף, והתקורות לתקורת הפרויקט
+  if (fo && P.project.project_type !== 'dev') {
+    const byKey = Object.fromEntries(fo.main.map(i => [`${i.code}|${i.description}`, i]));
+    const lines = [];
+    (ins || []).forEach(it => { const f = byKey[`${it.code || ''}|${it.description}`]; if (v.fo_cost && f) f.lines.forEach((l, k) => lines.push({ tenant_id: S.tenantId, project_id: P.id, boq_item_id: it.id, ...l, sort: k })); });
+    if (lines.length) await db.insert('cost_lines', lines);
+    if (v.fo_oh && fo.siteOHPct) { const nv = Math.round(fo.siteOHPct * 10) / 10; await db.update('projects', P.id, { overhead_pct: nv }); await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'הגדרות פרויקט', field: 'overhead_pct', old_value: P.project.overhead_pct, new_value: nv, reason: 'תקורות אתר מתוכנת התמחיר' }); }
+  }
   await logChange({ project_id: P.id, entity: 'boq', label: `קליטת כתב כמויות מ-${file.name}`, field: v.how === 'replace' ? 'החלפה' : 'הוספה', new_value: `${rows.length} סעיפים, ${Math.round(p.calcTotal).toLocaleString('en-US')} ₪` });
   toast(`נקלטו ${rows.length} סעיפים`); render();
 }

@@ -6,6 +6,7 @@ import { cashflow, CF_ROWS, CF_IN, CF_OUT, monthLabel, usedRows, groupPeriods, P
 import { projData, summarize } from './common.js';
 import { loadXLSX } from '../import.js';
 import { devCashBlock } from './devcash.js';
+import { partyOfMany } from '../dev.js';
 
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const opt = () => ({ ahead: 12, delay: 0, pid: '', per: 'month', ...(store('subcon-cf') || {}) });
@@ -45,6 +46,8 @@ function cashflowBlock(data, ids, title) {
     const o = opt();
     const st = settings();
     const r = cfFor(data, ids, o);
+    const pt = partyOfMany(ids.map(id => data.projects.find(p => p.id === id)).filter(Boolean));
+    const L = k => CF_ROWS[k].replace('מהקבלן הראשי', pt.from);
     const cur = r.months.find(m => m.m === r.cur);
     const view = groupPeriods(r.months, o.per, r.cur);
     const fut = r.months.filter(m => !m.past);
@@ -56,7 +59,7 @@ function cashflowBlock(data, ids, title) {
     const el = h(`<div>
       <div class="actions" style="margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <span class="mut small">טווח:</span><div class="seg" id="ah">${[3, 6, 12].map(k => `<button type="button" data-k="${k}" class="${o.ahead === k ? 'on' : ''}">${k} חודשים</button>`).join('')}</div>
-        <span class="mut small">תרחיש עיכוב בתשלומי הקבלן הראשי:</span><div class="seg" id="dl">${[0, 30, 60].map(k => `<button type="button" data-k="${k}" class="${o.delay === k ? 'on' : ''}">${k ? `+${k} יום` : 'בזמן'}</button>`).join('')}</div>
+        <span class="mut small">תרחיש עיכוב בתשלומי ${pt.the}:</span><div class="seg" id="dl">${[0, 30, 60].map(k => `<button type="button" data-k="${k}" class="${o.delay === k ? 'on' : ''}">${k ? `+${k} יום` : 'בזמן'}</button>`).join('')}</div>
         ${perSeg(o.per)}
         <button class="btn ghost small" id="xl">ייצוא לאקסל</button></div>
       <div class="kpis">
@@ -69,7 +72,7 @@ function cashflowBlock(data, ids, title) {
       <div class="card" style="padding:10px 6px">${chart(view, n(st.cash_min))}</div>
       <div class="tw cft"><table><thead><tr><th class="stk">₪ לפני מע"מ</th>${view.map(m => `<th class="n ${m.cur ? 'curm' : ''}">${m.label}${m.past ? '<div class="small mut">בפועל</div>' : m.cur ? `<div class="small">${o.per === 'month' ? 'החודש' : 'כולל החודש'}</div>` : ''}</th>`).join('')}</tr></thead><tbody>
         <tr class="sec"><td class="stk" colspan="1"><b>כניסות</b></td>${view.map(() => '<td></td>').join('')}</tr>
-        ${usedRows(CF_IN, view).map(k => row(k, CF_ROWS[k], view)).join('')}
+        ${usedRows(CF_IN, view).map(k => row(k, L(k), view)).join('')}
         <tr><td class="stk">מע"מ שנגבה</td>${view.map(m => `<td class="n mut">${m.vatIn ? m0(m.vatIn) : ''}</td>`).join('')}</tr>
         <tr class="tot"><td class="stk">סה"כ כניסות</td>${view.map(m => `<td class="n">${money(m.inTotal)}</td>`).join('')}</tr>
         <tr class="sec"><td class="stk"><b>יציאות</b></td>${view.map(() => '<td></td>').join('')}</tr>
@@ -92,10 +95,10 @@ function cashflowBlock(data, ids, title) {
       const M = view.find(x => x.m === mk);
       const its = M.items.filter(i => i.key === key);
       const pn = id => data.projects.find(p => p.id === id)?.name || '';
-      modal({ title: `${CF_ROWS[key]} · ${M.label}`, ok: 'סגירה', cancel: null, body: `<div class="tw" style="box-shadow:none"><table><thead><tr>${ids.length > 1 ? '<th>פרויקט</th>' : ''}<th>פירוט</th><th class="n">לפני מע"מ</th><th class="n">מע"מ</th></tr></thead><tbody>
+      modal({ title: `${L(key)} · ${M.label}`, ok: 'סגירה', cancel: null, body: `<div class="tw" style="box-shadow:none"><table><thead><tr>${ids.length > 1 ? '<th>פרויקט</th>' : ''}<th>פירוט</th><th class="n">לפני מע"מ</th><th class="n">מע"מ</th></tr></thead><tbody>
         ${its.map(i => `<tr>${ids.length > 1 ? `<td>${esc(pn(i.projectId))}</td>` : ''}<td>${esc(i.label)}</td><td class="n">${m0(i.pre)}</td><td class="n mut">${i.v ? m0(i.v) : ''}</td></tr>`).join('')}</tbody></table></div>` });
     });
-    $('#xl', el).onclick = () => exportCf(view, title, o, st);
+    $('#xl', el).onclick = () => exportCf(view, title, o, st, L);
     wrap.appendChild(el);
   };
   draw();
@@ -125,12 +128,12 @@ export function chart(view, min) {
     <div class="legend small"><span><i style="background:var(--gi)"></i>נטו בחודש</span><span><i style="background:var(--acc)"></i>יתרה מצטברת</span><span class="mut">עמודות בהירות = חודשים שעברו</span></div>`;
 }
 
-async function exportCf(view, title, o, st) {
+async function exportCf(view, title, o, st, L = k => CF_ROWS[k]) {
   const XLSX = await loadXLSX();
   const r = v => Math.round(n(v));
   const aoa = [[`תזרים מזומנים - ${title}`], [`הופק ${todayStr()} · לפי ${PERIODS[o.per] || 'חודש'} · תרחיש עיכוב ${o.delay} יום · מינימום ${r(st.cash_min)}`], [],
     ['', ...view.map(m => (m.label || monthLabel(m.m)) + (m.past ? ' (בפועל)' : ''))],
-    ['כניסות'], ...usedRows(CF_IN, view).map(k => [CF_ROWS[k], ...view.map(m => r(m.rows[k]))]),
+    ['כניסות'], ...usedRows(CF_IN, view).map(k => [L(k), ...view.map(m => r(m.rows[k]))]),
     ['מע"מ שנגבה', ...view.map(m => r(m.vatIn))], ['סה"כ כניסות', ...view.map(m => r(m.inTotal))],
     ['יציאות'], ...usedRows(CF_OUT, view).map(k => [CF_ROWS[k], ...view.map(m => r(m.rows[k]))]),
     ['מע"מ ששולם', ...view.map(m => r(m.vatOut))], ['סה"כ יציאות', ...view.map(m => r(m.outTotal))],
