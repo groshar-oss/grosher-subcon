@@ -4,7 +4,7 @@ import { h, esc, $, toast, store, modal } from '../util.js';
 import { db, isCloud, uuid } from '../db.js';
 import { loadDemoClients, removeDemoClients } from '../demo-clients.js';
 import { S, can, roleName, tenant, render, reloadTenants } from '../app.js';
-import { gconf, setGconf, gConnect, gDisconnect, gReady, gEnabled } from '../google.js';
+import { gconf, setGconf, gConnect, gDisconnect, gReady, gEnabled, gmailSend, isEmail } from '../google.js';
 
 export async function viewSettings() {
   const theme = store('subcon-theme') || 'auto';
@@ -43,17 +43,35 @@ function googleCard() {
     <form id="gf"><div class="grid g2">
       <label class="fld"><span>מזהה OAuth Client ID</span><input name="clientId" dir="ltr" value="${esc(g.clientId)}" placeholder="xxxx.apps.googleusercontent.com"${CONFIG.googleClientId ? ' readonly' : ''}><small>${CONFIG.googleClientId ? 'מוגדר באתר לכל המכשירים' : 'מ-Google Cloud, אותו פרויקט של מערכת התזרים. ההסבר בחוברת ההתקנה'}</small></label>
       <label class="fld"><span>שם תיקיית הבסיס בדרייב</span><input name="rootName" value="${esc(g.rootName)}"></label></div>
-      <div class="actions"><button class="btn ghost" type="submit">שמירה</button>${on ? '<button class="btn ghost" type="button" id="gdis">ניתוק</button>' : '<button class="btn" type="button" id="gcon">התחברות ל-Google</button>'}</div></form></div>`;
+      <h3 style="margin:14px 0 4px">כתובת השולח במיילים</h3>
+      <p class="small mut">המיילים ממשיכים לצאת ישירות מהמערכת דרך Gmail. כאן קובעים מה יראה הנמען בשורת השולח. הכתובת חייבת להיות מוגדרת קודם ב-Gmail תחת "שליחת דואר בשם", אחרת Gmail ישלח מכתובת ה-Gmail עצמה.</p>
+      <div class="grid g2">
+      <label class="fld"><span>שם השולח</span><input name="fromName" maxlength="80" value="${esc(g.fromName)}" placeholder="יונתן גרושר | גרושר פרויקטים"></label>
+      <label class="fld"><span>כתובת השולח</span><input name="fromEmail" type="email" dir="ltr" value="${esc(g.fromEmail)}" placeholder="Jonatan@groshar.co.il"><small>ריק = כתובת ה-Gmail המחוברת</small></label>
+      <label class="fld"><span>תשובות יגיעו אל (לא חובה)</span><input name="replyTo" type="email" dir="ltr" value="${esc(g.replyTo)}"><small>ריק = כתובת השולח</small></label>
+      <label class="chk"><input type="checkbox" name="bccSelf"${g.bccSelf ? ' checked' : ''}> <span>עותק מוסתר של כל מייל לכתובת השולח</span></label></div>
+      <div class="actions"><button class="btn ghost" type="submit">שמירה</button>${on ? '<button class="btn ghost" type="button" id="gtest">מייל בדיקה</button><button class="btn ghost" type="button" id="gdis">ניתוק</button>' : '<button class="btn" type="button" id="gcon">התחברות ל-Google</button>'}</div></form></div>`;
 }
 function wireGoogle(el) {
   const f = $('#gf', el); if (!f) return;
   f.onsubmit = e => { e.preventDefault(); const v = Object.fromEntries(new FormData(f)); const prev = gconf();
-    setGconf({ clientId: v.clientId.trim(), rootName: v.rootName.trim() || 'גרושר - בקרת עלויות ותזרים', folders: v.rootName.trim() !== prev.rootName ? {} : prev.folders }); toast('נשמר'); render(); };
+    const fe = (v.fromEmail || '').trim(), rt = (v.replyTo || '').trim();
+    if (fe && !isEmail(fe)) return toast('כתובת השולח לא תקינה', 'bad');
+    if (rt && !isEmail(rt)) return toast('כתובת "תשובות יגיעו אל" לא תקינה', 'bad');
+    setGconf({ clientId: v.clientId.trim(), rootName: v.rootName.trim() || 'גרושר - בקרת עלויות ותזרים', folders: v.rootName.trim() !== prev.rootName ? {} : prev.folders,
+      fromName: (v.fromName || '').trim(), fromEmail: fe, replyTo: rt, bccSelf: !!v.bccSelf }); toast('נשמר'); render(); };
   $('#gcon', el)?.addEventListener('click', async () => {
     const v = Object.fromEntries(new FormData(f)); if (v.clientId.trim()) setGconf({ clientId: v.clientId.trim() });
     try { await gConnect(); toast('מחובר ל-Google'); render(); } catch (e) { toast(e.message, 'bad'); }
   });
   $('#gdis', el)?.addEventListener('click', () => { gDisconnect(); toast('נותק'); render(); });
+  // מייל בדיקה לכתובת השולח: רואים בתיבה מה מופיע בשורת השולח
+  $('#gtest', el)?.addEventListener('click', async () => {
+    const g = gconf(); const to = isEmail(g.fromEmail) ? g.fromEmail.trim() : prompt('לאיזו כתובת לשלוח את מייל הבדיקה?') || '';
+    if (!isEmail(to)) return toast('אין כתובת לבדיקה', 'bad');
+    try { await gmailSend({ to, subject: 'מייל בדיקה · גרושר · בקרת עלויות ותזרים', html: `<p>זה מייל בדיקה מהמערכת.</p><p>אם בשורת השולח מופיע ${esc(g.fromEmail || 'כתובת ה-Gmail')}, ההגדרה עובדת. אם מופיעה כתובת ה-Gmail במקום, צריך להשלים ב-Gmail את "שליחת דואר בשם" (ראו חוברת ההתקנה).</p>` }); toast('מייל בדיקה נשלח ל-' + to); }
+    catch (e) { toast(e.message, 'bad'); }
+  });
 }
 
 // לקוחות דמו: שלושה קבלנים לדוגמה (גבס, צבע, ריצוף) ויזם אחד, למנהל השירות בלבד
