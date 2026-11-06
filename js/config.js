@@ -6,5 +6,8 @@ export const CONFIG = {
   supabaseAnonKey: 'sb_publishable_GErjk-Y1BEdVoZQkaluApw_8lbrjPJ_',
   // מזהה OAuth של Google (לא חובה כאן, אפשר להזין גם במסך "תצוגה ומצב"). משמש לשמירת קבצים בדרייב ולשליחת התראות מה-Gmail.
   googleClientId: '150346945279-htl8i0huva9oq8o62799mae1n6lrhqqg.apps.googleusercontent.com',
-  appName: 'גרושר · בקרת עלויות ותזרים'
+  appName: 'גרושר · בקרת עלויות ותזרים',
+  // כתובת השולח בכל המיילים שהמערכת שולחת דרך Gmail. חייבת להיות מוגדרת ב-Gmail תחת "שליחת דואר בשם". ריק = כתובת ה-Gmail המחוברת
+  mailFromName: 'יונתן גרושר | גרושר פרויקטים',
+  mailFromEmail: 'Jonatan@groshar.co.il'
 };

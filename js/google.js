@@ -9,7 +9,8 @@ const SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis
 const DAPI = 'https://www.googleapis.com/drive/v3/', DUP = 'https://www.googleapis.com/upload/drive/v3/', FOLDER = 'application/vnd.google-apps.folder';
 
 // מזהה שהוגדר בקובץ ההגדרות של האתר גובר על מה שנשמר בדפדפן, כדי שיעבוד אותו דבר בכל טלפון ומחשב
-export const gconf = () => { const s = store(K) || {}; return { rootName: 'גרושר - בקרת עלויות ותזרים', enabled: false, folders: {}, lastSync: 0, lastErr: '', ...s, clientId: CONFIG.googleClientId || s.clientId || '' }; };
+export const gconf = () => { const s = store(K) || {}; return { rootName: 'גרושר - בקרת עלויות ותזרים', enabled: false, folders: {}, lastSync: 0, lastErr: '',
+  fromName: CONFIG.mailFromName || '', fromEmail: CONFIG.mailFromEmail || '', replyTo: '', bccSelf: false, ...s, clientId: CONFIG.googleClientId || s.clientId || '' }; };
 const save = c => store(K, c);
 export function setGconf(patch) { const c = { ...gconf(), ...patch }; save(c); return c; }
 
@@ -81,11 +82,22 @@ export async function driveUpload(blob, { name, folder, fileId, description } = 
   return gfetch(url, { method: fileId ? 'PATCH' : 'POST', body: fd });
 }
 
-// מייל HTML מה-Gmail של המשתמשת המחוברת
+// מייל HTML מה-Gmail המחובר. כתובת השולח (למשל Jonatan@groshar.co.il) חייבת להיות מוגדרת ב-Gmail תחת "שליחת דואר בשם", אחרת Gmail שולח מכתובת ה-Gmail עצמה
 const b64 = s => btoa(unescape(encodeURIComponent(s)));
 const wrap76 = s => s.replace(/.{76}/g, '$&\r\n');
+const EMAIL = /^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/;
+export const isEmail = s => EMAIL.test(String(s || '').trim());
+/** שורות From / Reply-To / Bcc לפי הגדרת השולח. בלי כתובת שולח: אין שורות, ו-Gmail שולח מהכתובת שלו כמו קודם */
+export function senderHeaders(c, recipients = []) {
+  const email = String(c?.fromEmail || '').trim();
+  if (!isEmail(email)) return [];
+  const name = String(c?.fromName || '').replace(/[\r\n<>"]/g, ' ').replace(/\s+/g, ' ').trim();
+  const reply = isEmail(c?.replyTo) ? String(c.replyTo).trim() : email;
+  const inTo = recipients.some(r => String(r).toLowerCase().includes(email.toLowerCase()));
+  return [`From: ${name ? `=?UTF-8?B?${b64(name)}?= <${email}>` : email}`, `Reply-To: ${reply}`, ...(c?.bccSelf && !inTo ? [`Bcc: ${email}`] : [])];
+}
 export async function gmailSend({ to, cc = [], subject, html, attachments = [] }) {
-  const head = [`To: ${[].concat(to).join(', ')}`, ...([].concat(cc).length ? [`Cc: ${[].concat(cc).join(', ')}`] : []), `Subject: =?UTF-8?B?${b64(subject)}?=`, 'MIME-Version: 1.0'];
+  const head = [...senderHeaders(gconf(), [].concat(to, cc)), `To: ${[].concat(to).join(', ')}`, ...([].concat(cc).length ? [`Cc: ${[].concat(cc).join(', ')}`] : []), `Subject: =?UTF-8?B?${b64(subject)}?=`, 'MIME-Version: 1.0'];
   let mime;
   if (!attachments.length) mime = [...head, 'Content-Type: text/html; charset=UTF-8', 'Content-Transfer-Encoding: base64', '', wrap76(b64(html))].join('\r\n');
   else {
@@ -101,7 +113,7 @@ export async function gmailSend({ to, cc = [], subject, html, attachments = [] }
     mime = [...head, `Content-Type: multipart/mixed; boundary="${bnd}"`, '', ...parts].join('\r\n');
   }
   const raw = b64(mime).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  window.__LAST_GMAIL__ = { to: [].concat(to), cc: [].concat(cc), subject, html, attachments: attachments.map(a => ({ name: a.name, size: a.blob.size })) }; // לבדיקות
+  window.__LAST_GMAIL__ = { from: senderHeaders(gconf(), [].concat(to, cc)), to: [].concat(to), cc: [].concat(cc), subject, html, attachments: attachments.map(a => ({ name: a.name, size: a.blob.size })) }; // לבדיקות
   return gfetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ raw }) });
 }
 const blobB64 = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
