@@ -12,11 +12,12 @@ const UNITS = ['מ"ר', 'מ"א', "יח'", "קומפ'", 'מ"ק', 'טון', 'ק"ג
 
 // ===== כתב כמויות =====
 export function tabBoq(P, variationId = null, { dev = false } = {}) {
-  const items = P.pd.items.filter(i => (i.variation_id || null) === variationId);
+  const all = P.pd.items.filter(i => (i.variation_id || null) === variationId);
+  const items = all.filter(i => !i.is_overhead), ohItems = dev || variationId ? [] : all.filter(i => i.is_overhead);
   const word = dev ? 'תקציב' : 'כתב כמויות';
   const total = items.reduce((s, i) => s + itemSale(i), 0);
   const el = h(`<div>
-    ${can.edit() ? `<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ סעיף</button>${variationId ? '' : `<button class="btn ghost" id="imp">${dev ? 'קליטת תקציב (אקסל / תמחיר)' : 'קליטה (אקסל / תמחיר)'}</button>`}${variationId ? '' : '<input type="file" id="file" accept=".xlsx,.xls,.csv,.json" hidden>'}<button class="btn ghost" id="exp">ייצוא לאקסל</button></div>` : ''}
+    ${can.edit() ? `<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ סעיף</button>${variationId ? '' : `<button class="btn ghost" id="imp">${dev ? 'קליטת תקציב (אקסל / תמחיר)' : 'קליטה (אקסל / תמחיר)'}</button>`}${variationId ? '' : '<input type="file" id="file" accept=".xlsx,.xls,.csv,.json" hidden>'}<button class="btn ghost" id="exp">ייצוא לאקסל</button>${!dev && !variationId && !ohItems.length ? '<button class="btn ghost" id="ohadd">+ פרק תקורות אתר</button>' : ''}</div>` : ''}
     <div class="tw"><table><thead><tr><th>קוד</th><th>תיאור</th><th>יח'</th><th class="n">כמות</th><th class="n">${dev ? 'מחיר תקציב' : "מחיר יח'"}</th><th class="n">סה"כ</th><th class="hide-m">${dev ? '' : 'חיוב'}</th>${can.edit() ? '<th></th>' : ''}</tr></thead><tbody id="tb"></tbody></table></div></div>`);
   const tb = $('#tb', el);
   const cols = can.edit() ? 8 : 7;
@@ -32,10 +33,13 @@ export function tabBoq(P, variationId = null, { dev = false } = {}) {
   }
   if (items.length) tb.insertAdjacentHTML('beforeend', `<tr class="tot"><td></td><td>סה"כ ${variationId ? 'הוראת שינוי' : word} (${items.length} סעיפים)</td><td></td><td></td><td></td><td class="n">${money(total)}</td><td class="hide-m"></td>${can.edit() ? '<td></td>' : ''}</tr>`);
 
+  if (ohItems.length) tb.insertAdjacentHTML('beforeend', ohSection(P, ohItems, cols));
   $('#add', el)?.addEventListener('click', () => itemDialog(P, null, variationId));
-  $$('[data-ed]', el).forEach(b => b.onclick = () => itemDialog(P, items.find(i => i.id === b.dataset.ed), variationId));
+  $('#ohadd', el)?.addEventListener('click', () => addOverheadChapter(P));
+  $('#ohnew', el)?.addEventListener('click', () => itemDialog(P, null, null, { oh: true }));
+  $$('[data-ed]', el).forEach(b => b.onclick = () => { const it = all.find(i => i.id === b.dataset.ed); itemDialog(P, it, variationId, { oh: !!it.is_overhead }); });
   $$('[data-del]', el).forEach(b => b.onclick = async () => {
-    const it = items.find(i => i.id === b.dataset.del);
+    const it = all.find(i => i.id === b.dataset.del);
     const hasExp = P.pd.expenses.some(e => e.boq_item_id === it.id);
     if (!(await confirmBox('מחיקת סעיף', `למחוק את "${it.description}"? התמחיר שלו יימחק.${hasExp ? ' הוצאות שמשויכות אליו יעברו ל"כללי לפרויקט".' : ''}`, 'מחיקה', true))) return;
     await db.remove('boq_items', it.id);
@@ -49,7 +53,33 @@ export function tabBoq(P, variationId = null, { dev = false } = {}) {
   return el;
 }
 
-export async function itemDialog(P, it, variationId = null) {
+// ===== פרק תקורות אתר: סעיפים פנימיים עם עלות בלבד =====
+export const OH_CHAPTER = 'תקורות אתר';
+export const OH_TEMPLATE = [['מנהל עבודה', 'חודש'], ['ביטוח עבודות קבלניות', "קומפ'"], ['שמירה', 'חודש'], ['מכולת משרד ושירותים לאתר', 'חודש'], ['ניקיון ופינוי פסולת', 'חודש'], ['חשמל ומים לאתר', 'חודש'], ['הובלות וציוד כללי', "קומפ'"]];
+export const ohRows = (pid, list = OH_TEMPLATE, start = 0) => list.map(([d, u], k) => ({ tenant_id: S.tenantId, project_id: pid, variation_id: null, chapter: OH_CHAPTER, code: `OH.${String(k + 1).padStart(2, '0')}`, description: d, unit: u, qty: null, unit_price: null, billing_method: 'lump', progress_pct: 0, is_overhead: true, sort: start + k }));
+function ohSection(P, ohItems, cols) {
+  const ohBy = Object.fromEntries((P.summary?.rows || []).map(r => [r.item.id, r.c]));
+  const plan = ohItems.reduce((a, i) => a + n(ohBy[i.id]?.planned), 0);
+  return `<tr class="sec"><td colspan="${cols}">${OH_CHAPTER} <span class="chip">פנימי · לא מופיע למזמין</span> <span class="mut small">· תמחיר ${money(plan)}</span></td></tr>`
+    + ohItems.map(i => `<tr><td>${esc(i.code || '')}</td><td class="wrap">${esc(i.description)}${ohBy[i.id]?.noCosting ? ` <a class="chip amber" href="#/project/${P.id}/costing">לתמחר</a>` : ''}</td><td>${esc(i.unit || '')}</td><td class="n" colspan="3"><span class="mut small">עלות בלבד: ${money(ohBy[i.id]?.planned || 0)}</span></td><td class="hide-m"></td>
+      ${can.edit() ? `<td><button class="btn small ghost" data-ed="${i.id}">עריכה</button> <button class="btn small ghost" data-del="${i.id}" aria-label="מחיקה">✕</button></td>` : ''}</tr>`).join('')
+    + (can.edit() ? `<tr><td colspan="${cols}"><button class="btn small ghost" id="ohnew">+ סעיף תקורה</button> <span class="small mut">את העלות מזינים בלשונית "תמחיר", והוצאות משייכים לסעיף כמו לכל סעיף.</span></td></tr>` : '');
+}
+async function addOverheadChapter(P) {
+  const pct = n(P.project.overhead_pct);
+  const v = await modal({ title: 'פרק תקורות אתר', ok: 'הוספה', body: `<p>יתווסף פרק "${OH_CHAPTER}" עם ${OH_TEMPLATE.length} סעיפים: ${OH_TEMPLATE.map(x => esc(x[0])).join(', ')}.</p>
+    <p class="small mut">הסעיפים פנימיים: בלי מחיר מכירה, לא מופיעים בכתב הכמויות למזמין ולא בחשבונות. את העלות מזינים בלשונית "תמחיר", ואת ההוצאות משייכים אליהם, וכך רואים בקרה גם על התקורה.</p>
+    ${pct ? `<label class="chk"><input type="checkbox" name="zero" checked> <span>לאפס את התקורה באחוזים (כרגע ${pct}%), כדי שהתקורה לא תיספר פעמיים</span></label>` : ''}` });
+  if (!v) return;
+  const start = Math.max(0, ...P.pd.items.map(i => n(i.sort))) + 1;
+  await db.insert('boq_items', ohRows(P.id, OH_TEMPLATE, start));
+  if (pct && v.zero) { await db.update('projects', P.id, { overhead_pct: 0 }); await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'הגדרות פרויקט', field: 'תקורה %', old_value: pct, new_value: 0, reason: 'מעבר לפרק תקורות אתר' }); }
+  await logChange({ project_id: P.id, entity: 'boq', label: OH_CHAPTER, field: 'פרק תקורות', new_value: `${OH_TEMPLATE.length} סעיפים` });
+  toast('פרק התקורות נוסף. עכשיו מזינים עלות בלשונית "תמחיר".'); render();
+}
+
+export async function itemDialog(P, it, variationId = null, { oh = false } = {}) {
+  if (oh) return ohItemDialog(P, it);
   const chapters = [...new Set(P.pd.items.map(i => i.chapter).filter(Boolean))];
   const body = `<datalist id="chl">${chapters.map(c => `<option value="${esc(c)}">`).join('')}</datalist><datalist id="unl">${UNITS.map(u => `<option value="${esc(u)}">`).join('')}</datalist>
     <div class="grid g2">${field('פרק', 'chapter', it?.chapter ?? (variationId ? 'הוראות שינוי' : chapters.at(-1) || ''), { attrs: 'list="chl"' })}${field('קוד סעיף', 'code', it?.code, { attrs: 'dir="auto"' })}</div>
@@ -77,6 +107,22 @@ export async function itemDialog(P, it, variationId = null) {
   render();
 }
 
+async function ohItemDialog(P, it) {
+  const v = await modal({ title: it ? 'עריכת סעיף תקורה' : 'סעיף תקורה חדש', body: `<p class="small mut">סעיף פנימי בפרק "${OH_CHAPTER}": בלי מחיר מכירה ולא מופיע למזמין. את העלות מזינים בלשונית "תמחיר".</p>
+    <div class="grid g2">${field('קוד סעיף', 'code', it?.code, { attrs: 'dir="auto"' })}${field('יחידה', 'unit', it?.unit ?? 'חודש', { attrs: 'list="unl"' })}</div>${field('תיאור', 'description', it?.description, { req: true })}
+    <datalist id="unl">${UNITS.map(u => `<option value="${esc(u)}">`).join('')}</datalist>`, validate: d => !d.description.trim() && 'חסר תיאור' });
+  if (!v) return;
+  const row = { code: v.code.trim() || null, description: v.description.trim(), unit: v.unit.trim() || null };
+  if (it) await db.update('boq_items', it.id, row);
+  else {
+    const k = P.pd.items.filter(i => i.is_overhead).length;
+    const [r] = ohRows(P.id, [[row.description, row.unit]], Math.max(0, ...P.pd.items.map(i => n(i.sort))) + 1);
+    const [ni] = await db.insert('boq_items', { ...r, code: row.code || `OH.${String(k + 1).padStart(2, '0')}` });
+    await logChange({ project_id: P.id, entity: 'boq_item', entity_id: ni.id, label: `${ni.code || ''} ${row.description}`, field: 'סעיף תקורה חדש' });
+  }
+  toast('נשמר'); render();
+}
+
 async function exportBoq(P, items) {
   const XLSX = await loadXLSX();
   const rows = [['פרק', 'קוד', 'תיאור', 'יחידה', 'כמות', 'מחיר יחידה', 'סה"כ', 'שיטת חיוב']].concat(items.map(i => [i.chapter || '', i.code || '', i.description, i.unit || '', n(i.qty), n(i.unit_price), itemSale(i), BILLING[i.billing_method]]));
@@ -91,7 +137,7 @@ const fitoutNote = (fo, P) => { const dev = P.project.project_type === 'dev';
   return `<div class="note small"><b>קובץ מתוכנת התמחיר.</b> מחירי היחידה הם מחירי ההגשה (עלות × מקדם העמסה ${fo.K.toFixed(3)}, או מחיר נעול). סה"כ ${money(fo.sellTotal)} לפני מע"מ.${fo.K > 2.5 ? ` <span class="neg"><b>מקדם ההעמסה חריג (${fo.K.toFixed(2)}).</b> כדאי לבדוק את התקורות בתוכנת התמחיר לפני הקליטה.</span>` : ''}
     ${fo.options.length ? ` ${fo.options.length} חלופות לא נקלטות (אפשר להוסיף אותן כהוראת שינוי).` : ''}
     ${dev ? '' : `<label class="chk" style="margin:6px 0 0"><input type="checkbox" name="fo_cost" checked> <span>להעביר גם את העלויות לתמחיר של כל סעיף. עלות ישירה: ${money(fo.direct)}</span></label>
-    ${fo.siteOH ? `<label class="chk" style="margin:4px 0 0"><input type="checkbox" name="fo_oh" checked> <span>לעדכן את תקורת הפרויקט ל-${(Math.round(fo.siteOHPct * 10) / 10)}%. תקורות אתר: ${money(fo.siteOH)}<br><small class="mut">${esc(fo.overheads.filter(o => o.total).map(o => o.name).join(' · '))}</small></span></label>` : ''}`}</div>`; };
+    ${fo.siteOH ? `<label class="chk" style="margin:4px 0 0"><input type="checkbox" name="fo_oh" checked> <span>להקים פרק "${OH_CHAPTER}" מהתקורות שבקובץ (${fo.overheads.filter(o => o.total).length} סעיפים, ${money(fo.siteOH)}, ${(Math.round(fo.siteOHPct * 10) / 10)}% מהעלות הישירה). התקורה באחוזים בפרויקט תתאפס${P.pd.items.some(i => i.is_overhead) ? ', ופרק התקורות הקיים יוחלף' : ''}<br><small class="mut">${esc(fo.overheads.filter(o => o.total).map(o => o.name).join(' · '))}</small></span></label>` : ''}`}</div>`; };
 
 async function importFlow(P, file) {
   let sheets;
@@ -99,7 +145,7 @@ async function importFlow(P, file) {
   let cur = bestSheet(sheets) || { ...sheets[0], parsed: parseBoq(sheets[0].rows) };
   let map = cur.parsed.ok ? { ...cur.parsed.map, headerRow: cur.parsed.headerRow } : { headerRow: 0 };
   const fo = sheets[0].fitout || null; // קובץ מתוכנת התמחיר: יש גם עלויות ותקורות
-  const existing = P.pd.items.filter(i => !i.variation_id);
+  const existing = P.pd.items.filter(i => !i.variation_id && !i.is_overhead);
   const v = await modal({ title: `קליטת כתב כמויות: ${file.name}`, wide: true, ok: 'קליטה', body: '<div id="impbox"></div>', onMount: el => {
     const box = $('#impbox', el);
     const draw = () => {
@@ -152,7 +198,16 @@ async function importFlow(P, file) {
     const lines = [];
     (ins || []).forEach(it => { const f = byKey[`${it.code || ''}|${it.description}`]; if (v.fo_cost && f) f.lines.forEach((l, k) => lines.push({ tenant_id: S.tenantId, project_id: P.id, boq_item_id: it.id, ...l, sort: k })); });
     if (lines.length) await db.insert('cost_lines', lines);
-    if (v.fo_oh && fo.siteOHPct) { const nv = Math.round(fo.siteOHPct * 10) / 10; await db.update('projects', P.id, { overhead_pct: nv }); await logChange({ project_id: P.id, entity: 'project', entity_id: P.id, label: 'הגדרות פרויקט', field: 'overhead_pct', old_value: P.project.overhead_pct, new_value: nv, reason: 'תקורות אתר מתוכנת התמחיר' }); }
+    if (v.fo_oh && fo.siteOH) {
+      // התקורות מהקובץ הופכות לסעיפי תקורה פנימיים, עם העלות שלהם בתמחיר
+      const oldOH = P.pd.items.filter(i => i.is_overhead);
+      if (oldOH.length) await db.removeWhere('boq_items', { eq: { project_id: P.id }, in: { id: oldOH.map(i => i.id) } });
+      const list = fo.overheads.filter(o => o.total);
+      const ohIns = await db.insert('boq_items', ohRows(P.id, list.map(o => [o.name || 'תקורה', "קומפ'"]), sort));
+      await db.insert('cost_lines', (ohIns || []).map((it, k) => ({ tenant_id: S.tenantId, project_id: P.id, boq_item_id: it.id, kind: 'other', description: list[k].name || 'תקורה', qty: 1, unit: "קומפ'", unit_cost: Math.round(list[k].total * 100) / 100, waste_pct: 0, sort: 0 })));
+      if (n(P.project.overhead_pct)) await db.update('projects', P.id, { overhead_pct: 0 });
+      await logChange({ project_id: P.id, entity: 'boq', label: OH_CHAPTER, field: 'פרק תקורות מתוכנת התמחיר', old_value: n(P.project.overhead_pct) ? `${n(P.project.overhead_pct)}%` : null, new_value: `${list.length} סעיפים, ${Math.round(fo.siteOH).toLocaleString('en-US')} ₪` });
+    }
   }
   await logChange({ project_id: P.id, entity: 'boq', label: `קליטת כתב כמויות מ-${file.name}`, field: v.how === 'replace' ? 'החלפה' : 'הוספה', new_value: `${rows.length} סעיפים, ${Math.round(p.calcTotal).toLocaleString('en-US')} ₪` });
   toast(`נקלטו ${rows.length} סעיפים`); render();
@@ -178,19 +233,19 @@ export function tabCosting(P) {
   const groups = groupBy(P.pd.items, i => i.variation_id ? `הוראת שינוי ${vos[i.variation_id]?.number || ''} · ${vos[i.variation_id]?.title || ''}` : (i.chapter || 'ללא פרק'));
   let T = { sale: 0, plan: 0 };
   const el = h(`<div>
-    <div class="actions" style="margin-bottom:12px">${can.edit() ? '<button class="btn ghost" id="copy">העתקת תמחיר מפרויקט אחר</button>' : ''}<span class="mut small">תקורה בפרויקט: ${oh}% מהעלות הישירה (משנים בהגדרות הפרויקט)</span></div>
+    <div class="actions" style="margin-bottom:12px">${can.edit() ? '<button class="btn ghost" id="copy">העתקת תמחיר מפרויקט אחר</button>' : ''}<span class="mut small">${P.pd.items.some(i => i.is_overhead) ? `תקורה: בפרק "${OH_CHAPTER}"${oh ? ` + ${oh}% מהעלות הישירה (בהגדרות הפרויקט)` : ''}` : `תקורה בפרויקט: ${oh}% מהעלות הישירה (משנים בהגדרות הפרויקט, או מוסיפים פרק תקורות אתר בכתב הכמויות)`}</span></div>
     <div class="tw"><table><thead><tr><th>קוד</th><th>תיאור</th><th class="n">כמות</th><th class="n">מכירה</th><th class="n">עלות ישירה</th><th class="n">תמחיר כולל</th><th class="n">עלות ליח'</th><th class="n">מחיר ליח'</th><th class="n">רווח מתוכנן</th><th class="n">% רווח</th><th></th></tr></thead><tbody id="tb"></tbody></table></div></div>`);
   const tb = $('#tb', el);
   if (!P.pd.items.length) tb.innerHTML = `<tr><td colspan="11" class="empty">אין סעיפים. <a href="#/project/${P.id}/boq">לכתב הכמויות</a></td></tr>`;
   for (const [g, rs] of groups) {
     tb.insertAdjacentHTML('beforeend', `<tr class="sec"><td colspan="11">${esc(g)}</td></tr>`);
     for (const i of rs) {
-      const ls = linesBy[i.id] || [], pl = itemPlanned(ls, oh), sale = itemSale(i), prof = sale - pl.total;
+      const io = !!i.is_overhead, ls = linesBy[i.id] || [], pl = itemPlanned(ls, io ? 0 : oh), sale = itemSale(i), prof = io ? 0 : sale - pl.total;
       T.sale += sale; T.plan += pl.total;
-      const cls = !ls.length ? '' : prof < 0 ? 'al-dr' : '';
-      tb.insertAdjacentHTML('beforeend', `<tr class="click ${cls}" data-cost="${i.id}"><td>${esc(i.code || '')}</td><td class="wrap">${esc(i.description)}${ls.length ? '' : ' <span class="chip amber">לא תומחר</span>'}${prof < 0 && ls.length ? ' <span class="chip red">הפסד מתוכנן</span>' : ''}</td>
+      const cls = !ls.length || io ? '' : prof < 0 ? 'al-dr' : '';
+      tb.insertAdjacentHTML('beforeend', `<tr class="click ${cls}" data-cost="${i.id}"><td>${esc(i.code || '')}</td><td class="wrap">${esc(i.description)}${ls.length ? '' : ' <span class="chip amber">לא תומחר</span>'}${prof < 0 && ls.length ? ' <span class="chip red">הפסד מתוכנן</span>' : ''}${io ? ' <span class="chip">תקורה · פנימי</span>' : ''}</td>
         <td class="n">${num(i.qty)} <span class="small mut">${esc(i.unit || '')}</span></td><td class="n">${money(sale)}</td><td class="n">${money(pl.direct)}</td><td class="n">${money(pl.total)}</td>
-        <td class="n">${n(i.qty) ? money(pl.total / n(i.qty), { unit: true }) : ''}</td><td class="n">${money(i.unit_price, { unit: true })}</td><td class="n">${ls.length ? money(prof) : ''}</td><td class="n">${ls.length && sale ? pct(prof / sale * 100) : ''}</td>
+        <td class="n">${n(i.qty) ? money(pl.total / n(i.qty), { unit: true }) : ''}</td><td class="n">${money(i.unit_price, { unit: true })}</td><td class="n">${ls.length && !io ? money(prof) : ''}</td><td class="n">${ls.length && sale ? pct(prof / sale * 100) : ''}</td>
         <td><button class="btn small ${ls.length ? 'ghost' : ''}">${can.edit() ? (ls.length ? 'עריכה' : 'תמחור') : 'פירוט'}</button></td></tr>`);
     }
   }
@@ -201,7 +256,7 @@ export function tabCosting(P) {
 }
 
 export async function costingEditor(P, item) {
-  const oh = n(P.project.overhead_pct);
+  const oh = item.is_overhead ? 0 : n(P.project.overhead_pct);
   const orig = P.pd.lines.filter(l => l.boq_item_id === item.id).sort((a, b) => n(a.sort) - n(b.sort));
   let lines = orig.map(l => ({ id: l.id, kind: l.kind, description: l.description || '', qty: l.qty ?? '', unit: l.unit || '', unit_cost: l.unit_cost ?? '', waste_pct: l.waste_pct ?? 0, labor_type: l.labor_type || '', crew: l.crew ?? '' }));
   const sale = itemSale(item);
@@ -209,7 +264,7 @@ export async function costingEditor(P, item) {
   const actual = P.summary.rows.find(r => r.item.id === item.id)?.c.actual || 0;
   const needReason = orig.length && (n(item.progress_pct) > 0 || actual > 0);
   const others = P.pd.items.filter(i => i.id !== item.id && P.pd.lines.some(l => l.boq_item_id === i.id));
-  const body = `<p class="small mut">${num(item.qty)} ${esc(item.unit || '')} × ${money(item.unit_price, { unit: true })} = <b>${money(sale)}</b> · תקורה ${oh}% · עבודה עצמית: עלות יום כולל עלות מעביד (מקדם ${settings().employer_factor})</p>
+  const body = `<p class="small mut">${item.is_overhead ? `סעיף תקורה (פנימי, בלי מכירה). למשל: מנהל עבודה 8 חודשים × עלות לחודש` : `${num(item.qty)} ${esc(item.unit || '')} × ${money(item.unit_price, { unit: true })} = <b>${money(sale)}</b> · תקורה ${oh}%`} · עבודה עצמית: עלות יום כולל עלות מעביד (מקדם ${settings().employer_factor})</p>
     ${ro ? '' : `<div class="actions" style="margin-bottom:10px"><button type="button" class="btn small" id="addl">+ שורה</button>
       <select id="tpl" style="width:auto;min-height:30px"><option value="">תבנית לפי מקצוע…</option>${Object.keys(TEMPLATES).map(k => `<option>${esc(k)}</option>`).join('')}</select>
       ${others.length ? `<select id="cp" style="width:auto;min-height:30px;max-width:260px"><option value="">העתקה מסעיף אחר…</option>${others.map(i => `<option value="${i.id}">${esc(`${i.code || ''} ${i.description}`.slice(0, 60))}</option>`).join('')}</select>` : ''}</div>`}
@@ -241,6 +296,7 @@ export async function costingEditor(P, item) {
       };
       const sumUp = () => {
         const pl = itemPlanned(lines, oh), prof = sale - pl.total;
+        if (item.is_overhead) { $('#lsum', el).innerHTML = `<div class="kpis" style="grid-template-columns:repeat(2,1fr)"><div class="kpi"><div class="l">תמחיר התקורה</div><div class="v">${money(pl.total)}</div></div><div class="kpi"><div class="l">מכירה</div><div class="v">—</div><div class="n">סעיף פנימי, נכלל ברווח הפרויקט</div></div></div>`; return; }
         $('#lsum', el).innerHTML = `<div class="kpis" style="grid-template-columns:repeat(4,1fr)"><div class="kpi"><div class="l">עלות ישירה</div><div class="v">${money(pl.direct)}</div></div>
           <div class="kpi"><div class="l">תמחיר כולל תקורה</div><div class="v">${money(pl.total)}</div><div class="n">${n(item.qty) ? money(pl.total / n(item.qty), { unit: true }) + ' ליח\'' : ''}</div></div>
           <div class="kpi"><div class="l">רווח מתוכנן</div><div class="v ${prof < 0 ? 'neg' : 'pos'}">${money(prof)}</div></div><div class="kpi"><div class="l">אחוז רווח</div><div class="v ${prof < 0 ? 'neg' : ''}">${pct(sale ? prof / sale * 100 : 0)}</div></div></div>
