@@ -244,6 +244,7 @@ function renderLogin() {
   const invited = (new URLSearchParams(location.search).get('invite') || '').trim();
   const el = h(`<div class="login"><div class="box">
     <div class="logo"><img src="icons/logo-neg.png" alt=""><div><b>גרושר פרויקטים</b><div class="mut small">בקרת עלויות ותזרים</div></div></div>
+    <h1 class="lg-h">כניסה למערכת</h1>
     ${invited ? `<div class="note small" style="margin-bottom:10px"><b>הוזמנת למערכת.</b> בפעם הראשונה: לבחור סיסמה וללחוץ "הרשמה", ואז לאשר את המייל שיגיע. אחרי הכניסה תראה את הלקוח שהזמין אותך.</div>` : ''}
     <form id="lf">${field('אימייל', 'email', invited, { type: 'email', req: true, attrs: 'autocomplete="username" dir="ltr"' })}
     ${field('סיסמה', 'password', '', { type: 'password', req: true, attrs: 'autocomplete="current-password" dir="ltr"' })}

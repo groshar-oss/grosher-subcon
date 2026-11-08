@@ -418,3 +418,82 @@ fieldset.mods legend{padding:0 6px}
 .pctin{display:inline-flex;align-items:center;gap:3px}.pctin b{font-weight:600;color:var(--mut,#6b7491)}
 .ovr{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px}.ovr .small{flex-basis:100%}
 .ovrbox{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin:8px 0}
+
+/* ===== עיצוב לפי האתר groshar.co.il (אושר 08.11.2026): פחם, זית, שמנת, פינות ישרות, Heebo. השכבה הזו תמיד אחרונה בקובץ ===== */
+:root{
+  --navy:#11151C;--navy2:#1E242F;--navy3:#2A313D;--grad:#B4AE14;--acc:#6E6A0C;--acc2:#B4AE14;
+  --olive:#B4AE14;--olive-ink:#6E6A0C;--logo:#1B2A4A;
+  --bg:#F6F3EC;--card:#fff;--line:#DDD8CC;--line2:#BDB7A8;--ink:#151A22;--mut:#646A74;--th:#EEEAE0;--thd:#11151C;--tot:#EEEAE0;--sec:#F4F2DC;--secink:#4F4C08;
+  --gi:#24683F;--ri:#C03535;
+  --shadow:none;
+  --gridc:rgba(21,26,34,.04);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --bg:#0F1319;--card:#191F29;--line:#29303C;--line2:#3A4250;--ink:#F2F0EA;--mut:#9AA1AC;--th:#141922;--thd:#0B0E13;--tot:#141922;--sec:#2A2B18;--secink:#D6CF4C;--acc:#C2BC2A;--olive-ink:#C2BC2A;--gi:#5CC48A;--ri:#F07B7B;--gridc:rgba(255,255,255,.03)}}
+:root[data-theme=dark]{
+  --bg:#0F1319;--card:#191F29;--line:#29303C;--line2:#3A4250;--ink:#F2F0EA;--mut:#9AA1AC;--th:#141922;--thd:#0B0E13;--tot:#141922;--sec:#2A2B18;--secink:#D6CF4C;--acc:#C2BC2A;--olive-ink:#C2BC2A;--gi:#5CC48A;--ri:#F07B7B;--gridc:rgba(255,255,255,.03)}
+body{background-color:var(--bg);background-image:linear-gradient(var(--gridc) 1px,transparent 1px),linear-gradient(90deg,var(--gridc) 1px,transparent 1px);background-size:80px 80px;background-attachment:fixed}
+/* פינות ישרות כמו באתר. עיגולים (נקודות, מספרים) נשארים עגולים */
+*,*::before,*::after{border-radius:0!important}
+.dot,.helpb,.gnum,.stepper li span,.gpill i,.gdot,input[type=radio]{border-radius:50%!important}
+/* כותרות: דקות כמו באתר */
+h1{font-weight:300;font-size:28px;letter-spacing:0;line-height:1.2}
+h2{font-weight:500}
+h3{font-weight:500}
+.top .sub{color:var(--olive-ink);font-weight:600}
+/* תפריט צד */
+.side{background:var(--navy);color:#C9CDD4}
+.brand b{font-weight:500}.brand span{color:var(--olive)}
+.brand img{background:transparent}
+.tsel{background:transparent;border:1px solid rgba(255,255,255,.16)}
+.nav a{color:#C9CDD4;position:relative}
+.nav a:hover{background:rgba(255,255,255,.06)}
+.nav a.on{background:rgba(255,255,255,.07);color:#fff;font-weight:500;box-shadow:inset -3px 0 0 var(--olive)}
+.nav .grp{color:#7D8592}
+.side-foot{color:#9AA1AC}.side-foot button{color:#C9CDD4}
+.rolebadge{background:transparent;border:1px solid var(--olive);color:var(--olive)}
+/* כפתורים: זית עם טקסט כהה, משני עם מסגרת כהה */
+.btn{background:var(--olive);color:#11151C;border:1px solid var(--olive);font-weight:600}
+.btn:hover{filter:none;background:#C2BC22;border-color:#C2BC22}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--ink)}
+.btn.ghost:hover{background:var(--ink);color:var(--bg)}
+.btn.danger{background:#C03535;border-color:#C03535;color:#fff}
+.btn.link{background:none;border:0;color:var(--ink);text-decoration:none;border-bottom:1px solid var(--olive)}
+.btn.link:hover{background:none;color:var(--olive-ink)}
+a{color:var(--olive-ink)}
+input,select,textarea{border-color:var(--line2)}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--olive)}
+/* כרטיסים, טבלאות, לשוניות */
+.card,.kpi,.tw,.rpage,.ccard{box-shadow:none;border:1px solid var(--line)}
+.kpi .v,.kpis .v{font-weight:300}
+th{background:var(--thd);color:#E9EBEF;font-weight:500;border-bottom:0}
+.cft thead .stk{background:var(--thd)}
+.bar{background:var(--tot)}
+table.gt th.grp{color:#F2F0EA}
+th a{color:#E9EBEF}
+tr.sec>td{background:var(--sec);color:var(--secink)}
+.tabs a{background:var(--card);border-color:var(--line);color:var(--ink)}
+.tabs a:hover{border-color:var(--ink)}
+.tabs a.on{background:var(--navy);border-color:var(--navy);color:#fff;box-shadow:inset 0 -3px 0 var(--olive)}
+.seg{border-color:var(--line2)}
+.seg button.on{background:var(--navy);color:#fff}
+.chip{background:var(--tot)}
+.dlg{box-shadow:0 20px 60px rgba(0,0,0,.35);border-top:3px solid var(--olive)}
+.toast{background:var(--navy);border-inline-start:3px solid var(--olive)}
+.savebar{box-shadow:none;border-top:2px solid var(--olive)}
+.drop{border-color:var(--line2)}
+/* מסך כניסה: כמו ה-hero באתר */
+.login{background:#11151C;background-image:linear-gradient(rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px);background-size:80px 80px}
+.login .box{background:#F6F3EC;color:#151A22;border-top:3px solid var(--olive);padding:34px 32px}
+.login .box input{background:#fff;color:#151A22}
+.login .btn.ghost{color:#151A22;border-color:#151A22}
+.login .btn.link{color:#151A22}
+@media (max-width:760px){.mobile-top{background:var(--navy);border-bottom:3px solid var(--olive)}}
+@media print{body{background:#fff;background-image:none}th{background:var(--thd)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+.login .logo{justify-content:center}
+.login .lg-h{text-align:center;font-weight:300;font-size:30px;margin:4px 0 6px;color:#151A22}
+.login .lg-h::after{content:"";display:block;width:200px;height:14px;margin:10px auto 16px;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 14'%3E%3Cpath d='M0 10h82M118 10h82' stroke='%23B4AE14' stroke-width='1'/%3E%3Cpath d='M88 12.5 100 3l12 9.5' fill='none' stroke='%23B4AE14' stroke-width='1.8'/%3E%3C/svg%3E") center/contain no-repeat}
+.login .fld>span{color:#646A74}
+body{font-variant-emoji:text}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .bar i[style*="1B2A4A"]{background:#A9BADB!important}}
+:root[data-theme=dark] .bar i[style*="1B2A4A"]{background:#A9BADB!important}
