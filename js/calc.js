@@ -34,6 +34,8 @@ export function lineCost(l) {
 
 // סעיף תקורה: פנימי, לא מופיע למזמין ולא בחשבונות. העלות שלו נכנסת לבקרה כמו כל סעיף
 export const isOverhead = it => !!it?.is_overhead;
+// בלת"מ: רזרבה לבלתי צפוי. נספרת כעלות עד סוף הפרויקט, ומה שלא נוצל ממנה בסוף נחשב רווח
+export const isReserve = it => isOverhead(it) && it.code === 'OH.RES';
 
 // עלות מתוכננת לסעיף: ישירה + תקורה באחוזים מהישירה
 export function itemPlanned(lines, overheadPct = 0) {
@@ -84,11 +86,12 @@ export function itemControl(item, lines, actual, overheadPct, commit = 0) {
 }
 
 // סעיף תקורה: הצפי = התמחיר, אלא אם כבר הוצא (או הוזמן) יותר. כך תשלום מראש (ביטוח) לא נראה כחריגה
-function ohControl(it, lines, actual, commit, progress) {
+function ohControl(it, lines, actual, commit, progress, done = false) {
   const c = itemControl({ ...it, progress_pct: progress }, lines, actual, 0, commit);
-  if (!(it.forecast_manual !== null && it.forecast_manual !== undefined && it.forecast_manual !== '')) c.forecast = Math.max(c.planned, n(actual) + n(commit));
+  const reserve = isReserve(it);
+  if (!(it.forecast_manual !== null && it.forecast_manual !== undefined && it.forecast_manual !== '')) c.forecast = reserve && done ? n(actual) + n(commit) : Math.max(c.planned, n(actual) + n(commit));
   c.profit = -c.forecast; c.overrun = overrunPct(c.forecast, c.planned); c.spendAhead = false;
-  return { ...c, overhead: true };
+  return { ...c, overhead: true, reserve, reserveLeft: reserve ? Math.max(0, c.planned - n(actual) - n(commit)) : 0 };
 }
 
 const sum = (arr, k) => arr.reduce((s, x) => s + n(x[k]), 0);
@@ -106,7 +109,7 @@ export function projectSummary(data, mode = 'approved') {
   const wPlan = work.map(it => itemPlanned(linesBy[it.id] || [], oh).total), wSum = wPlan.reduce((a, b) => a + b, 0);
   const ohProgress = wSum ? work.reduce((a, it, k) => a + wPlan[k] * Math.min(100, Math.max(0, n(it.progress_pct))), 0) / wSum : 0;
   const rows = items.map(it => ({ item: it, vo: it.variation_id ? voById[it.variation_id] : null,
-    c: isOverhead(it) ? ohControl(it, linesBy[it.id] || [], actualByItem[it.id] || 0, commitByItem[it.id] || 0, ohProgress)
+    c: isOverhead(it) ? ohControl(it, linesBy[it.id] || [], actualByItem[it.id] || 0, commitByItem[it.id] || 0, ohProgress, project?.status === 'closed' || ohProgress >= 100)
       : itemControl(it, linesBy[it.id] || [], actualByItem[it.id] || 0, oh, commitByItem[it.id] || 0) }));
 
   const contractRows = rows.filter(r => !r.item.variation_id);

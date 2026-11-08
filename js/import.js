@@ -88,7 +88,11 @@ export async function readWorkbook(file) {
   const XLSX = await loadXLSX();
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: 'array', cellDates: false });
-  return wb.SheetNames.map(name => ({ name, rows: XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: '', blankrows: false }) }));
+  const sheets = wb.SheetNames.map(name => ({ name, rows: XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: '', blankrows: false }) }));
+  // אקסל מתוכנת התמחיר (ריכוז, ניתוח עלויות, תקורות, הכנה להגשה): נקלט עם העלויות והתקורות
+  const { isPricingXlsx, pricingSheet } = await import('./pricingxlsx.js');
+  if (isPricingXlsx(sheets)) { try { return [pricingSheet(sheets)]; } catch (e) { console.warn('pricing xlsx', e); } }
+  return sheets;
 }
 
 let xlsxP;

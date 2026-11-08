@@ -133,11 +133,26 @@ async function exportBoq(P, items) {
 
 // ===== קליטה מאקסל =====
 // הערה בחלון הקליטה לקובץ מתוכנת התמחיר
+// סעיפי התקורה שייקלטו מהקובץ: תקורות אתר, תקורות משרד ובלת"מ (רזרבה)
+export const RESERVE_CODE = 'OH.RES';
+function ohFromFile(fo) {
+  const list = fo.overheads.filter(o => o.total).map(o => ({ description: o.name || 'תקורה', unit: o.unit || "קומפ'", lines: o.lines || [{ kind: 'other', description: o.name || 'תקורה', qty: 1, unit: "קומפ'", unit_cost: Math.round(o.total * 100) / 100, waste_pct: 0 }] }));
+  const one = (description, code, amt) => ({ description, code, unit: "קומפ'", lines: [{ kind: 'other', description, qty: 1, unit: "קומפ'", unit_cost: Math.round(amt * 100) / 100, waste_pct: 0 }] });
+  if (fo.office > 0) list.push(one('תקורות משרד', 'OH.OFF', fo.office));
+  if (fo.reserve > 0) list.push(one('בלת"מ – רזרבה לבלתי צפוי', RESERVE_CODE, fo.reserve));
+  return list;
+}
+// הערה בחלון הקליטה לקובץ מתוכנת התמחיר: מה ייקלט, ובדיקה מול הריכוז שבקובץ
 const fitoutNote = (fo, P) => { const dev = P.project.project_type === 'dev';
-  return `<div class="note small"><b>קובץ מתוכנת התמחיר.</b> מחירי היחידה הם מחירי ההגשה (עלות × מקדם העמסה ${fo.K.toFixed(3)}, או מחיר נעול). סה"כ ${money(fo.sellTotal)} לפני מע"מ.${fo.K > 2.5 ? ` <span class="neg"><b>מקדם ההעמסה חריג (${fo.K.toFixed(2)}).</b> כדאי לבדוק את התקורות בתוכנת התמחיר לפני הקליטה.</span>` : ''}
+  const S = fo.summary || {}, oh = ohFromFile(fo), profit = fo.sellTotal - fo.direct - fo.siteOH - (fo.office || 0) - (fo.reserve || 0);
+  const chk = (lbl, mine, file) => `<tr><td>${lbl}</td><td class="n">${money(mine)}</td><td class="n">${file == null ? '<span class="mut">—</span>' : money(file)}</td><td>${file == null ? '' : Math.abs(mine - file) <= 1 ? '<span class="pos">✓ תואם</span>' : `<span class="neg">פער ${money(mine - file)}</span>`}</td></tr>`;
+  return `<div class="note small"><b>קובץ מתוכנת התמחיר${fo.meta?.client ? ` · לקוח: ${esc(fo.meta.client)}` : ''}.</b> מחירי היחידה הם מחירי ההגשה (בממוצע פי ${fo.K.toFixed(3)} מהעלות). סה"כ ${money(fo.sellTotal)} לפני מע"מ.${fo.K > 2.5 ? ` <span class="neg"><b>מקדם ההעמסה חריג (${fo.K.toFixed(2)}).</b> כדאי לבדוק את התקורות בתוכנת התמחיר לפני הקליטה.</span>` : ''}
     ${fo.options.length ? ` ${fo.options.length} חלופות לא נקלטות (אפשר להוסיף אותן כהוראת שינוי).` : ''}
-    ${dev ? '' : `<label class="chk" style="margin:6px 0 0"><input type="checkbox" name="fo_cost" checked> <span>להעביר גם את העלויות לתמחיר של כל סעיף. עלות ישירה: ${money(fo.direct)}</span></label>
-    ${fo.siteOH ? `<label class="chk" style="margin:4px 0 0"><input type="checkbox" name="fo_oh" checked> <span>להקים פרק "${OH_CHAPTER}" מהתקורות שבקובץ (${fo.overheads.filter(o => o.total).length} סעיפים, ${money(fo.siteOH)}, ${(Math.round(fo.siteOHPct * 10) / 10)}% מהעלות הישירה). התקורה באחוזים בפרויקט תתאפס${P.pd.items.some(i => i.is_overhead) ? ', ופרק התקורות הקיים יוחלף' : ''}<br><small class="mut">${esc(fo.overheads.filter(o => o.total).map(o => o.name).join(' · '))}</small></span></label>` : ''}`}</div>`; };
+    ${dev ? '' : `<div class="tw" style="margin:8px 0;box-shadow:none"><table><thead><tr><th>בדיקה מול הקובץ</th><th class="n">נקלט</th><th class="n">לפי הריכוז בקובץ</th><th></th></tr></thead><tbody>
+      ${chk('מכירה למזמין', fo.sellTotal, fo.fileSell ?? S.final ?? null)}${chk('עלות ישירה', fo.direct, S.direct ?? null)}${chk('תקורות אתר', fo.siteOH, S.siteOH ?? null)}
+      ${fo.office || S.office ? chk('תקורות משרד', fo.office || 0, S.office ?? null) : ''}${fo.reserve || S.reserve ? chk('בלת"מ (רזרבה)', fo.reserve || 0, S.reserve ?? null) : ''}${chk('רווח מתוכנן', profit, S.profit != null && S.final != null && S.formula != null ? S.profit + (S.final - S.formula) : S.profit ?? null)}</tbody></table></div>
+    <label class="chk" style="margin:6px 0 0"><input type="checkbox" name="fo_cost" checked> <span>להעביר גם את העלויות לתמחיר של כל סעיף. עלות ישירה: ${money(fo.direct)}</span></label>
+    ${oh.length ? `<label class="chk" style="margin:4px 0 0"><input type="checkbox" name="fo_oh" checked> <span>פרק "${OH_CHAPTER}" מהקובץ: ${oh.length} סעיפים, ${money(oh.reduce((a, o) => a + o.lines.reduce((b, l) => b + n(l.qty) * n(l.unit_cost), 0), 0))}${fo.reserve ? '. הבלת"מ נקלט כרזרבה: מה שלא נוצל ממנה בסוף הפרויקט נחשב רווח' : ''}. התקורה באחוזים בפרויקט תתאפס${P.pd.items.some(i => i.is_overhead) ? ', וסעיפי תקורה קיימים יתעדכנו לפי השם' : ''}<br><small class="mut">${esc(oh.map(o => o.description).join(' · '))}</small></span></label>` : ''}`}</div>`; };
 
 async function importFlow(P, file) {
   let sheets;
@@ -167,7 +182,7 @@ async function importFlow(P, file) {
         ${fo ? fitoutNote(fo, P) : ''}
         ${miss.length ? `<div class="note"><b>${miss.length} סעיפים בלי מחיר או כמות:</b> ${miss.slice(0, 8).map(i => esc(`${i.code} ${i.description}`.trim()) + ` (${i.missing.join(', ')}, שורה ${i.row})`).join(' · ')}${miss.length > 8 ? ' …' : ''}
           <label class="chk" style="margin:8px 0 0"><input type="checkbox" name="force"> לקלוט בכל זאת (הסעיפים יסומנו באדום)</label></div>` : ''}
-        ${existing.length ? `<label class="fld"><span>כבר יש ${existing.length} סעיפים בפרויקט</span><select name="how"><option value="append">להוסיף לקיימים</option><option value="replace">להחליף את כתב הכמויות הקיים (כולל התמחיר שלו)</option></select></label>` : ''}
+        ${existing.length ? `<label class="fld"><span>כבר יש ${existing.length} סעיפים בפרויקט</span><select name="how">${p.items.some(i => i.code) ? '<option value="update">לעדכן לפי קוד סעיף (שומר אחוזי ביצוע, הוצאות וחשבונות)</option>' : ''}<option value="append">להוסיף לקיימים</option><option value="replace">להחליף את כתב הכמויות הקיים (כולל התמחיר שלו)</option></select></label>` : ''}
         <div class="tw" style="max-height:340px;overflow:auto"><table><thead><tr><th>פרק</th><th>קוד</th><th>תיאור</th><th>יח'</th><th class="n">כמות</th><th class="n">מחיר</th><th class="n">סה"כ</th></tr></thead><tbody>
         ${p.items.slice(0, 400).map(i => `<tr class="${i.missing.length ? 'al-r' : ''}"><td class="small">${esc(i.chapter)}</td><td>${esc(i.code)}</td><td class="wrap">${esc(i.description)}</td><td>${esc(i.unit)}</td><td class="n">${num(i.qty)}</td><td class="n">${money(i.unit_price, { unit: true })}</td><td class="n">${money(n(i.qty) * n(i.unit_price))}</td></tr>`).join('')}
         </tbody></table></div>`;
@@ -185,32 +200,55 @@ async function importFlow(P, file) {
   } });
   if (!v) return;
   const p = parseBoq(cur.rows, map);
-  if (v.how === 'replace') {
+  const how = existing.length ? v.how : 'append';
+  if (how === 'replace') {
     if (!(await confirmBox('החלפת כתב כמויות', `${existing.length} הסעיפים הקיימים והתמחיר שלהם יימחקו.`, 'החלפה', true))) return;
     await db.removeWhere('boq_items', { eq: { project_id: P.id }, isNull: ['variation_id'], in: { id: existing.map(i => i.id) } });
   }
-  let sort = v.how === 'replace' ? 0 : Math.max(0, ...P.pd.items.map(i => n(i.sort))) + 1;
-  const rows = p.items.map(i => ({ tenant_id: S.tenantId, project_id: P.id, variation_id: null, chapter: i.chapter || null, code: i.code || null, description: i.description, unit: i.unit || null, qty: i.qty, unit_price: i.unit_price, billing_method: 'measure', progress_pct: 0, sort: sort++ }));
-  const ins = await db.insert('boq_items', rows);
-  // מתוכנת התמחיר: העלויות נכנסות לתמחיר של כל סעיף, והתקורות לתקורת הפרויקט
-  if (fo && P.project.project_type !== 'dev') {
-    const byKey = Object.fromEntries(fo.main.map(i => [`${i.code}|${i.description}`, i]));
-    const lines = [];
-    (ins || []).forEach(it => { const f = byKey[`${it.code || ''}|${it.description}`]; if (v.fo_cost && f) f.lines.forEach((l, k) => lines.push({ tenant_id: S.tenantId, project_id: P.id, boq_item_id: it.id, ...l, sort: k })); });
-    if (lines.length) await db.insert('cost_lines', lines);
-    if (v.fo_oh && fo.siteOH) {
-      // התקורות מהקובץ הופכות לסעיפי תקורה פנימיים, עם העלות שלהם בתמחיר
-      const oldOH = P.pd.items.filter(i => i.is_overhead);
-      if (oldOH.length) await db.removeWhere('boq_items', { eq: { project_id: P.id }, in: { id: oldOH.map(i => i.id) } });
-      const list = fo.overheads.filter(o => o.total);
-      const ohIns = await db.insert('boq_items', ohRows(P.id, list.map(o => [o.name || 'תקורה', "קומפ'"]), sort));
-      await db.insert('cost_lines', (ohIns || []).map((it, k) => ({ tenant_id: S.tenantId, project_id: P.id, boq_item_id: it.id, kind: 'other', description: list[k].name || 'תקורה', qty: 1, unit: "קומפ'", unit_cost: Math.round(list[k].total * 100) / 100, waste_pct: 0, sort: 0 })));
-      if (n(P.project.overhead_pct)) await db.update('projects', P.id, { overhead_pct: 0 });
-      await logChange({ project_id: P.id, entity: 'boq', label: OH_CHAPTER, field: 'פרק תקורות מתוכנת התמחיר', old_value: n(P.project.overhead_pct) ? `${n(P.project.overhead_pct)}%` : null, new_value: `${list.length} סעיפים, ${Math.round(fo.siteOH).toLocaleString('en-US')} ₪` });
-    }
+  let sort = how === 'replace' ? 0 : Math.max(0, ...P.pd.items.map(i => n(i.sort))) + 1;
+  const costOn = fo && P.project.project_type !== 'dev' && v.fo_cost;
+  const byKey = fo ? Object.fromEntries(fo.main.map(i => [`${i.code}|${i.description}`, i])) : {};
+  const costLines = (it, ls) => ls.map((l, k) => ({ tenant_id: S.tenantId, project_id: P.id, boq_item_id: it.id, ...l, sort: k }));
+  const label = it => `${it.code || ''} ${it.description}`.trim();
+  // עדכון לפי קוד סעיף: סעיף קיים מתעדכן במקום, חדש נוסף, וסעיף שלא בקובץ נשאר
+  const exByCode = how === 'update' ? Object.fromEntries(existing.filter(i => i.code).map(i => [i.code, i])) : {};
+  const fresh = [], upd = [], newLines = [], dropLines = [];
+  for (const i of p.items) {
+    const row = { chapter: i.chapter || null, code: i.code || null, description: i.description, unit: i.unit || null, qty: i.qty, unit_price: i.unit_price };
+    const old = i.code && exByCode[i.code];
+    if (old) {
+      const ch = Object.keys(row).filter(k => String(old[k] ?? '') !== String(row[k] ?? ''));
+      if (ch.length) { await db.update('boq_items', old.id, row); upd.push(old);
+        for (const k of ch.filter(k => ['qty', 'unit_price', 'description'].includes(k))) await logChange({ project_id: P.id, entity: 'boq_item', entity_id: old.id, label: label(row), field: { qty: 'כמות', unit_price: 'מחיר יחידה', description: 'תיאור' }[k], old_value: old[k], new_value: row[k], reason: `קליטה מעודכנת: ${file.name}` }); }
+      const f = byKey[`${i.code}|${i.description}`];
+      if (costOn && f) { dropLines.push(old.id); newLines.push(...costLines(old, f.lines)); }
+      delete exByCode[i.code];
+    } else fresh.push({ tenant_id: S.tenantId, project_id: P.id, variation_id: null, ...row, billing_method: 'measure', progress_pct: 0, sort: sort++ });
   }
-  await logChange({ project_id: P.id, entity: 'boq', label: `קליטת כתב כמויות מ-${file.name}`, field: v.how === 'replace' ? 'החלפה' : 'הוספה', new_value: `${rows.length} סעיפים, ${Math.round(p.calcTotal).toLocaleString('en-US')} ₪` });
-  toast(`נקלטו ${rows.length} סעיפים`); render();
+  const ins = fresh.length ? await db.insert('boq_items', fresh) : [];
+  if (costOn) (ins || []).forEach(it => { const f = byKey[`${it.code || ''}|${it.description}`]; if (f) newLines.push(...costLines(it, f.lines)); });
+  if (dropLines.length) await db.removeWhere('cost_lines', { eq: { project_id: P.id }, in: { boq_item_id: dropLines } });
+  if (newLines.length) await db.insert('cost_lines', newLines);
+  // תקורות מהקובץ: סעיפי תקורה פנימיים (אתר, משרד, בלת"מ). סעיף קיים באותו שם מתעדכן, כך שהוצאות שכבר שויכו נשמרות
+  let ohN = 0;
+  if (fo && P.project.project_type !== 'dev' && v.fo_oh) {
+    const list = ohFromFile(fo), oldOH = P.pd.items.filter(i => i.is_overhead);
+    const byName = Object.fromEntries(oldOH.map(i => [i.description, i]));
+    const addOH = [], drop = [], lines = [];
+    const k0 = oldOH.length;
+    list.forEach((o, k) => { const ex = byName[o.description]; if (ex) { drop.push(ex.id); lines.push(...costLines(ex, o.lines)); delete byName[o.description]; } else addOH.push({ o, k }); });
+    const rows = addOH.map(({ o }, j) => ({ ...ohRows(P.id, [[o.description, o.unit]], sort + j)[0], code: o.code || `OH.${String(k0 + j + 1).padStart(2, '0')}` }));
+    const ohIns = rows.length ? await db.insert('boq_items', rows) : [];
+    (ohIns || []).forEach((it, j) => lines.push(...costLines(it, addOH[j].o.lines)));
+    if (drop.length) await db.removeWhere('cost_lines', { eq: { project_id: P.id }, in: { boq_item_id: drop } });
+    if (lines.length) await db.insert('cost_lines', lines);
+    if (n(P.project.overhead_pct)) await db.update('projects', P.id, { overhead_pct: 0 });
+    ohN = list.length;
+    await logChange({ project_id: P.id, entity: 'boq', label: OH_CHAPTER, field: 'תקורות מתוכנת התמחיר', old_value: n(P.project.overhead_pct) ? `${n(P.project.overhead_pct)}%` : null, new_value: `${list.length} סעיפים${fo.reserve ? `, מתוכם בלת"מ ${Math.round(fo.reserve).toLocaleString('en-US')} ₪` : ''}` });
+  }
+  const kept = Object.keys(exByCode).length;
+  await logChange({ project_id: P.id, entity: 'boq', label: `קליטת כתב כמויות מ-${file.name}`, field: { replace: 'החלפה', update: 'עדכון לפי קוד', append: 'הוספה' }[how], new_value: `${p.items.length} סעיפים, ${Math.round(p.calcTotal).toLocaleString('en-US')} ₪` });
+  toast(how === 'update' ? `עודכנו ${upd.length} סעיפים, נוספו ${fresh.length}${kept ? `. ${kept} סעיפים שלא בקובץ נשארו בפרויקט` : ''}${ohN ? `. תקורות: ${ohN} סעיפים` : ''}` : `נקלטו ${fresh.length} סעיפים${ohN ? ` ועוד ${ohN} סעיפי תקורה` : ''}`); render();
 }
 
 // ===== תמחיר =====
