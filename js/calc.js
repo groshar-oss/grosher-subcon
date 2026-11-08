@@ -25,12 +25,15 @@ export const PROFIT_MODES = {
   all: 'כולל הוראות שינוי שטרם אושרו'
 };
 
-export const itemSale = it => n(it.qty) * n(it.unit_price);
+export const itemSale = it => it.is_overhead ? 0 : n(it.qty) * n(it.unit_price);
 
 export function lineCost(l) {
   const base = n(l.qty) * n(l.unit_cost);
   return l.kind === 'material' ? base * (1 + n(l.waste_pct) / 100) : base;
 }
+
+// סעיף תקורה: פנימי, לא מופיע למזמין ולא בחשבונות. העלות שלו נכנסת לבקרה כמו כל סעיף
+export const isOverhead = it => !!it?.is_overhead;
 
 // עלות מתוכננת לסעיף: ישירה + תקורה באחוזים מהישירה
 export function itemPlanned(lines, overheadPct = 0) {
@@ -80,6 +83,14 @@ export function itemControl(item, lines, actual, overheadPct, commit = 0) {
   };
 }
 
+// סעיף תקורה: הצפי = התמחיר, אלא אם כבר הוצא (או הוזמן) יותר. כך תשלום מראש (ביטוח) לא נראה כחריגה
+function ohControl(it, lines, actual, commit, progress) {
+  const c = itemControl({ ...it, progress_pct: progress }, lines, actual, 0, commit);
+  if (!(it.forecast_manual !== null && it.forecast_manual !== undefined && it.forecast_manual !== '')) c.forecast = Math.max(c.planned, n(actual) + n(commit));
+  c.profit = -c.forecast; c.overrun = overrunPct(c.forecast, c.planned); c.spendAhead = false;
+  return { ...c, overhead: true };
+}
+
 const sum = (arr, k) => arr.reduce((s, x) => s + n(x[k]), 0);
 
 // סיכום פרויקט לפי מצב תצוגת רווחיות
@@ -90,8 +101,13 @@ export function projectSummary(data, mode = 'approved') {
   const linesBy = {};
   for (const l of lines) (linesBy[l.boq_item_id] ||= []).push(l);
   const voById = Object.fromEntries(variations.map(v => [v.id, v]));
+  // סעיפי תקורה (פרק "תקורות אתר"): בלי מכירה, בלי תוספת % תקורה, ואחוז הביצוע שלהם = אחוז הביצוע של שאר החוזה (לפי משקל התמחיר)
+  const work = items.filter(it => !it.variation_id && !isOverhead(it));
+  const wPlan = work.map(it => itemPlanned(linesBy[it.id] || [], oh).total), wSum = wPlan.reduce((a, b) => a + b, 0);
+  const ohProgress = wSum ? work.reduce((a, it, k) => a + wPlan[k] * Math.min(100, Math.max(0, n(it.progress_pct))), 0) / wSum : 0;
   const rows = items.map(it => ({ item: it, vo: it.variation_id ? voById[it.variation_id] : null,
-    c: itemControl(it, linesBy[it.id] || [], actualByItem[it.id] || 0, oh, commitByItem[it.id] || 0) }));
+    c: isOverhead(it) ? ohControl(it, linesBy[it.id] || [], actualByItem[it.id] || 0, commitByItem[it.id] || 0, ohProgress)
+      : itemControl(it, linesBy[it.id] || [], actualByItem[it.id] || 0, oh, commitByItem[it.id] || 0) }));
 
   const contractRows = rows.filter(r => !r.item.variation_id);
   const voGroups = variations.map(v => {
@@ -173,7 +189,8 @@ export function actualsByItem(items, lines, expenses, overheadPct = 0) {
   const out = {};
   const linesBy = {};
   for (const l of lines) (linesBy[l.boq_item_id] ||= []).push(l);
-  const planned = id => itemPlanned(linesBy[id] || [], overheadPct).total;
+  const ohBy = Object.fromEntries(items.map(i => [i.id, isOverhead(i)]));
+  const planned = id => itemPlanned(linesBy[id] || [], ohBy[id] ? 0 : overheadPct).total;
   const spread = (group, amount) => {
     if (!group.length || !amount) return false;
     let w = group.map(i => planned(i.id));

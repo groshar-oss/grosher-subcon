@@ -45,7 +45,7 @@ export function computeBills({ project, items, variations = [], bills, lines, fi
     const rows = [];
     const seen = new Set();
     for (const l of bl) {
-      const it = itemById[l.boq_item_id]; if (!it) continue;
+      const it = itemById[l.boq_item_id]; if (!it || it.is_overhead) continue;
       if (it.variation_id && voById[it.variation_id]?.status === 'rejected') continue;
       const grp = grpOf(it);
       seen.add(it.id);

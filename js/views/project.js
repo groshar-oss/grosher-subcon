@@ -95,7 +95,7 @@ function tabControl(P) {
     <div class="tw" id="ctl"></div>${legend()}
     <div class="cols even"><div class="card"><h2>רווחיות לפי מקור ${modeLine()}</h2><div class="tw" style="box-shadow:none"><table id="split"></table></div></div>
     <div class="card"><h2>איך מחושב</h2><p class="small">צפי עלות לסיום = עלות בפועל + יתרת התמחיר לפי אחוז הביצוע (אלא אם הוזן צפי ידני). רווח צפוי = מכירה פחות צפי עלות. חריגה = צפי עלות מול התמחיר.</p>
-    <p class="small mut">בפועל = הוצאות + עלות עבודה מיומן העבודה. הצפי לא יורד מתחת לבפועל + הזמנות רכש פתוחות. הוצאה כללית לפרויקט מתחלקת בין הסעיפים לפי משקל התמחיר. הוצאה של הוראת שינוי נספרת רק בהוראה.</p>${can.edit() ? '<p class="small mut">אחוז ביצוע מעדכנים בטבלה. עד שיהיו חשבונות חלקיים (שלב 4), זה הנתון שקובע את הצפי.</p>' : ''}</div></div></div>`);
+    <p class="small mut">בפועל = הוצאות + עלות עבודה מיומן העבודה. הצפי לא יורד מתחת לבפועל + הזמנות רכש פתוחות. הוצאה כללית לפרויקט מתחלקת בין הסעיפים לפי משקל התמחיר. הוצאה של הוראת שינוי נספרת רק בהוראה.${P.pd.items.some(i => i.is_overhead) ? ' סעיפי "תקורות אתר" הם עלות בלבד, בלי מכירה. אחוז הביצוע שלהם נקבע אוטומטית לפי שאר הפרויקט.' : ''}</p>${can.edit() ? '<p class="small mut">אחוז ביצוע מעדכנים בטבלה. עד שיהיו חשבונות חלקיים (שלב 4), זה הנתון שקובע את הצפי.</p>' : ''}</div></div></div>`);
   $('#mb', el).appendChild(modeSwitch());
 
   const contractByChapter = groupBy(s.contractRows, r => r.item.chapter || 'ללא פרק');
@@ -103,8 +103,8 @@ function tabControl(P) {
   const head = `<thead><tr><th>קוד</th><th>תיאור</th><th class="n">מכירה</th><th class="n">תמחיר</th><th class="n">בפועל</th><th class="n">צפי לסיום</th><th class="n">רווח צפוי</th><th class="n">% ביצוע</th><th class="n">% הוצאה</th><th class="n">חריגה</th></tr></thead>`;
   const row = r => {
     const c = r.c, a = rowAttr(c.overrun);
-    const prog = can.edit() ? `<input class="cell-in" type="number" min="0" max="100" step="1" inputmode="numeric" dir="ltr" value="${Math.round(c.progress * 10) / 10}" data-prog="${r.item.id}" aria-label="אחוז ביצוע">` : pct(c.progress, { d: 0 });
-    return `<tr class="click ${a.cls}"${a.style} data-item="${r.item.id}"><td>${esc(r.item.code || '')}</td><td class="wrap">${esc(r.item.description)}${c.noCosting ? ' <span class="chip amber">לא תומחר</span>' : ''}${r.item.forecast_manual != null ? ' <span class="chip blue" title="' + esc(r.item.forecast_note || '') + '">צפי ידני</span>' : ''}</td>
+    const prog = c.overhead ? `<span class="small mut" title="סעיף תקורה: אחוז הביצוע לפי שאר הפרויקט">${pct(c.progress, { d: 0 })} אוטו'</span>` : can.edit() ? `<input class="cell-in" type="number" min="0" max="100" step="1" inputmode="numeric" dir="ltr" value="${Math.round(c.progress * 10) / 10}" data-prog="${r.item.id}" aria-label="אחוז ביצוע">` : pct(c.progress, { d: 0 });
+    return `<tr class="click ${a.cls}"${a.style} data-item="${r.item.id}"><td>${esc(r.item.code || '')}</td><td class="wrap">${esc(r.item.description)}${c.noCosting ? ' <span class="chip amber">לא תומחר</span>' : ''}${c.overhead ? ' <span class="chip">תקורה</span>' : ''}${r.item.forecast_manual != null ? ' <span class="chip blue" title="' + esc(r.item.forecast_note || '') + '">צפי ידני</span>' : ''}</td>
       <td class="n">${money(c.sale)}</td><td class="n">${money(c.planned)}</td><td class="n">${money(c.actual)}</td><td class="n">${money(c.forecast)}</td><td class="n">${money(c.profit)}</td>
       <td class="n">${prog}</td><td class="n">${pct(c.spentPct, { d: 0 })}</td><td class="n">${c.noCosting ? '' : pct(c.overrun, { sign: true })}${a.crit ? '<span class="crit">קריטי</span>' : ''}</td></tr>`;
   };
@@ -115,7 +115,7 @@ function tabControl(P) {
   };
   let html = `<table>${head}<tbody>`;
   if (!s.rows.length) html += `<tr><td colspan="10" class="empty">אין סעיפים עדיין. <a href="#/project/${P.id}/boq">לכתב הכמויות</a></td></tr>`;
-  for (const [ch, rs] of contractByChapter) { html += `<tr class="sec"><td colspan="10">${esc(ch)}</td></tr>` + rs.map(row).join('') + (contractByChapter.length > 1 ? subtotal('סה"כ ' + ch, rs) : ''); }
+  for (const [ch, rs] of contractByChapter) { html += `<tr class="sec"><td colspan="10">${esc(ch)}${rs.every(r => r.c.overhead) ? ' <span class="chip">פנימי · עלות בלבד</span>' : ''}</td></tr>` + rs.map(row).join('') + (contractByChapter.length > 1 ? subtotal('סה"כ ' + ch, rs) : ''); }
   if (s.contractRows.length) html += subtotal('סה"כ חוזה', s.contractRows);
   if (voGroups.length) {
     html += `<tr class="sec"><td colspan="10">הוראות שינוי (בנפרד מהחוזה)</td></tr>`;
@@ -153,7 +153,7 @@ async function itemDetail(P, itemId) {
   const it = r.item, c = r.c;
   const lines = P.pd.lines.filter(l => l.boq_item_id === itemId);
   const exps = P.pd.expenses.filter(e => e.boq_item_id === itemId);
-  const oh = n(P.project.overhead_pct);
+  const oh = it.is_overhead ? 0 : n(P.project.overhead_pct);
   const byKind = {};
   for (const l of lines) (byKind[l.kind] ||= { plan: 0, act: 0 }).plan += lineCost(l) * (1 + oh / 100);
   for (const e of exps) { const k = e.kind === 'general' ? 'other' : e.kind; (byKind[k] ||= { plan: 0, act: 0 }).act += n(e.amount); }

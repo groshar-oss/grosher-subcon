@@ -10,6 +10,7 @@ import { modulesFieldset, readModules, syncModulesType, mods, moduleTags } from 
 import { projectContactsBlock, wireProjectContacts, saveProjectContacts } from '../contacts.js';
 import { loadTemplates, templatePicker, wireTemplatePicker, applyTemplate } from './templates.js';
 import { spreadBlock, wireSpread, readSpread } from './spreadui.js';
+import { ohRows, OH_TEMPLATE } from './boq.js';
 
 export function projectForm(p = {}, mcs = [], { isNew = false } = {}) {
   const ov = p.overhead_pct ?? settings().overhead_pct;
@@ -22,7 +23,7 @@ export function projectForm(p = {}, mcs = [], { isNew = false } = {}) {
   ${field('כתובת', 'address', p.address)}${field('מזמין / יזם', 'owner_name', p.owner_name)}
   ${field('תאריך התחלה', 'start_date', p.start_date, { type: 'date' })}${field('תאריך סיום', 'end_date', p.end_date, { type: 'date' })}
   <div class="subonly" ${dev ? 'hidden' : ''}>${select('סוג חוזה', 'contract_type', CONTRACT, p.contract_type || 'measure')}</div>${select('סטטוס', 'status', STATUS, p.status || 'active')}
-  <div class="subonly" ${dev ? 'hidden' : ''}>${field('תנאי תשלום (שוטף + ימים)', 'pay_terms_days', p.pay_terms_days ?? 60, { type: 'number' })}</div><div class="subonly" ${dev ? 'hidden' : ''}>${field('תקורה (% מהעלות הישירה)', 'overhead_pct', ov, { type: 'number' })}</div>
+  <div class="subonly" ${dev ? 'hidden' : ''}>${field('תנאי תשלום (שוטף + ימים)', 'pay_terms_days', p.pay_terms_days ?? 60, { type: 'number' })}</div><div class="subonly" ${dev ? 'hidden' : ''}>${isNew ? `<label class="chk" style="margin-top:22px"><input type="checkbox" name="oh_chapter" checked> <span>פרק "תקורות אתר" בכתב הכמויות<br><small class="mut">מנהל עבודה, ביטוח, שמירה וכו'. סעיפים פנימיים עם עלות, לא מופיעים למזמין</small></span></label><div class="ohpct" hidden>${field('תקורה (% מהעלות הישירה)', 'overhead_pct', ov, { type: 'number' })}</div>` : field('תקורה נוספת (% מהעלות הישירה)', 'overhead_pct', ov, { type: 'number', hint: 'אם התקורה מפורטת בפרק "תקורות אתר", להשאיר 0' })}</div>
   </div><div class="subonly" ${dev ? 'hidden' : ''}><h3 style="margin:6px 0 10px">ניכויים מהחשבונות</h3><div class="grid g4">
   ${field('עיכבון %', 'retention_pct', p.retention_pct ?? 5, { type: 'number' })}${field('תקרת עיכבון ₪', 'retention_cap', p.retention_cap, { type: 'number' })}
   ${field('ביטוח %', 'insurance_pct', p.insurance_pct ?? 0, { type: 'number' })}${field('הוצאות משותפות %', 'shared_pct', p.shared_pct ?? 0, { type: 'number' })}
@@ -66,6 +67,8 @@ export function wireProjectType(el) {
   $$('[name=project_type]', el).forEach(r => r.onchange = () => { sync(); syncModulesType(el, typeNow()); }); sync();
   wireModules(el);
   wireProjectContacts(el);
+  const ohc = $('[name=oh_chapter]', el), ohp = $('.ohpct', el);
+  if (ohc && ohp) { const u = () => { ohp.hidden = ohc.checked; }; ohc.onchange = u; u(); }
 }
 // מודול הצמדה: שדה מדד הבסיס מופיע רק כשהמודול דלוק
 export function wireModules(el) {
@@ -81,10 +84,15 @@ export async function newProject(mcs) {
   const v = await modal({ title: 'פרויקט חדש', body: templatePicker(tpls) + projectForm({}, mcs, { isNew: true }), wide: true, onMount: el => { wireProjectType(el); wireTemplatePicker(el, tpls); }, validate: d => !d.name.trim() && 'חסר שם פרויקט' });
   if (!v) return;
   const row = await projectRow(v, mcs);
+  // פרק תקורות: רק כשאין תבנית עם סעיפים (תבנית עם כתב כמויות קובעת בעצמה)
+  const tplItems = tpls.find(t => t.id === v.tpl)?.data?.items || [];
+  const ohChapter = row.project_type !== 'dev' && !!v.oh_chapter && !tplItems.length;
+  if (ohChapter) row.overhead_pct = 0;
   if (row.project_type === 'dev') Object.assign(row, { main_contractor_id: null, retention_pct: 0, insurance_pct: 0, shared_pct: 0, tax_pct: 0, overhead_pct: 0 });
   const [p] = await db.insert('projects', { tenant_id: S.tenantId, ...row });
   await saveProjectContacts(p.id, v.pc_json);
   const tpl = tpls.find(t => t.id === v.tpl); if (tpl) await applyTemplate(tpl, p);
+  if (ohChapter) await db.insert('boq_items', ohRows(p.id, OH_TEMPLATE, 100000));
   toast(row.project_type === 'dev' ? 'הפרויקט נוסף. השלב הבא: קליטת התקציב' : 'הפרויקט נוסף. השלב הבא: כתב כמויות');
   location.hash = `#/project/${p.id}/boq`;
 }
