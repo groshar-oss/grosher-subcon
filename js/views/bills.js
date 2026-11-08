@@ -27,7 +27,7 @@ const statusChip = (r, today = todayStr()) => {
 // סעיפים בחשבון: חוזה, הוראות שינוי מאושרות, ואחריהן הוראות שינוי שטרם אושרו (לאישור). הוראות שנדחו לא נכנסות
 const voGrp = (i, vo) => !i.variation_id ? 0 : VO_APPROVED.includes(vo[i.variation_id]?.status) ? 1 : 2;
 const billableItems = P => { const vo = Object.fromEntries(P.pd.variations.map(v => [v.id, v]));
-  return P.pd.items.filter(i => !i.variation_id || (vo[i.variation_id] && vo[i.variation_id].status !== 'rejected')).map((i, k) => [i, k]).sort((a, b) => voGrp(a[0], vo) - voGrp(b[0], vo) || a[1] - b[1]).map(x => x[0]); };
+  return P.pd.items.filter(i => !i.is_overhead).filter(i => !i.variation_id || (vo[i.variation_id] && vo[i.variation_id].status !== 'rejected')).map((i, k) => [i, k]).sort((a, b) => voGrp(a[0], vo) - voGrp(b[0], vo) || a[1] - b[1]).map(x => x[0]); };
 
 // ===== לשונית חשבונות בפרויקט =====
 export function tabBills(P) {
