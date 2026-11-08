@@ -75,7 +75,7 @@ export async function viewHome() {
       <div class="meta">${esc(mcName(p.main_contractor_id) || party(p).none)} · ${CONTRACT[p.contract_type] || ''} · שוטף+${p.pay_terms_days} · ${STATUS[p.status]}</div>
       <div class="pr"><div>מכירה<b>${money(t.sale)}</b></div><div>צפי עלות<b>${money(t.forecast)}</b></div><div>רווח צפוי<b class="${t.profit >= 0 ? '' : 'neg'}">${money(t.profit)} <small class="mut">${pct(t.profitPct)}</small></b></div>
       <div>בפועל עד היום<b>${money(t.actual)}</b></div><div>ביצוע / הוצאה<b>${pct(t.progress, { d: 0 })} / ${pct(t.spentPct, { d: 0 })}</b></div></div>
-      <div class="bar" title="כחול: אחוז ביצוע. רקע: אחוז הוצאה מהתמחיר"><i style="width:${Math.min(100, t.spentPct)}%;background:${levelColor(l.cls)};opacity:.35"></i><i style="width:${Math.min(100, t.progress)}%;background:#2f5bea"></i></div>
+      <div class="bar" title="כחול כהה: אחוז ביצוע. רקע: אחוז הוצאה מהתמחיר"><i style="width:${Math.min(100, t.spentPct)}%;background:${levelColor(l.cls)};opacity:.35"></i><i style="width:${Math.min(100, t.progress)}%;background:#1B2A4A"></i></div>
       ${s.excludedActual ? `<div class="small neg" style="margin-top:6px">עלות שכבר הוצאה על הוראות שינוי שלא נכללות בתצוגה: ${money(s.excludedActual)}</div>` : ''}</a>`);
   }
   const al = $('#alist', el);
@@ -123,7 +123,7 @@ export function buildActions(data, sums, devSums = []) {
       out.push({ w: DEV_W[a.type] ?? (red ? 70 + Math.min(n0(a.pct), 25) : 45), color: levelColor(l.cls), sev: red ? 'red' : 'amber', key: `dev|${p.id}|${a.type}|${a.item?.id || a.co?.id || a.bill?.id || a.title}`,
         dtype: a.type, pid: p.id, title: a.title, sub: `${p.name} · ${a.detail}`, amt: a.amount != null ? money(a.amount) : '', href: `#/project/${p.id}/${a.bill ? 'cbill/' + a.bill.id : a.co ? 'cos' : a.type === 'expense_no_item' || a.type === 'vendor_no_contract' ? 'expenses' : a.type === 'invoiced_over_contract' || a.type === 'outside_budget' ? 'contracts' : 'control'}` });
     }
-    if (!s.hasBaseline && s.rows.length) out.push({ w: 40, color: '#2f5bea', dtype: 'baseline_missing', title: 'התקציב עוד לא ננעל כבסיס', sub: p.name, amt: money(s.total.budget), href: `#/project/${p.id}/control` });
+    if (!s.hasBaseline && s.rows.length) out.push({ w: 40, color: '#1B2A4A', dtype: 'baseline_missing', title: 'התקציב עוד לא ננעל כבסיס', sub: p.name, amt: money(s.total.budget), href: `#/project/${p.id}/control` });
     if (!s.rows.length) out.push({ w: 35, color: '#f2c400', title: 'אין תקציב', sub: p.name, amt: '', href: `#/project/${p.id}/boq` });
   }
   // תזרים יזם: הוצאות מעל הכנסות, יתרה מתחת למינימום, תקבול באיחור (6 חודשים קדימה)
@@ -147,7 +147,7 @@ export function buildActions(data, sums, devSums = []) {
     // גבייה: חשבונות באיחור, ותשלום צפוי בשבועיים הקרובים
     const col = collection(s.billing.byBill);
     for (const r of col.overdue) out.push({ w: 98, color: 'var(--ri)', title: `חשבון ${r.bill.number} באיחור תשלום`, sub: `${p.name} · היה צפוי ב-${r.due.split('-').reverse().join('.')}`, amt: money(r.outstanding), href: `#/project/${p.id}/bill/${r.bill.id}` });
-    for (const r of col.dueSoon) out.push({ w: 40, color: '#2f5bea', title: `תשלום צפוי: חשבון ${r.bill.number}`, sub: `${p.name} · ${r.due.split('-').reverse().join('.')}`, amt: money(r.outstanding), href: `#/project/${p.id}/bill/${r.bill.id}` });
+    for (const r of col.dueSoon) out.push({ w: 40, color: '#1B2A4A', title: `תשלום צפוי: חשבון ${r.bill.number}`, sub: `${p.name} · ${r.due.split('-').reverse().join('.')}`, amt: money(r.outstanding), href: `#/project/${p.id}/bill/${r.bill.id}` });
     for (const id of s.billing.order) { const r = s.billing.byBill[id];
       if (r.bill.status === 'submitted' && r.bill.submitted_date && (Date.now() - new Date(r.bill.submitted_date)) / 864e5 > 21) out.push({ w: 55, color: '#ff9f43', title: `חשבון ${r.bill.number} ממתין לאישור יותר מ-3 שבועות`, sub: `${p.name} · הוגש ${r.bill.submitted_date.split('-').reverse().join('.')}`, amt: money(r.curSub), href: `#/project/${p.id}/bill/${r.bill.id}` });
       if (r.approvedStage && r.cut > 0 && r.cut / Math.max(1, r.curSub) >= 0.03) out.push({ w: 52, color: '#ff9f43', title: `קיצוץ פיקוח בחשבון ${r.bill.number}`, sub: `${p.name} · אושר ${Math.round((1 - r.cut / r.curSub) * 100)}% מהמוגש. לבדוק אם לערער`, amt: money(-r.cut), href: `#/project/${p.id}/bill/${r.bill.id}` }); }
@@ -194,7 +194,7 @@ export function buildActions(data, sums, devSums = []) {
   for (const g of (data.guarantees || []).filter(guarVisible(data))) { const s = guaranteeState(g, today); if (s === 'expired' || s === 'soon') out.push({ w: s === 'expired' ? 72 : 56, color: s === 'expired' ? 'var(--ri)' : '#ff9f43', title: `ערבות ${GUAR_KINDS[g.kind]} ${s === 'expired' ? 'פגה' : `פגה בעוד ${daysLeft(g.expiry, today)} ימים`}`, sub: `${data.projects.find(p => p.id === g.project_id)?.name || ''} · ${g.bank || ''} ${g.number || ''} · להאריך או לבקש החזרה`, amt: money(g.amount), href: '#/vendors/guarantees' }); }
   for (const { p, s } of sums) if (p.status === 'closing' || (p.end_date && p.end_date < today)) {
     const fb = finalBill(p, s.billing.retentionTotal);
-    if (!data.bills.some(b => b.project_id === p.id && b.is_final)) out.push({ w: 46, color: '#2f5bea', title: fb.ready ? 'אפשר להגיש חשבון סופי' : 'לקראת חשבון סופי', sub: `${p.name} · ${fb.ready ? `עיכבון לשחרור ${plainMoney(fb.toRelease)}` : 'חסר: ' + fb.missing.join(', ')}`, amt: '', href: `#/project/${p.id}/bills` });
+    if (!data.bills.some(b => b.project_id === p.id && b.is_final)) out.push({ w: 46, color: '#1B2A4A', title: fb.ready ? 'אפשר להגיש חשבון סופי' : 'לקראת חשבון סופי', sub: `${p.name} · ${fb.ready ? `עיכבון לשחרור ${plainMoney(fb.toRelease)}` : 'חסר: ' + fb.missing.join(', ')}`, amt: '', href: `#/project/${p.id}/bills` });
   }
   // תזרים: יתרה צפויה מתחת למינימום ב-6 החודשים הקרובים
   if (sums.length) {
