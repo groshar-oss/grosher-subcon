@@ -45,8 +45,10 @@ export function fitoutCompute(d) {
   });
   const main = items.filter(i => !i.option);
   const sellTotal = main.reduce((a, i) => a + i.sell * i.qty, 0);
+  // תקורות משרד ובלת"מ לפי אחוזי ההעמסה (כמו בריכוז של תוכנת התמחיר)
+  const base = direct + siteOH, office = r2(base * num(L.officeOverheadPct) / 100), reserve = r2((base + office) * num(L.contingencyPct) / 100);
   return { meta: M, loading: L, items, main, options: items.filter(i => i.option), direct, siteOH, overheads, K, sellTotal,
-    siteOHPct: direct ? siteOH / direct * 100 : 0, name: d.name || M.address || '' };
+    siteOHPct: direct ? siteOH / direct * 100 : 0, office, reserve, name: d.name || M.address || '' };
 }
 
 /** הופך את הפרויקט לגיליון "וירטואלי" שהקליטה הרגילה יודעת לקרוא: כותרות, שורת פרק, ושורות סעיפים (בלי חלופות) */
