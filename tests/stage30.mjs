@@ -1,0 +1,62 @@
+// בדיקת חבילה 30: קליטת אקסל מתוכנת התמחיר (מכירה, עלות, תקורות אתר, משרד, בלת"מ כרזרבה, עדכון לפי קוד)
+import { chromium } from 'playwright';
+const BASE = 'http://localhost:8123/'; const KEY = 'grosher-subcon-demo-v5'; const OUT = 'tests/shots/';
+const FILE = 'tests/private/pricing-sample.xlsx';
+const b = await chromium.launch();
+const ok = (name, cond) => { console.log((cond ? 'ok   ' : 'FAIL ') + name); if (!cond) process.exitCode = 1; };
+const errs = [];
+const p = await (await b.newContext({ viewport: { width: 1440, height: 950 } })).newPage(); p.on('pageerror', e => errs.push(e.message));
+const T = () => p.evaluate(k => JSON.parse(localStorage.getItem(k)).tables, KEY);
+await p.goto(BASE); await p.waitForSelector('.kpis'); await p.evaluate(() => localStorage.clear()); await p.reload(); await p.waitForSelector('.kpis');
+// פרויקט חדש בלי פרק תקורות מתבנית
+await p.goto(BASE + '#/projects'); await p.waitForSelector('#add'); await p.click('#add'); await p.waitForSelector('.dlg [name=name]');
+await p.fill('.dlg [name=name]', 'פרויקט בדיקת תמחור'); await p.uncheck('.dlg [name=oh_chapter]'); await p.fill('.dlg [name=overhead_pct]', '3'); await p.click('.dlg [data-ok]'); await p.waitForTimeout(1200);
+let t = await T(); const pr = t.projects.find(x => x.name === 'פרויקט בדיקת תמחור');
+await p.goto(BASE + `#/project/${pr.id}/boq`); await p.waitForSelector('#file', { state: 'attached' });
+await p.setInputFiles('#file', FILE); await p.waitForSelector('.dlg #impbox table'); await p.waitForTimeout(400);
+const note = await p.textContent('.dlg .note');
+ok('preview: recognized pricing file + client', note.includes('קובץ מתוכנת התמחיר'));
+ok('preview: all totals match the file', (note.match(/✓ תואם/g) || []).length === 6 && !note.includes('פער'));
+ok('preview: 1 option not imported', note.includes('1 חלופות'));
+await p.screenshot({ path: OUT + 'p30-preview.png' });
+await p.click('.dlg [data-ok]'); await p.waitForTimeout(1500);
+t = await T();
+const its = t.boq_items.filter(i => i.project_id === pr.id), main = its.filter(i => !i.is_overhead), oh = its.filter(i => i.is_overhead);
+const sale = main.reduce((a, i) => a + i.qty * i.unit_price, 0);
+const lc = l => l.qty * l.unit_cost * (l.kind === 'material' ? 1 + (l.waste_pct || 0) / 100 : 1);
+const cost = id => t.cost_lines.filter(l => l.boq_item_id === id).reduce((a, l) => a + lc(l), 0);
+const direct = main.reduce((a, i) => a + cost(i.id), 0), ohSum = oh.reduce((a, i) => a + cost(i.id), 0);
+ok(`98 items, sale 1,870,971 (${Math.round(sale)})`, main.length === 98 && Math.abs(sale - 1870971) < 1);
+ok(`direct cost 1,397,527 (${Math.round(direct)})`, Math.abs(direct - 1397527.09) < 2);
+ok(`overheads: 8 items = site+office+reserve 273,987 (${Math.round(ohSum)})`, oh.length === 8 && Math.abs(ohSum - (163177.22 + 31214.09 + 79595.92)) < 2);
+ok('reserve item + office item', oh.some(i => i.code === 'OH.RES') && oh.some(i => i.code === 'OH.OFF' && i.description === 'תקורות משרד'));
+ok('chapters with names', main.some(i => i.chapter === 'א.1 חדרים חדשים · בנייה – גבס, דלתות, זכוכית ותקרה'));
+ok('LVT breakdown: material+waste and labor', t.cost_lines.filter(l => l.boq_item_id === main.find(i => i.code === 'א.3.04').id).length === 2);
+ok('overhead % reset to 0', t.projects.find(x => x.id === pr.id).overhead_pct === 0);
+// בקרה: רווח מתוכנן = רווח מבוקש (עם עיגול ההגשה), רזרבה מוצגת
+await p.goto(BASE + `#/project/${pr.id}/control`); await p.waitForSelector('#ctl table');
+const kp = await p.textContent('.kpis');
+ok('control: planned cost incl. reserve 1,671,514', kp.includes('1,671,514') || kp.includes('1,671,515'));
+ok('control: reserve chip', (await p.textContent('#ctl')).includes('רזרבה · נותרו'));
+await p.screenshot({ path: OUT + 'p30-control.png', fullPage: true });
+// הוצאה על סעיף, אחוז ביצוע, ואז קליטה מעודכנת לפי קוד
+const it = main.find(i => i.code === 'א.1.01');
+await p.evaluate(([k, pid, iid]) => { const d = JSON.parse(localStorage.getItem(k)); d.tables.boq_items.find(x => x.id === iid).progress_pct = 40;
+  d.tables.expenses.push({ id: 'e-test-1', tenant_id: d.tables.projects.find(x => x.id === pid).tenant_id, project_id: pid, boq_item_id: iid, variation_id: null, kind: 'sub', supplier_name: 'גבס בדיקה', amount: 10000, status: 'invoice', doc_date: '2026-11-01', doc_no: 'T1', vat_pct: 18 }); localStorage.setItem(k, JSON.stringify(d)); }, [KEY, pr.id, it.id]);
+await p.reload(); await p.goto(BASE + `#/project/${pr.id}/boq`); await p.waitForSelector('#file', { state: 'attached' });
+await p.setInputFiles('#file', FILE); await p.waitForSelector('.dlg select[name=how]');
+ok('update-by-code option offered first', (await p.$eval('.dlg select[name=how]', s => s.value)) === 'update');
+await p.click('.dlg [data-ok]'); await p.waitForTimeout(1500);
+t = await T();
+const its2 = t.boq_items.filter(i => i.project_id === pr.id);
+ok('re-import: no duplicates', its2.filter(i => !i.is_overhead).length === 98 && its2.filter(i => i.is_overhead).length === 8);
+ok('re-import: progress + expense kept', its2.find(i => i.id === it.id)?.progress_pct === 40 && t.expenses.find(e => e.id === 'e-test-1')?.boq_item_id === it.id);
+ok('re-import: cost lines not doubled', Math.abs(its2.filter(i => !i.is_overhead).reduce((a, i) => a + cost(i.id), 0) - 1397527.09) < 2);
+// טלפון
+await p.setViewportSize({ width: 390, height: 844 });
+await p.goto(BASE + `#/project/${pr.id}/boq`); await p.waitForSelector('#file', { state: 'attached' }); await p.setInputFiles('#file', FILE); await p.waitForSelector('.dlg #impbox table'); await p.waitForTimeout(300);
+ok('phone: import dialog fits', (await p.evaluate(() => document.documentElement.scrollWidth)) <= 392);
+await p.screenshot({ path: OUT + 'p30-phone.png' });
+await p.click('.dlg [data-x]').catch(() => {});
+ok('no page errors: ' + errs.slice(0, 2).join(' | '), errs.length === 0);
+await b.close();

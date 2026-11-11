@@ -3,6 +3,8 @@ import { CONFIG } from '../config.js';
 import { h, esc, $, toast, store, modal } from '../util.js';
 import { db, isCloud, uuid } from '../db.js';
 import { loadDemoClients, removeDemoClients } from '../demo-clients.js';
+import { SCHEMA_EXPECTED } from '../schema-expected.js';
+import { schemaDiff } from '../schema-check.js';
 import { S, can, roleName, tenant, render, reloadTenants } from '../app.js';
 import { gconf, setGconf, gConnect, gDisconnect, gReady, gEnabled, gmailSend, isEmail } from '../google.js';
 
@@ -15,7 +17,7 @@ export async function viewSettings() {
       <p>חיבור: <b>${isCloud() ? 'ענן (Supabase), עם משתמשים והרשאות' : 'מצב הדגמה, הנתונים נשמרים רק בדפדפן הזה'}</b></p>
       <p>משתמש: <b dir="ltr">${esc(S.user?.email || '')}</b> · ${esc(roleName(S.role))}</p>
       ${can.edit() && S.tenantId ? '<button class="btn ghost" id="bk">גיבוי נתוני הלקוח (JSON)</button>' : ''}</div></div>
-    ${can.expense() ? googleCard() : ''}${can.admin() ? demoCard() : ''}</div>`);
+    ${can.expense() ? googleCard() : ''}${can.admin() ? demoCard() : ''}${S.ctx?.isAdmin && isCloud() ? schemaCard() : ''}</div>`);
   el.querySelectorAll('[data-t]').forEach(b => b.onclick = () => {
     const t = b.dataset.t; store('subcon-theme', t === 'auto' ? null : t);
     if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
@@ -31,6 +33,7 @@ export async function viewSettings() {
   });
   wireGoogle(el);
   wireDemo(el);
+  wireSchema(el);
   return el;
 }
 
@@ -106,4 +109,22 @@ function wireDemo(el) {
     try { const k = await removeDemoClients(db); await reloadTenants(); toast(`נמחקו ${k} לקוחות דמו`); render(); }
     catch (e) { busy(false); msg(''); toast(e.message, 'bad'); }
   });
+}
+
+// בדיקת התקנה: האם כל העמודות שהקוד צריך קיימות במסד (כלומר schema.sql הורץ עד הסוף)
+function schemaCard() {
+  return `<div class="card" id="schc"><h2>בדיקת התקנה</h2>
+    <p class="small mut">בודק שקובץ ה-SQL האחרון (supabase/schema.sql) הורץ ב-Supabase עד הסוף.</p>
+    <p id="schm">בודק…</p></div>`;
+}
+async function wireSchema(el) {
+  const m = $('#schm', el); if (!m) return;
+  try {
+    const miss = schemaDiff(SCHEMA_EXPECTED, await db.rpc('schema_columns', {}));
+    m.innerHTML = miss.length
+      ? `<b class="neg">חסרות ${miss.length} עמודות.</b> צריך להריץ שוב את supabase/schema.sql ב-Supabase (SQL Editor). בטוח להרצה חוזרת.<br><span class="small mut" dir="ltr">${esc(miss.slice(0, 30).join(' · '))}${miss.length > 30 ? ' …' : ''}</span>`
+      : `<b class="pos">✓ המסד תואם לקוד</b> <span class="small mut">(${SCHEMA_EXPECTED.length} עמודות)</span>`;
+  } catch {
+    m.innerHTML = '<b class="neg">לא ניתן לבדוק:</b> צריך להריץ ב-Supabase את supabase/updates/030-schema-check.sql (או את schema.sql המלא).';
+  }
 }
