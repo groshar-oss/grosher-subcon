@@ -17,6 +17,7 @@ import { devCashflow, devCashAlerts } from '../devcash.js';
 import { rememberProjects, actionRow, stateMap, editAlert, sendOne, defaultDecision, digestList, digestText, digestHtml, maybeSendDigest, targetsFor, waLink, mailLink } from '../alertsui.js';
 import { actKey } from '../alerts.js';
 import { vendorStatus, docStatus, OWN_REQUIRED, DOC_TYPES, GUAR_KINDS, guaranteeState, daysLeft, finalBill } from '../docs.js';
+import { ohLines } from '../tenantoh.js';
 
 export async function viewHome() {
   if (!S.tenantId) return h(`<div><div class="top"><div><h1>ברוכה הבאה</h1><div class="sub">עדיין אין לקוחות במערכת.</div></div></div>
@@ -128,7 +129,7 @@ export function buildActions(data, sums, devSums = []) {
   }
   // תזרים יזם: הוצאות מעל הכנסות, יתרה מתחת למינימום, תקבול באיחור (6 חודשים קדימה)
   if (devSums.length) {
-    const cf = devCashflow(devSums.map(({ p, s }) => ({ project: p, s, pd: projData(data, p.id) })), { settings: settings(), back: 0, ahead: 6 });
+    const cf = devCashflow(devSums.map(({ p, s }) => ({ project: p, s, pd: projData(data, p.id) })), { settings: settings(), back: 0, ahead: 6, tenantOH: ohLines(settings()) });
     for (const a of devCashAlerts(cf)) out.push({ w: a.type === 'cash_below_min' ? 97 : a.type === 'cash_out_over_in' ? 74 : 68, color: a.crit || a.type === 'income_overdue' ? 'var(--ri)' : '#ff9f43', sev: a.crit ? 'red' : 'amber', dtype: a.type,
       pid: a.projectId || (devSums.length === 1 ? devSums[0].p.id : null), key: `devcash|${a.type}|${a.title}`, title: a.title, sub: a.detail, amt: money(a.amount), href: a.projectId || devSums.length === 1 ? `#/project/${a.projectId || devSums[0].p.id}/cashflow` : '#/cashflow' });
   }
