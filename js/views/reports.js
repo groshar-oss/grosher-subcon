@@ -8,6 +8,7 @@ import { collection, dueDate } from '../bills.js';
 import { GUAR_KINDS, guaranteeState } from '../docs.js';
 import { cashflow, monthLabel, mkey, addMonths } from '../cashflow.js';
 import { party } from '../dev.js';
+import { tenantOH, ohInMonth } from '../tenantoh.js';
 import { projData, summarize, STATUS } from './common.js';
 import { loadXLSX } from '../import.js';
 import { viewDevReports, reportNav } from './devreports.js';
@@ -29,6 +30,7 @@ const setOpt = o => store('subcon-rep', { ...opt(), ...o });
 
 export const REPORTS = [
   ['profit', 'רווחיות: חוזה, תוספות, סה"כ', () => can.costing()],
+  ['ohprofit', 'רווח אחרי תקורות', () => can.costing()],
   ['labor', 'עלות עבודה', () => can.prices()],
   ['expenses', 'הוצאות לפי ספק ולפי סוג', () => can.prices()],
   ['vo', 'הוראות שינוי', () => can.costing()],
@@ -78,12 +80,12 @@ export async function viewReports(kind = 'profit') {
   const rerender = () => viewReports(kind).then(v => el.replaceWith(v));
   $('#pid', el).onchange = e => { setOpt({ pid: e.target.value }); rerender(); };
   for (const k of ['from', 'to', 'month']) $('#' + k, el)?.addEventListener('change', e => { if (e.target.value) { setOpt({ [k]: e.target.value }); rerender(); } });
-  if (['profit', 'client'].includes(kind)) $('#mode', el).appendChild(modeSwitch(rerender));
-  const fn = { profit: repProfit, labor: repLabor, expenses: repExpenses, vo: repVo, retention: repRetention, client: repClient }[kind];
+  if (['profit', 'client', 'ohprofit'].includes(kind)) $('#mode', el).appendChild(modeSwitch(rerender));
+  const fn = { profit: repProfit, ohprofit: repOhProfit, labor: repLabor, expenses: repExpenses, vo: repVo, retention: repRetention, client: repClient }[kind];
   const title = list.find(r => r[0] === kind)[1];
   const scope = o.pid ? projects[0]?.name : 'כל הפרויקטים הפעילים';
   const body = fn({ data, sums, o, rerender });
-  $('#rep', el).append(h(`<div class="rephead"><img src="icons/icon-192.png" alt=""><div><b>${esc(title)}</b><span>${esc(tenant()?.name || '')} · ${esc(scope || '')}${usesPeriod ? ' · ' + periodText(o) : ''}${['profit', 'client'].includes(kind) ? ' · ' + esc(PROFIT_MODES[S.mode]) : ''} · הופק ${fmtDate(todayStr())}</span></div></div>`), body);
+  $('#rep', el).append(h(`<div class="rephead"><img src="icons/icon-192.png" alt=""><div><b>${esc(title)}</b><span>${esc(tenant()?.name || '')} · ${esc(scope || '')}${usesPeriod ? ' · ' + periodText(o) : ''}${['profit', 'client', 'ohprofit'].includes(kind) ? ' · ' + esc(PROFIT_MODES[S.mode]) : ''} · הופק ${fmtDate(todayStr())}</span></div></div>`), body);
   $('#print', el).onclick = () => window.print();
   $('#xl', el).onclick = () => exportTables($('#rep', el), `${title} - ${scope}`);
   $('#gdrive', el).onclick = () => pdfToDrive($('#rep', el), title, o.pid ? data.projects.find(p => p.id === o.pid) : null);
@@ -121,6 +123,36 @@ function repProfit({ sums }) {
     <p class="small mut">רווח = מכירה פחות צפי עלות לסיום. "סה"כ בתצוגה" לפי המתג למעלה: ${esc(PROFIT_MODES[S.mode])}. תוספות לא מאושרות הן הוראות שינוי שהוגשו או בוצעו ועדיין לא אושרו.</p></div>`);
 }
 const cls = v => `<span class="${v < 0 ? 'neg' : ''}">${m0(v)}</span>`;
+
+// ===== 1א. רווח אחרי תקורות הקבלן: התקורות הקבועות מתחלקות בכל חודש בין הפרויקטים הפעילים לפי היקף המכירה =====
+function repOhProfit({ data, sums }) {
+  const cur = todayStr().slice(0, 7), A = tenantOH(data, settings(), cur);
+  const setLink = can.admin() || can.edit() ? `<a href="#/client/${S.tenantId}">הגדרות הלקוח</a>` : 'הגדרות הלקוח';
+  if (!A.lines.length) return h(`<div class="card empty">עוד לא הוגדרו תקורות קבועות של הקבלן (משרד, הנהלה, רכבים, ביטוחים). מגדירים אותן ב${setLink}, ואז הדוח מחלק אותן בין הפרויקטים.</div>`);
+  const rows = sums.map(({ p, s }) => { const b = A.byProject[p.id] || { total: 0, toDate: 0, future: 0 }, t = s.total, after = t.profit - b.total;
+    return { t, b, after, cells: [`<b>${esc(p.name)}</b><div class="small mut">${STATUS[p.status]}${p.start_date || p.end_date ? ` · ${p.start_date ? fmtDate(p.start_date) : '?'} עד ${p.end_date ? fmtDate(p.end_date) : '?'}` : ''}</div>`,
+      m0(t.sale), cls(t.profit), pct(t.profitPct), m0(b.toDate), m0(b.future), m0(b.total), cls(after), pct(t.sale ? after / t.sale * 100 : 0)] }; });
+  const tt = { sale: sum(rows, r => r.t.sale), profit: sum(rows, r => r.t.profit), toDate: sum(rows, r => r.b.toDate), future: sum(rows, r => r.b.future), total: sum(rows, r => r.b.total) };
+  const shown = sums.map(x => x.p).filter(p => A.months.some(m => m.alloc[p.id]));
+  const many = shown.length > 6;
+  const mrows = A.months.map(m => ({ cls: m.m === cur ? 'curm' : '', cells: [`${monthLabel(m.m)}${m.past ? '' : m.m === cur ? ' <span class="small">החודש</span>' : ' <span class="small mut">צפי</span>'}`, m0(m.amount), String(m.active),
+    ...(many ? [] : shown.map(p => m.alloc[p.id] ? m0(m.alloc[p.id]) : '')), m.unalloc ? `<span class="neg">${m0(m.unalloc)}</span>` : ''] }));
+  const nowAmt = ohInMonth(A.lines, cur);
+  return h(`<div data-sheet="רווח אחרי תקורות">
+    <div class="kpis">
+      <div class="kpi"><div class="l">תקורות קבועות בחודש</div><div class="v">${money(nowAmt)}</div><div class="n">${A.lines.length} שורות · ${setLink}</div></div>
+      <div class="kpi"><div class="l">שויך לפרויקטים בדוח</div><div class="v">${money(tt.total)}</div><div class="n">עד היום ${money(tt.toDate)} · בהמשך ${money(tt.future)}</div></div>
+      <div class="kpi"><div class="l">רווח צפוי לפני תקורות</div><div class="v ${tt.profit < 0 ? 'neg' : 'pos'}">${money(tt.profit)}</div><div class="n">${pct(tt.sale ? tt.profit / tt.sale * 100 : 0)} מהמכירה</div></div>
+      <div class="kpi"><div class="l">רווח אחרי תקורות</div><div class="v ${tt.profit - tt.total < 0 ? 'neg' : 'pos'}">${money(tt.profit - tt.total)}</div><div class="n">${pct(tt.sale ? (tt.profit - tt.total) / tt.sale * 100 : 0)} מהמכירה</div></div>
+    </div>
+    ${A.unalloc ? `<div class="note neg small">${money(A.unalloc)} מהתקורות נופלים בחודשים שאין בהם פרויקט פעיל (${A.months.filter(m => m.unalloc).map(m => monthLabel(m.m)).join(', ')}). הם לא משויכים לאף פרויקט, אבל יורדים מהרווח של העסק.</div>` : ''}
+    ${T([['פרויקט'], ['מכירה', 1], ['רווח צפוי', 1], ['% רווח', 1], ['עד היום', 1], ['בהמשך', 1], ['סה"כ', 1], ['רווח אחרי תקורות', 1], ['%', 1]], rows,
+      ['סה"כ', m0(tt.sale), cls(tt.profit), pct(tt.sale ? tt.profit / tt.sale * 100 : 0), m0(tt.toDate), m0(tt.future), m0(tt.total), cls(tt.profit - tt.total), pct(tt.sale ? (tt.profit - tt.total) / tt.sale * 100 : 0)], 'אין פרויקטים', [['לפני תקורות', 3], ['תקורות הקבלן שמשויכות לפרויקט', 3], ['אחרי תקורות', 2]])}
+    <h2 style="margin:22px 0 8px">חלוקה לפי חודשים</h2>
+    <div data-sheet="תקורות לפי חודש">${T([['חודש'], ['תקורות', 1], ['פרויקטים פעילים', 1], ...(many ? [] : shown.map(p => [esc(p.name), 1])), ['לא משויך', 1]], mrows,
+      ['סה"כ', m0(A.total), '', ...(many ? [] : shown.map(p => m0(A.byProject[p.id]?.total || 0))), A.unalloc ? m0(A.unalloc) : '']) }</div>
+    <p class="small mut">בכל חודש התקורות הקבועות מתחלקות בין הפרויקטים שפעילים באותו חודש (מתאריך ההתחלה עד תאריך הסיום), לפי היקף המכירה של כל פרויקט: חוזה והוראות שינוי מאושרות. פרויקט בלי תאריך סיום נחשב פעיל עד חודשיים קדימה. פרויקטי יזם לא משתתפים. הרווח הצפוי לפי המתג למעלה: ${esc(PROFIT_MODES[S.mode])}.</p></div>`);
+}
 
 // ===== 6. עלות עבודה: לפי עובד / פרויקט / סעיף =====
 function repLabor({ data, sums, o, rerender }) {
@@ -226,7 +258,7 @@ function repClient({ data, sums, o }) {
   // סיכום כללי
   const t = { sale: sum(sums, x => x.s.total.sale), forecast: sum(sums, x => x.s.total.forecast), actual: sum(sums, x => x.s.total.actual) };
   const col = sums.map(x => collection(x.s.billing.byBill));
-  const cf = cashflow(sums.map(({ p, s, pd }) => ({ project: p, summary: s, pd })), { settings: st, back: 0, ahead: 3 });
+  const cf = cashflow(sums.map(({ p, s, pd }) => ({ project: p, summary: s, pd })), { settings: st, back: 0, ahead: 3, tenantOH: o.pid ? [] : ohLines(st) });
   el.append(h(`<section class="rpage" data-sheet="סיכום">
     <h2>סיכום ${monthLabel(month)} · ${sums.length} פרויקטים</h2>
     <div class="kpis"><div class="kpi"><div class="l">היקף מכירה</div><div class="v">${money(t.sale)}</div></div>
@@ -279,5 +311,5 @@ export function subReportNodes(data, pid) {
   const pd = projData(data, pid); const sums = [{ p, pd, s: summarize(pd) }];
   const o = { ...opt(), pid, by: 'worker' };
   const fns = { profit: repProfit, labor: repLabor, expenses: repExpenses, vo: repVo, retention: repRetention, client: repClient };
-  return REPORTS.filter(r => r[2]()).map(([kind, title]) => { try { return { kind, title, node: fns[kind]({ data, sums, o, rerender: () => {} }) }; } catch (e) { console.warn('report', kind, e); return null; } }).filter(Boolean);
+  return REPORTS.filter(r => r[2]() && fns[r[0]]).map(([kind, title]) => { try { return { kind, title, node: fns[kind]({ data, sums, o, rerender: () => {} }) }; } catch (e) { console.warn('report', kind, e); return null; } }).filter(Boolean);
 }

@@ -6,6 +6,7 @@ import { S, can, reloadTenants, render, roleName, logChange } from '../app.js';
 import { n } from '../calc.js';
 import { store } from '../util.js';
 import { has } from '../modules.js';
+import { ohLines, ohInMonth } from '../tenantoh.js';
 import { loadTemplates, templatesCard, wireTemplatesCard } from './templates.js';
 import { closedThrough, nextToClose, todayStr } from '../monthclose.js';
 import { contactPicker, wireContactPickers, loadContacts, cardFields, ensureLinksLocal } from '../contacts.js';
@@ -35,6 +36,19 @@ export async function viewClients() {
   };
   $$('[data-open]', el).forEach(b => b.onclick = () => { S.tenantId = b.dataset.open; store('subcon-tenant', S.tenantId); reloadTenants().then(() => { location.hash = '#/'; render(); }); });
   return el;
+}
+
+// כרטיס התקורות הקבועות של הקבלן בהגדרות הלקוח
+function ohCard(st) {
+  const list = st.fixed_oh || [], cur = new Date().toISOString().slice(0, 7), mm = m => m ? m.split('-').reverse().join('/') : '';
+  const money0 = v => Math.round(n(v)).toLocaleString('en-US');
+  return `<div class="card" id="ohcard"><h2>תקורות קבועות של הקבלן <button class="btn small" id="addoh">+ תקורה</button></h2>
+    <p class="small mut">הוצאות של העסק שלא שייכות לפרויקט אחד: משרד, הנהלה, רכבים, ביטוחים, הנהלת חשבונות. הן נכנסות לתזרים של כל הפרויקטים, ובכל חודש מתחלקות בין הפרויקטים הפעילים לפי היקף המכירה, כדי לראות רווח אחרי תקורות. פרויקטי יזם לא משתתפים.</p>
+    <div class="tw"><table><thead><tr><th>תיאור</th><th class="n">לחודש ₪</th><th>מחודש</th><th>עד חודש</th><th class="n">יום תשלום</th><th>מע"מ</th><th></th></tr></thead><tbody>
+    ${list.map(l => `<tr class="click${l.to_month && l.to_month < cur ? ' mut' : ''}" data-oh="${esc(l.id)}" title="עריכה"><td><b>${esc(l.name)}</b>${l.to_month && l.to_month < cur ? ' <span class="chip">הסתיים</span>' : ''}</td><td class="n">${money0(l.amount)}</td><td>${mm(l.from_month)}</td><td>${l.to_month ? mm(l.to_month) : '<span class="mut">ללא סיום</span>'}</td><td class="n">${esc(l.pay_day || '')}</td><td>${l.vat === false ? 'לא' : 'כן'}</td>
+      <td><button type="button" class="btn small ghost">עריכה</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">עוד לא הוגדרו תקורות קבועות</td></tr>'}
+    ${list.length ? `<tr class="tot"><td>סה"כ בחודש הנוכחי</td><td class="n">${money0(ohInMonth(ohLines(st), cur))}</td><td colspan="5"><a href="#/reports/ohprofit">דוח רווח אחרי תקורות</a> · <a href="#/cashflow">תזרים</a></td></tr>` : ''}
+    </tbody></table></div></div>`;
 }
 
 export async function viewClient(id) {
@@ -85,6 +99,7 @@ export async function viewClient(id) {
       <p class="small mut">צבעי חריגה: עד 3% צהוב, 3%-5% כתום, 5%-10% אדום, מעל 10% אדום שמתכהה. מעל הסף הקריטי השורה מסומנת "קריטי".</p>
       <button class="btn">שמירת הגדרות</button></form></div>
   </div>
+  ${ohCard(st)}
   ${showIdx ? `<div class="card" id="idxcard"><h2>מדד תשומות הבנייה <button class="btn small" id="addix">+ מדד חודשי</button></h2>
     <p class="small mut">מדד אחד לכל חודש, משותף לכל הפרויקטים הצמודים (${idxProjects.map(p => esc(p.name)).join(', ') || 'אין כרגע'}). הלמ"ס מפרסמת את המדד בסביבות ה-15 לחודש שאחרי. המערכת לוקחת את המדד האחרון שהוזן: ממלאת אותו בחשבון חדש ומחשבת לפיו את הפרש ההצמדה בתזרים. הפרש הצמדה לא נספר כחריגה.</p>
     <div class="tw"><table><thead><tr><th>חודש המדד</th><th class="n">ערך</th><th class="n">שינוי מהחודש הקודם</th><th>הערה</th><th></th></tr></thead><tbody>
@@ -132,6 +147,27 @@ export async function viewClient(id) {
     for (const k of Object.keys(ns)) if (String(ns[k]) !== String(st[k])) await logChange({ entity: 'tenant', entity_id: id, label: 'הגדרות לקוח', field: k, old_value: st[k], new_value: ns[k] });
     await reloadTenants(); toast('ההגדרות נשמרו'); render();
   };
+  // תקורות קבועות של הקבלן
+  const ohDlg = async (x = {}) => {
+    const cur = new Date().toISOString().slice(0, 7);
+    const v = await modal({ title: x.id ? 'עריכת תקורה קבועה' : 'תקורה קבועה חדשה', ok: 'שמירה', danger: false,
+      body: `${field('תיאור', 'name', x.name || '', { req: true, hint: 'למשל: שכירות משרד, מזכירה, רכב מנהל, הנהלת חשבונות, ביטוח שנתי' })}
+        <div class="grid g2">${field('סכום חודשי ₪ (לפני מע"מ)', 'amount', x.amount ?? '', { type: 'number', req: true, attrs: 'step="0.01" inputmode="decimal"' })}${field('יום תשלום בחודש', 'pay_day', x.pay_day ?? 10, { type: 'number', attrs: 'min="1" max="31" inputmode="numeric"' })}
+        ${field('מחודש', 'from_month', x.from_month || cur, { type: 'month', req: true })}${field('עד חודש', 'to_month', x.to_month || '', { type: 'month', hint: 'ריק = בלי תאריך סיום' })}</div>
+        <label class="chk"><input type="checkbox" name="vat" ${x.vat === false ? '' : 'checked'}> יש מע"מ על ההוצאה</label>
+        ${x.id ? '<label class="chk"><input type="checkbox" name="del"> מחיקת התקורה הזו</label>' : ''}`,
+      validate: d => d.del ? false : (!d.name.trim() && 'חסר תיאור') || (!(n(d.amount) > 0) && 'הסכום החודשי חייב להיות גדול מ-0') || (!/^\d{4}-\d{2}$/.test(d.from_month) && 'חסר חודש התחלה') || (d.to_month && d.to_month < d.from_month && 'חודש הסיום לפני חודש ההתחלה') });
+    if (!v) return;
+    const cs = S.tenants.find(x => x.id === id)?.settings || {}, list = [...(cs.fixed_oh || [])];
+    const row = { id: x.id || crypto.randomUUID(), name: v.name.trim(), amount: n(v.amount), from_month: v.from_month, to_month: v.to_month || '', pay_day: Math.min(31, Math.max(1, Math.round(n(v.pay_day) || 10))), vat: !!v.vat };
+    const i = list.findIndex(l => l.id === x.id);
+    if (v.del) { if (i >= 0) list.splice(i, 1); } else if (i >= 0) list[i] = row; else list.push(row);
+    await db.update('tenants', id, { settings: { ...cs, fixed_oh: list } });
+    await logChange({ entity: 'tenant', entity_id: id, label: 'תקורות קבועות של הקבלן', field: v.del ? x.name : row.name, old_value: x.id ? `${x.amount} ₪ לחודש` : null, new_value: v.del ? 'נמחק' : `${row.amount} ₪ לחודש, ${row.from_month} עד ${row.to_month || 'ללא סיום'}` });
+    await reloadTenants(); toast(v.del ? 'התקורה נמחקה' : 'התקורה נשמרה'); render();
+  };
+  $('#addoh', el)?.addEventListener('click', () => ohDlg());
+  $$('[data-oh]', el).forEach(b => b.onclick = () => ohDlg((st.fixed_oh || []).find(x => x.id === b.dataset.oh)));
   const ixDlg = async (x = {}) => {
     const last = ser[0];
     const nextM = last ? (() => { const [y, m] = last.month.split('-').map(Number); return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`; })() : new Date(Date.now() - 45 * 864e5).toISOString().slice(0, 7);

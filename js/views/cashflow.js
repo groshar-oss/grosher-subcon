@@ -7,15 +7,16 @@ import { projData, summarize } from './common.js';
 import { loadXLSX } from '../import.js';
 import { devCashBlock } from './devcash.js';
 import { partyOfMany } from '../dev.js';
+import { ohLines } from '../tenantoh.js';
 
 const todayStr = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
 const opt = () => ({ ahead: 12, delay: 0, pid: '', per: 'month', ...(store('subcon-cf') || {}) });
 const m0 = v => money(v, { sym: false });
 
-// נתוני תזרים לרשימת פרויקטים (סגורים לא נכנסים, אלא אם נבחר פרויקט ספציפי)
-export function cfFor(data, ids, o = opt()) {
+// נתוני תזרים לרשימת פרויקטים (סגורים לא נכנסים, אלא אם נבחר פרויקט ספציפי). all: תזרים של כל העסק, כולל התקורות הקבועות של הקבלן
+export function cfFor(data, ids, o = opt(), all = false) {
   const list = ids.map(id => { const pd = projData(data, id); return { project: pd.project, summary: summarize(pd), pd }; });
-  return cashflow(list, { settings: settings(), today: todayStr(), back: 3, ahead: o.ahead, delay: o.delay, indexSeries: data.indexSeries || [] });
+  return cashflow(list, { settings: settings(), today: todayStr(), back: 3, ahead: o.ahead, delay: o.delay, indexSeries: data.indexSeries || [], tenantOH: all ? ohLines(settings()) : [] });
 }
 
 // עמוד תזרים מרוכז (#/cashflow) עם סינון לפרויקט
@@ -32,7 +33,7 @@ export async function viewCashflow() {
     <div class="actions"><select id="pid" aria-label="פרויקט"><option value="">כל הפרויקטים</option>${data.projects.map(p => `<option value="${p.id}" ${p.id === o.pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div></div>
     <div id="cf"></div></div>`);
   $('#pid', el).onchange = e => { store('subcon-cf', { ...opt(), pid: e.target.value }); viewCashflow().then(v => el.replaceWith(v)); };
-  $('#cf', el).appendChild(cashflowBlock(data, o.pid ? [o.pid] : live.map(p => p.id), o.pid ? data.projects.find(p => p.id === o.pid).name : 'כל הפרויקטים'));
+  $('#cf', el).appendChild(cashflowBlock(data, o.pid ? [o.pid] : live.map(p => p.id), o.pid ? data.projects.find(p => p.id === o.pid).name : 'כל הפרויקטים', !o.pid));
   if (devs.length && !o.pid) { el.appendChild(h(`<h2 style="margin:24px 0 0">פרויקטי יזם (${devs.length})</h2>`)); el.appendChild(devCashBlock(all, devs.map(p => p.id), 'פרויקטי יזם')); }
   return el;
 }
@@ -40,12 +41,12 @@ export async function viewCashflow() {
 // לשונית תזרים בפרויקט
 export function tabCashflow(P) { return cashflowBlock(P.data, [P.id], P.project.name); }
 
-function cashflowBlock(data, ids, title) {
+function cashflowBlock(data, ids, title, all = false) {
   const wrap = h('<div></div>');
   const draw = () => {
     const o = opt();
     const st = settings();
-    const r = cfFor(data, ids, o);
+    const r = cfFor(data, ids, o, all);
     const pt = partyOfMany(ids.map(id => data.projects.find(p => p.id === id)).filter(Boolean));
     const L = k => CF_ROWS[k].replace('מהקבלן הראשי', pt.from);
     const cur = r.months.find(m => m.m === r.cur);
@@ -85,7 +86,7 @@ function cashflowBlock(data, ids, title) {
         <tr><td class="stk small mut">חשבונות שהגיע מועד תשלומם (כולל מע"מ)</td>${view.map(m => `<td class="n small mut">${m.past && m.schedIn ? m0(m.schedIn) : ''}</td>`).join('')}</tr>
         <tr><td class="stk small mut">התקבל בפועל באותו חודש</td>${view.map(m => `<td class="n small ${m.past && m.actualIn < m.schedIn - 1 ? 'neg' : 'mut'}">${m.past && (m.schedIn || m.actualIn) ? m0(m.actualIn) : ''}</td>`).join('')}</tr>
       </tbody></table></div>
-      <p class="small mut">החודשים שעברו מציגים תנועות בפועל (תקבולים, הוצאות ששולמו ושכר). החודש הנוכחי והבאים הם צפי: חשבונות שהוגשו לפי מועד התשלום (באיחור נכנס לחודש הנוכחי), חשבונות עתידיים לפי יתרת המכירה עד סיום הפרויקט (הגשה ב-5 לחודש העוקב, שוטף+X, בניכוי עיכבון, ביטוח והוצאות משותפות), שחרור עיכבון אחרי סיום, חשבוניות ספקים לפי שוטף+${n(st.supplier_terms_days)}, הזמנות רכש פתוחות, שכר מהיומן בחודש שאחרי, ויתרת צפי העלות${view.some(m => m.rows.in_index) ? '. הפרש הצמדה צפוי: לפי המדד האחרון שהוזן מול מדד הבסיס של הפרויקט, בלי ניחוש של מדד עתידי (לא נספר כחריגה)' : ''}${view.some(m => m.rows.out_fixed) ? '. עלויות חודשיות קבועות: מהחודש הנוכחי עד סוף התקופה של כל עלות' : ''}${o.per === 'week' ? '. בתצוגה שבועית הסכום החודשי מתחלק לפי ימים, כי הצפי נבנה לפי חודשים' : ''}. מע"מ: ההפרש בין מה שנגבה למה ששולם משולם לרשות בחודש שאחרי. לחיצה על סכום מציגה את הפירוט.</p>
+      <p class="small mut">החודשים שעברו מציגים תנועות בפועל (תקבולים, הוצאות ששולמו ושכר). החודש הנוכחי והבאים הם צפי: חשבונות שהוגשו לפי מועד התשלום (באיחור נכנס לחודש הנוכחי), חשבונות עתידיים לפי יתרת המכירה עד סיום הפרויקט (הגשה ב-5 לחודש העוקב, שוטף+X, בניכוי עיכבון, ביטוח והוצאות משותפות), שחרור עיכבון אחרי סיום, חשבוניות ספקים לפי שוטף+${n(st.supplier_terms_days)}, הזמנות רכש פתוחות, שכר מהיומן בחודש שאחרי, ויתרת צפי העלות${view.some(m => m.rows.in_index) ? '. הפרש הצמדה צפוי: לפי המדד האחרון שהוזן מול מדד הבסיס של הפרויקט, בלי ניחוש של מדד עתידי (לא נספר כחריגה)' : ''}${view.some(m => m.rows.out_fixed) ? '. עלויות חודשיות קבועות: מהחודש הנוכחי עד סוף התקופה של כל עלות' : ''}${view.some(m => m.rows.out_ohfixed) ? '. תקורות קבועות של הקבלן: לפי ההגדרות של הלקוח, בכל חודש בתקופה שלהן' : ''}${o.per === 'week' ? '. בתצוגה שבועית הסכום החודשי מתחלק לפי ימים, כי הצפי נבנה לפי חודשים' : ''}. מע"מ: ההפרש בין מה שנגבה למה ששולם משולם לרשות בחודש שאחרי. לחיצה על סכום מציגה את הפירוט.</p>
     </div>`);
     $$('#ah button', el).forEach(b => b.onclick = () => { store('subcon-cf', { ...opt(), ahead: +b.dataset.k }); draw(); });
     $$('#dl button', el).forEach(b => b.onclick = () => { store('subcon-cf', { ...opt(), delay: +b.dataset.k }); draw(); });
@@ -94,7 +95,7 @@ function cashflowBlock(data, ids, title) {
       const [mk, key] = td.dataset.cell.split('|');
       const M = view.find(x => x.m === mk);
       const its = M.items.filter(i => i.key === key);
-      const pn = id => data.projects.find(p => p.id === id)?.name || '';
+      const pn = id => id ? data.projects.find(p => p.id === id)?.name || '' : 'כל העסק';
       modal({ title: `${L(key)} · ${M.label}`, ok: 'סגירה', cancel: null, body: `<div class="tw" style="box-shadow:none"><table><thead><tr>${ids.length > 1 ? '<th>פרויקט</th>' : ''}<th>פירוט</th><th class="n">לפני מע"מ</th><th class="n">מע"מ</th></tr></thead><tbody>
         ${its.map(i => `<tr>${ids.length > 1 ? `<td>${esc(pn(i.projectId))}</td>` : ''}<td>${esc(i.label)}</td><td class="n">${m0(i.pre)}</td><td class="n mut">${i.v ? m0(i.v) : ''}</td></tr>`).join('')}</tbody></table></div>` });
     });

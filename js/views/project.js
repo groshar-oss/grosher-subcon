@@ -6,6 +6,7 @@ import { n, COST_KINDS, VO_STATUS, PROFIT_MODES, itemPlanned, lineCost, EXPENSE_
 import { STATUS, CONTRACT, projData, summarize, rowAttr, legend, modeLine } from './common.js';
 import { projectForm, projectRow, wireModules, wireProjectType } from './projects.js';
 import { mods, MODULES } from '../modules.js';
+import { tenantOH } from '../tenantoh.js';
 import { tabBoq, tabCosting } from './boq.js';
 import { tabVo, tabExpenses } from './vo_exp.js';
 import { dayView, tabWorkLog, fieldProject } from './worklog.js';
@@ -87,6 +88,8 @@ function tabControl(P) {
       <div class="kpi"><div class="l">עלות בפועל</div><div class="v">${money(t.actual)}</div><div class="n">${pct(t.spentPct, { d: 0 })} מהתמחיר · ביצוע ${pct(t.progress, { d: 0 })}</div></div>
       <div class="kpi"><div class="l">צפי עלות לסיום</div><div class="v">${money(t.forecast)}</div><div class="n">חריגה ${pct(t.overrun, { sign: true })}</div></div>
       <div class="kpi"><div class="l">רווח צפוי</div><div class="v ${t.profit >= 0 ? 'pos' : 'neg'}">${money(t.profit)}</div><div class="n">${pct(t.profitPct)} מהמכירה</div></div>
+      ${(() => { const A = tenantOH(P.data, settings(), new Date().toISOString().slice(0, 7)); const b = A.byProject[P.id]; if (!A.lines.length || !b) return '';
+        const after = t.profit - b.total; return `<div class="kpi"><div class="l">רווח אחרי תקורות הקבלן</div><div class="v ${after >= 0 ? 'pos' : 'neg'}">${money(after)}</div><div class="n">חלק הפרויקט בתקורות הקבועות ${money(b.total)} (עד היום ${money(b.toDate)}) · <a href="#/reports/ohprofit">פירוט</a></div></div>`; })()}
     </div>
     ${s.excludedActual ? `<div class="note">עלות שכבר הוצאה על הוראות שינוי שלא נכללות בתצוגה הזו: <b>${money(s.excludedActual)}</b>. כדי לראות אותם, עברי ל"כולל לא מאושרים".</div>` : ''}
     ${(() => { const q = quotaCounts(s.quotas || []); return q.over + q.warn ? `<a class="note" style="display:block" href="#/project/${P.id}/quota"><b>מכסות:</b> ${q.over ? `${q.over} שורות תמחיר חרגו בכמות או בכסף` : ''}${q.over && q.warn ? ' · ' : ''}${q.warn ? `${q.warn} מתקרבות למכסה` : ''}. לפירוט ←</a>` : ''; })()}

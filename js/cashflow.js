@@ -16,17 +16,17 @@ export const monthLabel = m => `${HE_MONTHS[+m.slice(5, 7) - 1]} ${m.slice(2, 4)
 
 export const CF_ROWS = {
   in_paid: 'תקבולים מהקבלן הראשי', in_billed: 'חשבונות שהוגשו (יתרה לגבייה)', in_future: 'חשבונות עתידיים (לפי יתרת המכירה)', in_retention: 'שחרור עיכבון', in_index: 'הפרש הצמדה צפוי',
-  out_paid: 'הוצאות ששולמו', out_open: 'חשבוניות ספקים פתוחות', out_po: 'הזמנות רכש פתוחות', out_labor: 'שכר עובדים (מהיומן)', out_future: 'יתרת עלויות לפי צפי', out_fixed: 'עלויות חודשיות קבועות'
+  out_paid: 'הוצאות ששולמו', out_open: 'חשבוניות ספקים פתוחות', out_po: 'הזמנות רכש פתוחות', out_labor: 'שכר עובדים (מהיומן)', out_future: 'יתרת עלויות לפי צפי', out_fixed: 'עלויות חודשיות קבועות', out_ohfixed: 'תקורות קבועות של הקבלן'
 };
 export const CF_IN = ['in_paid', 'in_billed', 'in_future', 'in_index', 'in_retention'];
 // שורות של מודולים: מוצגות רק כשיש בהן סכום
-export const OPT_ROWS = ['in_index', 'out_index', 'out_fixed', 'in_forecast'];
+export const OPT_ROWS = ['in_index', 'out_index', 'out_fixed', 'out_ohfixed', 'in_forecast'];
 export const usedRows = (keys, view) => keys.filter(k => !OPT_ROWS.includes(k) || view.some(m => m.rows[k]));
-export const CF_OUT = ['out_paid', 'out_open', 'out_po', 'out_labor', 'out_fixed', 'out_future'];
+export const CF_OUT = ['out_paid', 'out_open', 'out_po', 'out_labor', 'out_fixed', 'out_ohfixed', 'out_future'];
 
 /**
  * projects: [{ project, summary, pd, costs }] (summary מ-summarize: billing, rows, total; pd: expenses, pos, poLines, entries)
- * opts: { settings, today: 'YYYY-MM-DD', back: 3, ahead: 12, delay: 0 (חודשי עיכוב בתשלומי הקבלן הראשי), indexSeries: [] }
+ * opts: { settings, today: 'YYYY-MM-DD', back: 3, ahead: 12, delay: 0 (חודשי עיכוב בתשלומי הקבלן הראשי), indexSeries: [], tenantOH: [] (תקורות קבועות של הקבלן, רק בתזרים של כל הפרויקטים) }
  */
 export function cashflow(projects, opts = {}) {
   const s = { ...DEF, ...(opts.settings || {}) };
@@ -125,6 +125,9 @@ export function cashflow(projects, opts = {}) {
       put(pm, 'out_future', amt * laborShare, false, `עבודה (${monthLabel(wm)})`, P.id);
     }
   }
+
+  // תקורות קבועות של הקבלן: משולמות בחודש עצמו, לא שייכות לפרויקט
+  for (const l of opts.tenantOH || []) for (const m of months) if (l.from_month <= m && (!l.to_month || l.to_month >= m)) put(m, 'out_ohfixed', n(l.amount), l.vat !== false, `${l.name || 'תקורה קבועה'} (${monthLabel(m)})`, null);
 
   // מע"מ: ההפרש בין מע"מ שנגבה לשולם משולם לרשות בחודש שאחרי (שלילי = החזר)
   for (const m of months) {
