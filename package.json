@@ -1,0 +1,12 @@
+{
+  "name": "grosher-subcon",
+  "private": true,
+  "description": "גרושר · בקרת עלויות ותזרים. האתר עצמו סטטי (GitHub Pages); הקובץ הזה רק לבדיקות.",
+  "scripts": {
+    "test": "node tests/run-all.mjs",
+    "check": "node tests/check-syntax.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

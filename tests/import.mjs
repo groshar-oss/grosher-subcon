@@ -1,0 +1,18 @@
+import { chromium } from 'playwright';
+const BASE='http://localhost:8123/'; const b=await chromium.launch(); const p=await b.newPage({viewport:{width:1440,height:900}});
+const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('console',m=>{if(m.type()==='error')errs.push(m.text())});
+await p.goto(BASE); await p.waitForSelector('.kpis');
+const pid=await p.evaluate(()=>[...document.querySelectorAll('a.proj')].pop().getAttribute('href').split('/')[2]);
+await p.goto(BASE+`#/project/${pid}/boq`); await p.waitForTimeout(600);
+const before=await p.evaluate(()=>document.querySelectorAll('table tbody tr').length);
+await p.setInputFiles('#file','tests/sample-boq.xlsx');
+await p.waitForSelector('#impbox table',{timeout:20000}); await p.waitForTimeout(500);
+await p.screenshot({path:'tests/shots/import-preview.png'});
+console.log((await p.evaluate(()=>document.querySelector('#impbox').innerText)).slice(0,900));
+const btns=await p.$$eval('.ov button',bs=>bs.map(b=>b.innerText.trim())); console.log('buttons',btns);
+b._p=p; 
+await p.check('input[name=force]'); await p.click('.ov button:text-is("קליטה")');
+await p.waitForTimeout(1000);
+const after=await p.evaluate(()=>document.querySelectorAll('table tbody tr').length);
+await p.screenshot({path:'tests/shots/import-after.png',fullPage:true});
+console.log('rows before/after',before,after); console.log(errs.join('\n')||'no errors'); await b.close();

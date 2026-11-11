@@ -1,0 +1,24 @@
+# בדיקות אוטומטיות על כל PR ועל כל דחיפה ל-main: תחביר, התאמת הסכמה, חישובים ובדיקות דפדפן יציבות.
+name: בדיקות
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      # בדיקות בלי דפדפן: תחביר, התאמת רשימת העמודות ל-SQL, חישובים
+      - run: node tests/check-syntax.mjs
+      - run: node tests/schema-check.mjs
+      - run: node tests/unit.mjs
+      - run: node tests/dev-unit.mjs
+      # בדיקות דפדפן יציבות (מצב הדגמה). השאר רצות ידנית: node tests/run-all.mjs
+      - run: node tests/run-all.mjs smoke.mjs bills.mjs offline.mjs import.mjs stage7.mjs stage29.mjs
