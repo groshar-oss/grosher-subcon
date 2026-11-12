@@ -119,7 +119,13 @@ async function docxText(blob) {
 async function localBoq(blob, row) {
   const XLSX = await loadXLSX();
   const wb = XLSX.read(await blob.arrayBuffer(), { type: 'array' });
-  const best = bestSheet(wb.SheetNames.map(name => ({ name, rows: XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' }) })));
+  const sheets = wb.SheetNames.map(name => ({ name, rows: XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' }) }));
+  // קובץ מתוכנת התמחיר: נקלט בחלון הקליטה המלא של כתב הכמויות (מכירה, עלות, תקורות, משרד ובלת"מ), לא כרשימת סעיפים בלבד
+  const { isPricingXlsx, pricingFromSheets } = await import('../pricingxlsx.js');
+  if (isPricingXlsx(sheets)) { try { const f = pricingFromSheets(sheets);
+    return { doc_type: 'boq', pricing: true, confidence: 1, summary: `קובץ מתוכנת התמחיר: ${f.main.length} סעיפים, מכירה ${Math.round(f.sellTotal).toLocaleString('en-US')} ₪, עלות ישירה ${Math.round(f.direct).toLocaleString('en-US')} ₪, ותקורות`, project_id: row.project_id,
+      lines: f.main.map(i => ({ description: i.description, qty: i.qty, unit: i.unit, unit_price: i.sell, total: i.qty * i.sell, code: i.code, chapter: i.chapter, item_id: null, po_line_id: null })), warnings: [] }; } catch (e) { console.warn('pricing xlsx', e); } }
+  const best = bestSheet(sheets);
   if (!best || best.parsed.items.length < 3) return null;
   return { doc_type: 'boq', confidence: 0.95, summary: `כתב כמויות מגיליון "${best.name}" (${best.parsed.items.length} סעיפים)`, project_id: row.project_id, lines: best.parsed.items.map(i => ({ description: i.description, qty: i.qty, unit: i.unit, unit_price: i.unit_price, total: n(i.qty) * n(i.unit_price), code: i.code, chapter: i.chapter, item_id: null, po_line_id: null })), warnings: [] };
 }
@@ -218,6 +224,7 @@ export function reviewFile(row, data) {
           <label class="chk"><input type="checkbox" data-s="contract.indexation" ${c.indexation ? 'checked' : ''}> החוזה צמוד למדד</label>
           ${(c.guarantees || []).length ? `<p class="small">ערבויות שנדרשות בחוזה: ${c.guarantees.map(g => `${GUAR_KINDS[g.kind] || g.kind} ${g.pct ? g.pct + '%' : ''}${g.amount ? ' ₪' + Math.round(g.amount).toLocaleString('en-US') : ''}`).join(' · ')}. ייפתחו כרשומות ערבות להשלמה.</p>` : ''}
           ${doc.lines.length ? `<label class="chk"><input type="checkbox" id="withboq" checked> לקלוט גם את כתב הכמויות שבחוזה (${doc.lines.length} סעיפים)</label>` : ''}`; }
+      if (t === 'boq' && doc.pricing) return `<div class="grid g2">${proj}</div><p class="note"><b>זה קובץ מתוכנת התמחיר.</b> אחרי "אישור וקליטה" ייפתח חלון הקליטה של כתב הכמויות בפרויקט, ושם נקלטים יחד מחירי המכירה, העלות של כל סעיף, תקורות אתר, תקורות משרד ובלת"מ, עם בדיקה מול הריכוז שבקובץ.</p><h4>סעיפים (${doc.lines.length})</h4>${linesTable({ price: true }).replace(/<th>סעיף<\/th>/, '<th>קוד</th>')}`;
       if (t === 'boq') return `<div class="grid g2">${proj}</div>${pd().items.length ? `<p class="note">בפרויקט כבר יש ${pd().items.length} סעיפים. הסעיפים מהקובץ יתווספו אליהם (קוד שכבר קיים יעודכן).</p>` : ''}<h4>סעיפים (${doc.lines.length})</h4>${linesTable({ price: true }).replace(/<th>סעיף<\/th>/, '<th>קוד</th>')}`;
       if (t === 'vo') { const v = x.vo ||= { source: 'change_order', has_written_order: true };
         return `<div class="grid g2">${proj}${fld('הוראה קיימת לעדכון', `<select data-s="vo.vo_id"><option value="">הוראה חדשה</option>${pd().vos.map(c => `<option value="${c.id}" ${c.id === v.vo_id ? 'selected' : ''}>${esc(`${c.number} ${c.title}`)}</option>`).join('')}</select>`)}
@@ -289,6 +296,8 @@ export function reviewFile(row, data) {
       const err = validate(doc, data);
       if (err) return toast(err, 'bad');
       const btn = $('#apply', ov); btn.disabled = true; btn.textContent = 'קולט...';
+      if (doc.doc_type === 'boq' && doc.pricing) { // הקליטה המלאה נעשית בלשונית כתב הכמויות
+        window.__pricingImport = { pid: doc.project_id, row }; close(false); location.hash = `#/project/${doc.project_id}/boq`; return; }
       try { const r = await applyDoc(doc, row, data); toast(`נקלט: ${r.links.filter(l => l.label).map(l => l.label).join(' · ')}`); close(true); }
       catch (e) { btn.disabled = false; btn.textContent = 'אישור וקליטה'; toast(e.message, 'bad'); }
     });

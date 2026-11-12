@@ -52,6 +52,11 @@ export function tabBoq(P, variationId = null, { dev = false } = {}) {
   const file = $('#file', el);
   $('#imp', el)?.addEventListener('click', () => file.click());
   file?.addEventListener('change', async () => { if (file.files[0]) await importFlow(P, file.files[0]); file.value = ''; });
+  // קובץ מתוכנת התמחיר שהגיע מתיבת המסמכים: פותחים את חלון הקליטה המלא
+  const pend = window.__pricingImport;
+  if (pend && pend.pid === P.id && !variationId) { window.__pricingImport = null;
+    import('../files.js').then(m => m.fileBlob(pend.row)).then(b => new Promise(r => setTimeout(r, 50)).then(() => importFlow(P, new File([b], pend.row.name, { type: b.type || '' }))))
+      .then(ok => ok && db.update('files', pend.row.id, { status: 'done', project_id: P.id, doc_type: 'boq' })).catch(e => toast(e.message, 'bad')); }
   return el;
 }
 
@@ -251,6 +256,7 @@ async function importFlow(P, file) {
   const kept = Object.keys(exByCode).length;
   await logChange({ project_id: P.id, entity: 'boq', label: `קליטת כתב כמויות מ-${file.name}`, field: { replace: 'החלפה', update: 'עדכון לפי קוד', append: 'הוספה' }[how], new_value: `${p.items.length} סעיפים, ${Math.round(p.calcTotal).toLocaleString('en-US')} ₪` });
   toast(how === 'update' ? `עודכנו ${upd.length} סעיפים, נוספו ${fresh.length}${kept ? `. ${kept} סעיפים שלא בקובץ נשארו בפרויקט` : ''}${ohN ? `. תקורות: ${ohN} סעיפים` : ''}` : `נקלטו ${fresh.length} סעיפים${ohN ? ` ועוד ${ohN} סעיפי תקורה` : ''}`); render();
+  return true;
 }
 
 // ===== תמחיר =====
