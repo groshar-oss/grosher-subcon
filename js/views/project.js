@@ -1,7 +1,7 @@
 // מסך פרויקט: לשוניות בקרה, כתב כמויות, תמחיר, הוראות שינוי, הוצאות, יומן שינויים והגדרות
 import { h, esc, $, $$, modal, field, toast, money, pct, num, area, fmtDate, confirmBox } from '../util.js';
 import { db } from '../db.js';
-import { S, can, loadTenantData, modeSwitch, render, logChange, settings, projectTabs } from '../app.js';
+import { S, can, loadTenantData, modeSwitch, render, logChange, settings, projectTabs, TAB_VIS } from '../app.js';
 import { n, COST_KINDS, VO_STATUS, PROFIT_MODES, itemPlanned, lineCost, EXPENSE_KINDS } from '../calc.js';
 import { STATUS, CONTRACT, projData, summarize, rowAttr, legend, modeLine } from './common.js';
 import { projectForm, projectRow, wireModules, wireProjectType } from './projects.js';
@@ -54,7 +54,8 @@ export async function viewProject(id, tab, extra) {
   const qc = quotaCounts(P.summary.quotas || []);
   const tabs = projectTabs(project);
   const el = h(`<div>${projTop(P, `${esc(mc?.name || party(project).none)} · ${CONTRACT[project.contract_type]} · שוטף+${project.pay_terms_days} · ${STATUS[project.status]}${project.address ? ' · ' + esc(project.address) : ''}`)}
-    <nav class="tabs ptabs">${tabs.map(([k, l]) => `<a href="#/project/${id}/${k}" class="${k === tab ? 'on' : ''}">${l}${k === 'quota' && qc.over + qc.warn ? ` <span class="badge ${qc.over ? 'red' : 'amber'}">${qc.over + qc.warn}</span>` : ''}</a>`).join('')}</nav><div id="tab"></div></div>`);
+    <nav class="tabs ptabs">${tabs.map(([k, l]) => `<a href="#/project/${id}/${k}" class="${k === tab ? 'on' : ''}"${TAB_VIS[k] ? ` title="${TAB_VIS[k] === 'pub' ? `גלוי ${party(project).to}` : `פנימי, ${party(project).the} לא רואה`}"` : ''}>${TAB_VIS[k] ? `<i class="vis ${TAB_VIS[k]}" aria-hidden="true"></i>` : ''}${l}${k === 'quota' && qc.over + qc.warn ? ` <span class="badge ${qc.over ? 'red' : 'amber'}">${qc.over + qc.warn}</span>` : ''}</a>`).join('')}</nav>
+    <div class="vislegend small mut no-print"><span><i class="vis pub"></i>גלוי ${party(project).to}</span><span><i class="vis int"></i>פנימי, ${party(project).the} לא רואה</span></div><div id="tab"></div></div>`);
   el.dataset.qover = qc.over; el.dataset.qwarn = qc.warn;
   wirePsel(el, tab);
   const body = $('#tab', el);

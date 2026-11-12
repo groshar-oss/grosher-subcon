@@ -1,4 +1,5 @@
 // כתב כמויות (כולל קליטה מאקסל) ותמחיר ביצוע
+import { party } from '../dev.js';
 import { h, esc, $, $$, modal, field, select, toast, money, pct, num, confirmBox, numOrNull } from '../util.js';
 import { db } from '../db.js';
 import { S, can, render, logChange, settings } from '../app.js';
@@ -17,7 +18,8 @@ export function tabBoq(P, variationId = null, { dev = false } = {}) {
   const word = dev ? 'תקציב' : 'כתב כמויות';
   const total = items.reduce((s, i) => s + itemSale(i), 0);
   const el = h(`<div>
-    ${can.edit() ? `<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ סעיף</button>${variationId ? '' : `<button class="btn ghost" id="imp">${dev ? 'קליטת תקציב (אקסל / תמחיר)' : 'קליטה (אקסל / תמחיר)'}</button>`}${variationId ? '' : '<input type="file" id="file" accept=".xlsx,.xls,.csv,.json" hidden>'}<button class="btn ghost" id="exp">ייצוא לאקסל</button>${!dev && !variationId && !ohItems.length ? '<button class="btn ghost" id="ohadd">+ פרק תקורות אתר</button>' : ''}</div>` : ''}
+    ${!dev && !variationId ? `<div class="note visnote pub"><i class="vis pub" aria-hidden="true"></i><span><b>כתב כמויות · מכירה.</b> זה מה ש${party(P.project).the} מכיר: סעיפים, כמויות ומחירי מכירה. מכאן יוצאים החשבונות והוראות השינוי. העלויות שלנו נמצאות בלשונית <a href="#/project/${P.id}/costing">תמחיר · עלות פנימית</a>.</span></div>` : ''}
+    ${can.edit() ? `<div class="actions" style="margin-bottom:12px"><button class="btn" id="add">+ סעיף</button>${variationId ? '' : `<button class="btn ghost" id="imp">${dev ? 'קליטת תקציב מאקסל או מתוכנת התמחיר' : 'קליטה מאקסל או מתוכנת התמחיר'}</button>`}${variationId ? '' : '<input type="file" id="file" accept=".xlsx,.xls,.csv,.json" hidden>'}<button class="btn ghost" id="exp">ייצוא לאקסל</button>${!dev && !variationId && !ohItems.length ? '<button class="btn ghost" id="ohadd">+ פרק תקורות אתר</button>' : ''}</div>` : ''}
     <div class="tw"><table><thead><tr><th>קוד</th><th>תיאור</th><th>יח'</th><th class="n">כמות</th><th class="n">${dev ? 'מחיר תקציב' : "מחיר יח'"}</th><th class="n">סה"כ</th><th class="hide-m">${dev ? '' : 'חיוב'}</th>${can.edit() ? '<th></th>' : ''}</tr></thead><tbody id="tb"></tbody></table></div></div>`);
   const tb = $('#tb', el);
   const cols = can.edit() ? 8 : 7;
@@ -60,7 +62,7 @@ export const ohRows = (pid, list = OH_TEMPLATE, start = 0) => list.map(([d, u], 
 function ohSection(P, ohItems, cols) {
   const ohBy = Object.fromEntries((P.summary?.rows || []).map(r => [r.item.id, r.c]));
   const plan = ohItems.reduce((a, i) => a + n(ohBy[i.id]?.planned), 0);
-  return `<tr class="sec"><td colspan="${cols}">${OH_CHAPTER} <span class="chip">פנימי · לא מופיע למזמין</span> <span class="mut small">· תמחיר ${money(plan)}</span></td></tr>`
+  return `<tr class="sec"><td colspan="${cols}">${OH_CHAPTER} <span class="chip vischip"><i class="vis int" aria-hidden="true"></i>פנימי · לא מופיע ${party(P.project).to} ובחשבונות</span> <span class="mut small">· תמחיר ${money(plan)}</span></td></tr>`
     + ohItems.map(i => `<tr><td>${esc(i.code || '')}</td><td class="wrap">${esc(i.description)}${ohBy[i.id]?.noCosting ? ` <a class="chip amber" href="#/project/${P.id}/costing">לתמחר</a>` : ''}</td><td>${esc(i.unit || '')}</td><td class="n" colspan="3"><span class="mut small">עלות בלבד: ${money(ohBy[i.id]?.planned || 0)}</span></td><td class="hide-m"></td>
       ${can.edit() ? `<td><button class="btn small ghost" data-ed="${i.id}">עריכה</button> <button class="btn small ghost" data-del="${i.id}" aria-label="מחיקה">✕</button></td>` : ''}</tr>`).join('')
     + (can.edit() ? `<tr><td colspan="${cols}"><button class="btn small ghost" id="ohnew">+ סעיף תקורה</button> <span class="small mut">את העלות מזינים בלשונית "תמחיר", והוצאות משייכים לסעיף כמו לכל סעיף.</span></td></tr>` : '');
@@ -271,6 +273,7 @@ export function tabCosting(P) {
   const groups = groupBy(P.pd.items, i => i.variation_id ? `הוראת שינוי ${vos[i.variation_id]?.number || ''} · ${vos[i.variation_id]?.title || ''}` : (i.chapter || 'ללא פרק'));
   let T = { sale: 0, plan: 0 };
   const el = h(`<div>
+    <div class="note visnote int"><i class="vis int" aria-hidden="true"></i><span><b>תמחיר · עלות פנימית.</b> פנימי בלבד: כמה כל סעיף עולה לנו (חומר, עבודה, קבלני משנה וציוד), ומה הרווח המתוכנן. ${party(P.project).the} לא רואה את זה. מחירי המכירה נמצאים בלשונית <a href="#/project/${P.id}/boq">כתב כמויות · מכירה</a>.</span></div>
     <div class="actions" style="margin-bottom:12px">${can.edit() ? '<button class="btn ghost" id="copy">העתקת תמחיר מפרויקט אחר</button>' : ''}<span class="mut small">${P.pd.items.some(i => i.is_overhead) ? `תקורה: בפרק "${OH_CHAPTER}"${oh ? ` + ${oh}% מהעלות הישירה (בהגדרות הפרויקט)` : ''}` : `תקורה בפרויקט: ${oh}% מהעלות הישירה (משנים בהגדרות הפרויקט, או מוסיפים פרק תקורות אתר בכתב הכמויות)`}</span></div>
     <div class="tw"><table><thead><tr><th>קוד</th><th>תיאור</th><th class="n">כמות</th><th class="n">מכירה</th><th class="n">עלות ישירה</th><th class="n">תמחיר כולל</th><th class="n">עלות ליח'</th><th class="n">מחיר ליח'</th><th class="n">רווח מתוכנן</th><th class="n">% רווח</th><th></th></tr></thead><tbody id="tb"></tbody></table></div></div>`);
   const tb = $('#tb', el);

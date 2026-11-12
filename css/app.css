@@ -497,3 +497,15 @@ tr.sec>td{background:var(--sec);color:var(--secink)}
 body{font-variant-emoji:text}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]) .bar i[style*="1B2A4A"]{background:#A9BADB!important}}
 :root[data-theme=dark] .bar i[style*="1B2A4A"]{background:#A9BADB!important}
+
+/* גלוי למזמין מול פנימי: נקודה בלשוניות, מקרא והסבר בראש כתב הכמויות והתמחיר */
+.vis{display:inline-block;width:8px;height:8px;border-radius:50%;margin-inline-end:6px;vertical-align:1px;flex:0 0 auto}
+.vis.pub{background:var(--acc)}
+.vis.int{background:transparent;border:1.5px solid var(--mut)}
+.tabs a.on .vis.int{border-color:#fff}
+.tabs a.on .vis.pub{background:#fff}
+.vislegend{display:flex;gap:16px;margin:-6px 0 12px;flex-wrap:wrap}
+.vislegend span{display:inline-flex;align-items:center}
+.visnote{display:flex;gap:8px;align-items:baseline}
+.visnote .vis{flex:0 0 8px}
+.vischip{display:inline-flex;align-items:center}
