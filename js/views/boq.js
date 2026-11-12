@@ -253,9 +253,24 @@ async function importFlow(P, file) {
     ohN = list.length;
     await logChange({ project_id: P.id, entity: 'boq', label: OH_CHAPTER, field: 'תקורות מתוכנת התמחיר', old_value: n(P.project.overhead_pct) ? `${n(P.project.overhead_pct)}%` : null, new_value: `${list.length} סעיפים${fo.reserve ? `, מתוכם בלת"מ ${Math.round(fo.reserve).toLocaleString('en-US')} ₪` : ''}` });
   }
-  const kept = Object.keys(exByCode).length;
+  // סעיפים שהיו בפרויקט ולא נמצאים בקובץ החדש: מציעים למחוק (רק סעיפים בלי ביצוע, הוצאות, הזמנות או חשבונות)
+  const keptItems = Object.values(exByCode);
+  let removedN = 0;
+  if (keptItems.length) {
+    const used = i => n(i.progress_pct) > 0 || P.pd.expenses.some(e => e.boq_item_id === i.id) || (P.pd.poLines || []).some(l => l.boq_item_id === i.id) || (P.pd.billLines || []).some(l => l.boq_item_id === i.id);
+    const free = keptItems.filter(i => !used(i)), busy = keptItems.length - free.length;
+    const list = free.slice(0, 8).map(i => `${i.code} ${String(i.description).slice(0, 40)} (${Math.round(n(i.qty) * n(i.unit_price)).toLocaleString('en-US')} ₪)`).join(' · ') + (free.length > 8 ? ' …' : '');
+    if (free.length && await confirmBox('סעיפים שלא נמצאים בקובץ', `${free.length} סעיפים בפרויקט לא מופיעים בקובץ החדש: ${list}. למחוק אותם? אם לא, הם נשארים ונספרים במכירה.${busy ? ` ${busy} סעיפים עם ביצוע, הוצאות או חשבונות יישארו בכל מקרה.` : ''}`, 'מחיקה', true)) {
+      const ids = free.map(i => i.id);
+      await db.removeWhere('cost_lines', { eq: { project_id: P.id }, in: { boq_item_id: ids } });
+      await db.removeWhere('boq_items', { eq: { project_id: P.id }, in: { id: ids } });
+      for (const i of free) await logChange({ project_id: P.id, entity: 'boq_item', entity_id: i.id, label: label(i), field: 'מחיקה', old_value: Math.round(n(i.qty) * n(i.unit_price)), new_value: null, reason: `לא נמצא בקובץ ${file.name}` });
+      removedN = free.length;
+    }
+  }
+  const kept = keptItems.length - removedN;
   await logChange({ project_id: P.id, entity: 'boq', label: `קליטת כתב כמויות מ-${file.name}`, field: { replace: 'החלפה', update: 'עדכון לפי קוד', append: 'הוספה' }[how], new_value: `${p.items.length} סעיפים, ${Math.round(p.calcTotal).toLocaleString('en-US')} ₪` });
-  toast(how === 'update' ? `עודכנו ${upd.length} סעיפים, נוספו ${fresh.length}${kept ? `. ${kept} סעיפים שלא בקובץ נשארו בפרויקט` : ''}${ohN ? `. תקורות: ${ohN} סעיפים` : ''}` : `נקלטו ${fresh.length} סעיפים${ohN ? ` ועוד ${ohN} סעיפי תקורה` : ''}`); render();
+  toast(how === 'update' ? `עודכנו ${upd.length} סעיפים, נוספו ${fresh.length}${removedN ? `. נמחקו ${removedN} סעיפים שלא בקובץ` : ''}${kept ? `. ${kept} סעיפים שלא בקובץ נשארו בפרויקט` : ''}${ohN ? `. תקורות: ${ohN} סעיפים` : ''}` : `נקלטו ${fresh.length} סעיפים${ohN ? ` ועוד ${ohN} סעיפי תקורה` : ''}`); render();
   return true;
 }
 
