@@ -5,6 +5,7 @@
 import { n, lineCost } from './calc.js';
 import { dueDate } from './bills.js';
 import { has, indexRate, fixedMonths, spreadWeights, spreadEnd } from './modules.js';
+import { hasPlan, poPieces, openPieces, incomePieces, incomePct } from './payplan.js';
 
 const DEF = { cash_opening: 0, cash_asof: '', cash_min: 0, supplier_terms_days: 60, vat_pct: 18 };
 const corrTag = x => (x.corr_month ? ` (תיקון ל-${x.corr_month.split('-').reverse().join('/')})` : '');
@@ -75,9 +76,17 @@ export function cashflow(projects, opts = {}) {
     const workMonths = []; for (let m = cur; m <= endM; m = addMonths(m, 1)) workMonths.push(m);
     // פריסה: שווה בכל חודש, או לפי עקומת S / שלבים כשמודול הפריסה דלוק
     const W = spreadWeights(P, workMonths);
+    // לוח תקבולים מוסכם (מקדמה, אבני דרך באחוזים): החלקים שעוד לא חויבו נכנסים בחודש שלהם, והיתרה מתפרסת כרגיל
+    let rem = remaining;
+    if (incomePct(P.spread?.income) > 0 && remaining > 1 && P.status !== 'closed') {
+      for (const p of openPieces(incomePieces(P.spread.income, sale), billed)) {
+        const amt = Math.min(rem, p.amount); if (amt <= 0) break; rem -= amt;
+        put(addMonths(notPast(mkey(dueDate(p.month + '-05', terms))), delay), 'in_future', amt * (1 - ded), true, `${p.label} (${p.pct}%)`, P.id);
+      }
+    }
     const idxRate = has(P, 'index') ? indexRate(P.base_index, opts.indexSeries || pd.indexSeries || [], cur) : 0;
-    if (remaining > 1 && P.status !== 'closed') for (const [wi, wm] of workMonths.entries()) {
-      const amt = remaining * W[wi];
+    if (rem > 1 && P.status !== 'closed') for (const [wi, wm] of workMonths.entries()) {
+      const amt = rem * W[wi];
       const due = mkey(dueDate(addMonths(wm, 1) + '-05', terms));
       put(addMonths(due, delay), 'in_future', amt * (1 - ded), true, `חשבון עתידי על ${monthLabel(wm)}`, P.id);
       // הצמדה: לפי המדד האחרון שפורסם מול מדד הבסיס. לא מנחשים מדד עתידי
@@ -103,7 +112,12 @@ export function cashflow(projects, opts = {}) {
       const total = (pd.poLines || []).filter(l => l.po_id === po.id).reduce((a, l) => a + n(l.qty) * n(l.unit_price), 0);
       const inv = pd.expenses.filter(e => e.po_id === po.id).reduce((a, e) => a + n(e.amount), 0);
       const open = Math.max(0, total - inv);
-      put(notPast(mkey(dueDate(po.expected_date || po.order_date || today, supTerms))), 'out_po', open, true, `הזמנה ${po.number || ''} ${po.supplier_name}`, P.id);
+      const pp = po.pay_plan || null, pt = pp?.terms_days != null && pp.terms_days !== '' ? n(pp.terms_days) : supTerms;
+      if (hasPlan(pp)) {
+        // לוח תשלומים של ההזמנה: כל חלק בחודש שלו + תנאי התשלום. מה שכבר חויב יורד מהחלקים הראשונים
+        const base = mkey(po.expected_date || po.order_date || today);
+        for (const p of openPieces(poPieces(pp, total, base, endM), inv)) put(notPast(mkey(dueDate(p.month + '-01', pt))), 'out_po', p.amount, true, `הזמנה ${po.number || ''} ${po.supplier_name} · ${p.label}`, P.id);
+      } else put(notPast(mkey(dueDate(po.expected_date || po.order_date || today, pt))), 'out_po', open, true, `הזמנה ${po.number || ''} ${po.supplier_name}`, P.id);
     }
     // שכר: עלות היומן של כל חודש משולמת בחודש שאחרי
     const laborBy = {};

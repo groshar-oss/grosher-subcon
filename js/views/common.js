@@ -29,7 +29,7 @@ export function summarize(pd, mode = S.mode) {
   if (has(pd.project, 'fixed')) { const cur = new Date().toISOString().slice(0, 7);
     for (const fc of pd.fixedCosts || []) { const left = fixedLeft(fc, cur); if (!left) continue;
       if (fc.boq_item_id) com.byItem[fc.boq_item_id] = (com.byItem[fc.boq_item_id] || 0) + left; else com.unassigned += left; } }
-  const s = projectSummary({ ...pd, actualByItem: act.byItem, commitByItem: com.byItem }, mode);
+  const s = projectSummary({ ...pd, actualByItem: act.byItem, commitByItem: com.byItem, closedByItem: com.closedByItem }, mode);
   s.unallocated = act.unallocated;
   s.costs = costs;
   s.laborCost = Object.values(costs).reduce((a, c) => a + c.cost, 0);

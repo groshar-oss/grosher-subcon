@@ -509,3 +509,4 @@ body{font-variant-emoji:text}
 .visnote{display:flex;gap:8px;align-items:baseline}
 .visnote .vis{flex:0 0 8px}
 .vischip{display:inline-flex;align-items:center}
+.chip.trd{background:#eef1e4;color:#55602a;font-weight:500}
