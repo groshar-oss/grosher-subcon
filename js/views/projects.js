@@ -9,7 +9,7 @@ import { isDev, isExec, party, partyOfMany, PROJECT_TYPES, devSummary } from '..
 import { modulesFieldset, readModules, syncModulesType, mods, moduleTags } from '../modules.js';
 import { projectContactsBlock, wireProjectContacts, saveProjectContacts } from '../contacts.js';
 import { loadTemplates, templatePicker, wireTemplatePicker, applyTemplate } from './templates.js';
-import { spreadBlock, wireSpread, readSpread } from './spreadui.js';
+import { spreadBlock, wireSpread, readSpread, incomeBlock, wireIncome, readIncome } from './spreadui.js';
 import { ohRows, OH_TEMPLATE } from './boq.js';
 
 export function projectForm(p = {}, mcs = [], { isNew = false } = {}) {
@@ -31,6 +31,7 @@ export function projectForm(p = {}, mcs = [], { isNew = false } = {}) {
   ${modulesFieldset(p, { isNew })}
   <div class="idxonly" ${(isNew ? false : mods(p).index) ? '' : 'hidden'}><div class="grid g2">${field('מדד בסיס של הפרויקט (מדד תשומות הבנייה)', 'base_index', p.base_index, { type: 'number', attrs: 'step="any" dir="ltr"' })}<p class="small mut" style="align-self:end">החוזה צמוד למדד. המדד של כל חודש מוזן פעם אחת לכל הפרויקטים, ב"הגדרות לקוח ומשתמשים".</p></div></div>
   ${spreadBlock(p, { isNew, on: !isNew && mods(p).spread })}
+  <div class="subonly" ${dev ? 'hidden' : ''}>${incomeBlock(p)}</div>
   ${projectContactsBlock(p.id)}`;
 }
 
@@ -51,6 +52,7 @@ export async function projectRow(v, mcs, type = null) {
   const t = v.project_type || type || 'sub';
   if (Object.keys(v).some(k => k.startsWith('mod_'))) { row.modules = readModules(v, t); row.indexation = !!row.modules.index; }
   if ('spread_json' in v) row.spread = readSpread(v);
+  if ('income_json' in v && t !== 'dev') { const inc = readIncome(v); if (inc || row.spread) row.spread = { ...(row.spread || { curve: 's', floors: [] }), ...(inc ? { income: inc } : {}) }; }
   return row;
 }
 
@@ -75,7 +77,7 @@ export function wireModules(el) {
   const idx = $('[name=mod_index]', el), box = $('.idxonly', el), spr = $('[name=mod_spread]', el), sbox = $('.spreadonly', el);
   const upd = () => { if (box) box.hidden = !idx?.checked; if (sbox) sbox.hidden = !spr?.checked; };
   idx?.addEventListener('change', upd); spr?.addEventListener('change', upd); upd();
-  wireSpread(el);
+  wireSpread(el); wireIncome(el);
   $$('.modrow input', el).forEach(i => i.addEventListener('change', () => { i.closest('.modrow').dataset.touched = '1'; }));
 }
 

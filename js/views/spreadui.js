@@ -77,3 +77,34 @@ export function readSpread(v) {
     return { curve: s.curve === 'linear' ? 'linear' : 's', floors: (s.floors || []).filter(f => okM(f.from_month) && okM(f.to_month)).map(f => ({ name: String(f.name || '').trim() || 'שלב', from_month: f.from_month, to_month: f.to_month < f.from_month ? f.from_month : f.to_month, weight: Number(f.weight) || 0 })) };
   } catch { return null; }
 }
+
+// לוח תקבולים מוסכם מהמזמין / הקבלן הראשי: מקדמה ואבני דרך באחוזים מהמכירה, לפי חודש. נשמר ב-projects.spread.income = { rows: [{ name, pct, month }] }
+export function incomeBlock(p) {
+  const rows = p.spread?.income?.rows || [];
+  return `<details class="incomeplan card" ${rows.length ? 'open' : ''} style="margin:8px 0;padding:12px"><summary><b>לוח תקבולים מוסכם</b> <span class="small mut">(רשות) מקדמה ותשלומים באחוזים לפי חודש</span></summary>
+    <p class="small mut" style="margin:6px 0">אם סוכם לוח תשלומים, התזרים מציג את התקבולים לפיו (החודש + תנאי התשלום). מה שכבר חויב בחשבונות יורד מהתשלומים הראשונים, והיתרה שלא בלוח מתפזרת כרגיל. קיזוז המקדמה מהחשבונות עוד לא מחושב.</p>
+    <div id="inrows"></div><button type="button" class="btn small ghost" id="inadd">+ תשלום</button> <span class="small" id="insum"></span>
+    <input type="hidden" name="income_json" value="${esc(JSON.stringify(rows))}"></details>`;
+}
+export function wireIncome(el) {
+  const box = $('.incomeplan', el); if (!box) return;
+  const hid = $('[name=income_json]', box);
+  let rows; try { rows = JSON.parse(hid.value) || []; } catch { rows = []; }
+  const sum = () => {
+    hid.value = JSON.stringify(rows);
+    const tot = rows.reduce((a, r) => a + (Number(r.pct) || 0), 0);
+    $('#insum', box).innerHTML = rows.length ? `סה"כ <b class="${tot > 100.01 ? 'neg' : ''}">${Math.round(tot * 100) / 100}%</b>${tot < 99.99 ? ` · היתרה (${Math.round((100 - tot) * 100) / 100}%) מתפזרת לפי ההתקדמות` : ''}` : '';
+  };
+  const draw = () => {
+    $('#inrows', box).innerHTML = rows.map((r, i) => `<div class="grid g3" style="margin-bottom:6px"><input data-i="${i}" data-f="name" placeholder="${i ? 'למשל סיום שלד' : 'מקדמה'}" value="${esc(r.name || '')}"><input data-i="${i}" data-f="pct" type="number" step="any" dir="ltr" placeholder="%" value="${esc(r.pct ?? '')}"><div style="display:flex;gap:6px"><input data-i="${i}" data-f="month" type="month" value="${esc(r.month || '')}" style="flex:1"><button type="button" class="btn small ghost" data-del="${i}" aria-label="מחיקה">✕</button></div></div>`).join('');
+    sum();
+    $$('#inrows input', box).forEach(inp => inp.oninput = inp.onchange = () => { rows[+inp.dataset.i][inp.dataset.f] = inp.dataset.f === 'pct' ? (inp.value === '' ? '' : Number(inp.value)) : inp.value; sum(); });
+    $$('#inrows [data-del]', box).forEach(b => b.onclick = () => { rows.splice(+b.dataset.del, 1); draw(); });
+  };
+  $('#inadd', box).onclick = () => { rows.push({ name: rows.length ? '' : 'מקדמה', pct: '', month: $('[name=start_date]', el)?.value?.slice(0, 7) || '' }); draw(); };
+  draw();
+}
+export function readIncome(v) {
+  try { const rows = (JSON.parse(v.income_json || '[]') || []).filter(r => Number(r.pct) > 0 && okM(r.month)).map(r => ({ name: String(r.name || '').trim() || 'תשלום', pct: Number(r.pct), month: r.month }));
+    return rows.length ? { rows } : null; } catch { return null; }
+}

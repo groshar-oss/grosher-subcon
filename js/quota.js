@@ -79,7 +79,10 @@ export function entriesAsCosts(entries, costs) {
 
 // התקשרויות פתוחות מהזמנות רכש: ערך ההזמנה פחות מה שכבר חויב בחשבוניות שקושרו אליה
 export function openCommitments(pos, poLines, expenses) {
-  const byItem = {}; let unassigned = 0;
+  const byItem = {}, closedByItem = {}; let unassigned = 0;
+  // הזמנה שסומנה "סוגרת את כל העבודה בסעיפים": הסכום שלה הוא הסגירה של הסעיף (לבקרה מול התקציב המקורי)
+  for (const po of pos) if (po.status !== 'cancelled' && po.pay_plan?.closes)
+    for (const l of poLines.filter(l => l.po_id === po.id && l.boq_item_id)) closedByItem[l.boq_item_id] = (closedByItem[l.boq_item_id] || 0) + n(l.qty) * n(l.unit_price);
   for (const po of pos) {
     if (!PO_LIVE.includes(po.status)) continue;
     const ls = poLines.filter(l => l.po_id === po.id);
@@ -92,7 +95,7 @@ export function openCommitments(pos, poLines, expenses) {
       if (l.boq_item_id) byItem[l.boq_item_id] = (byItem[l.boq_item_id] || 0) + share; else unassigned += share;
     }
   }
-  return { byItem, unassigned };
+  return { byItem, unassigned, closedByItem };
 }
 
 const r1 = x => Math.round(x * 10) / 10;

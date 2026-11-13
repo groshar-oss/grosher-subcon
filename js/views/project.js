@@ -7,6 +7,8 @@ import { STATUS, CONTRACT, projData, summarize, rowAttr, legend, modeLine } from
 import { projectForm, projectRow, wireModules, wireProjectType } from './projects.js';
 import { mods, MODULES } from '../modules.js';
 import { tenantOH } from '../tenantoh.js';
+import { tradeOf, projectTrades } from '../trades.js';
+import { store } from '../util.js';
 import { tabBoq, tabCosting } from './boq.js';
 import { tabVo, tabExpenses } from './vo_exp.js';
 import { dayView, tabWorkLog, fieldProject } from './worklog.js';
@@ -81,6 +83,14 @@ async function devProject(P, tab, extra) {
 // ===== בקרה ורווחיות =====
 function tabControl(P) {
   const s = P.summary, t = s.total;
+  // תקציב מקורי: שיפור (או חריגה) בסגירות מול התמחיר שננעל
+  const hasBase = s.hasBase, inView = r => !r.item.variation_id || (r.vo && (S.mode === 'all' ? ['approved', 'partial', 'submitted', 'executed_unapproved'] : S.mode === 'approved' ? ['approved', 'partial'] : []).includes(r.vo.status));
+  const closedRows = s.rows.filter(r => r.c.closed && r.c.base != null);
+  const closeGain = closedRows.reduce((a, r) => a + r.c.base - r.c.forecast, 0), closedBase = closedRows.reduce((a, r) => a + r.c.base, 0);
+  const baseTot = hasBase ? s.contractRows.reduce((a, r) => a + n(r.c.base), 0) : 0;
+  // סינון לפי חבילה (ריצוף, גבס...)
+  const tkey = 'subcon-trade-' + P.id, trades = projectTrades(P.pd.items);
+  let tf = store(tkey) || ''; if (tf && !trades.some(x => x.name === tf)) tf = '';
   const el = h(`<div>${stepsCard(projectSteps(P.pd, { workers: P.data.workers }))}
     <div class="actions" style="margin-bottom:12px" id="mb"><span class="mut small">תצוגת רווחיות:</span></div>
     <div class="kpis">
@@ -89,6 +99,7 @@ function tabControl(P) {
       <div class="kpi"><div class="l">עלות בפועל</div><div class="v">${money(t.actual)}</div><div class="n">${pct(t.spentPct, { d: 0 })} מהתמחיר · ביצוע ${pct(t.progress, { d: 0 })}</div></div>
       <div class="kpi"><div class="l">צפי עלות לסיום</div><div class="v">${money(t.forecast)}</div><div class="n">חריגה ${pct(t.overrun, { sign: true })}</div></div>
       <div class="kpi"><div class="l">רווח צפוי</div><div class="v ${t.profit >= 0 ? 'pos' : 'neg'}">${money(t.profit)}</div><div class="n">${pct(t.profitPct)} מהמכירה</div></div>
+      ${hasBase ? `<div class="kpi"><div class="l">שיפור בסגירות מול המקורי</div><div class="v ${closeGain >= 0 ? 'pos' : 'neg'}">${money(closeGain)}</div><div class="n">${closedRows.length ? `${closedRows.length} סעיפים נסגרו בהתקשרות · ${pct(closedBase ? closeGain / closedBase * 100 : 0)} מהמקורי שלהם` : 'עוד לא נסגר סעיף בהתקשרות מלאה'} · תקציב מקורי ${money(baseTot)}${P.project.baseline_at ? ` מ-${fmtDate(P.project.baseline_at)}` : ''}</div></div>` : ''}
       ${(() => { const A = tenantOH(P.data, settings(), new Date().toISOString().slice(0, 7)); const b = A.byProject[P.id]; if (!A.lines.length || !b) return '';
         const after = t.profit - b.total; return `<div class="kpi"><div class="l">רווח אחרי תקורות הקבלן</div><div class="v ${after >= 0 ? 'pos' : 'neg'}">${money(after)}</div><div class="n">חלק הפרויקט בתקורות הקבועות ${money(b.total)} (עד היום ${money(b.toDate)}) · <a href="#/reports/ohprofit">פירוט</a></div></div>`; })()}
     </div>
@@ -96,40 +107,47 @@ function tabControl(P) {
     ${(() => { const q = quotaCounts(s.quotas || []); return q.over + q.warn ? `<a class="note" style="display:block" href="#/project/${P.id}/quota"><b>מכסות:</b> ${q.over ? `${q.over} שורות תמחיר חרגו בכמות או בכסף` : ''}${q.over && q.warn ? ' · ' : ''}${q.warn ? `${q.warn} מתקרבות למכסה` : ''}. לפירוט ←</a>` : ''; })()}
     ${s.commitOpen ? `<div class="small mut" style="margin-bottom:8px">התקשרויות רכש פתוחות (הוזמן ועוד לא חויב): <b>${money(s.commitOpen)}</b>. נכללות בצפי לסיום.</div>` : ''}
     ${s.unallocated ? `<div class="note">יש הוצאות בסך ${money(s.unallocated)} שלא שויכו לאף סעיף (אין סעיפים מתאימים בפרויקט).</div>` : ''}
+    ${trades.length > 1 ? `<div class="actions" style="margin-bottom:8px;flex-wrap:wrap;gap:6px"><span class="mut small">חבילה:</span><select id="tf" aria-label="סינון לפי חבילה" style="width:auto"><option value="">כל הסעיפים</option>${trades.map(x => `<option value="${esc(x.name)}" ${x.name === tf ? 'selected' : ''}>${esc(x.name)} (${x.count})</option>`).join('')}</select><span class="small mut" id="tfsum"></span></div>` : ''}
     <div class="tw" id="ctl"></div>${legend()}
     <div class="cols even"><div class="card"><h2>רווחיות לפי מקור ${modeLine()}</h2><div class="tw" style="box-shadow:none"><table id="split"></table></div></div>
     <div class="card"><h2>איך מחושב</h2><p class="small">צפי עלות לסיום = עלות בפועל + יתרת התמחיר לפי אחוז הביצוע (אלא אם הוזן צפי ידני). רווח צפוי = מכירה פחות צפי עלות. חריגה = צפי עלות מול התמחיר.</p>
     <p class="small mut">בפועל = הוצאות + עלות עבודה מיומן העבודה. הצפי לא יורד מתחת לבפועל + הזמנות רכש פתוחות. הוצאה כללית לפרויקט מתחלקת בין הסעיפים לפי משקל התמחיר. הוצאה של הוראת שינוי נספרת רק בהוראה.${P.pd.items.some(i => i.is_overhead) ? ' סעיפי "תקורות אתר" הם עלות בלבד, בלי מכירה. אחוז הביצוע שלהם נקבע אוטומטית לפי שאר הפרויקט.' : ''}</p>${can.edit() ? '<p class="small mut">אחוז ביצוע מעדכנים בטבלה. עד שיהיו חשבונות חלקיים (שלב 4), זה הנתון שקובע את הצפי.</p>' : ''}</div></div></div>`);
   $('#mb', el).appendChild(modeSwitch());
 
-  const contractByChapter = groupBy(s.contractRows, r => r.item.chapter || 'ללא פרק');
+  const pick = r => !tf || tradeOf(r.item) === tf;
+  const contractByChapter = groupBy(s.contractRows.filter(pick), r => r.item.chapter || 'ללא פרק');
   const voGroups = s.voGroups.filter(g => S.mode === 'all' ? ['approved', 'partial', 'submitted', 'executed_unapproved'].includes(g.vo.status) : S.mode === 'approved' ? ['approved', 'partial'].includes(g.vo.status) : false);
-  const head = `<thead><tr><th>קוד</th><th>תיאור</th><th class="n">מכירה</th><th class="n">תמחיר</th><th class="n">בפועל</th><th class="n">צפי לסיום</th><th class="n">רווח צפוי</th><th class="n">% ביצוע</th><th class="n">% הוצאה</th><th class="n">חריגה</th></tr></thead>`;
+  const NC = hasBase ? 12 : 10;
+  const head = `<thead><tr><th>קוד</th><th>תיאור</th><th class="n">מכירה</th>${hasBase ? '<th class="n">תקציב מקורי</th>' : ''}<th class="n">תמחיר</th><th class="n">בפועל</th><th class="n">צפי לסיום</th><th class="n">רווח צפוי</th><th class="n">% ביצוע</th><th class="n">% הוצאה</th><th class="n">חריגה</th>${hasBase ? '<th class="n">צפי מול המקורי</th>' : ''}</tr></thead>`;
   const row = r => {
     const c = r.c, a = rowAttr(c.overrun);
     const prog = c.overhead ? `<span class="small mut" title="סעיף תקורה: אחוז הביצוע לפי שאר הפרויקט">${pct(c.progress, { d: 0 })} אוטו'</span>` : can.edit() ? `<input class="cell-in" type="number" min="0" max="100" step="1" inputmode="numeric" dir="ltr" value="${Math.round(c.progress * 10) / 10}" data-prog="${r.item.id}" aria-label="אחוז ביצוע">` : pct(c.progress, { d: 0 });
-    return `<tr class="click ${a.cls}"${a.style} data-item="${r.item.id}"><td>${esc(r.item.code || '')}</td><td class="wrap">${esc(r.item.description)}${c.noCosting ? ' <span class="chip amber">לא תומחר</span>' : ''}${c.reserve ? ` <span class="chip blue" title="רזרבה לבלתי צפוי. מה שלא נוצל בסוף הפרויקט נחשב רווח">רזרבה · נותרו ${money(c.reserveLeft)}</span>` : c.overhead ? ' <span class="chip">תקורה</span>' : ''}${r.item.forecast_manual != null ? ' <span class="chip blue" title="' + esc(r.item.forecast_note || '') + '">צפי ידני</span>' : ''}</td>
-      <td class="n">${money(c.sale)}</td><td class="n">${money(c.planned)}</td><td class="n">${money(c.actual)}</td><td class="n">${money(c.forecast)}</td><td class="n">${money(c.profit)}</td>
-      <td class="n">${prog}</td><td class="n">${pct(c.spentPct, { d: 0 })}</td><td class="n">${c.noCosting ? '' : pct(c.overrun, { sign: true })}${a.crit ? '<span class="crit">קריטי</span>' : ''}</td></tr>`;
+    return `<tr class="click ${a.cls}"${a.style} data-item="${r.item.id}"><td>${esc(r.item.code || '')}</td><td class="wrap">${esc(r.item.description)}${c.noCosting ? ' <span class="chip amber">לא תומחר</span>' : ''}${c.reserve ? ` <span class="chip blue" title="רזרבה לבלתי צפוי. מה שלא נוצל בסוף הפרויקט נחשב רווח">רזרבה · נותרו ${money(c.reserveLeft)}</span>` : c.overhead ? ' <span class="chip">תקורה</span>' : ''}${r.item.forecast_manual != null ? ' <span class="chip blue" title="' + esc(r.item.forecast_note || '') + '">צפי ידני</span>' : ''}${c.closed ? ` <span class="chip green" title="נסגר בהתקשרות מלאה: הצפי לפי ההזמנה">נסגר ${money(c.closed)}</span>` : ''}</td>
+      <td class="n">${money(c.sale)}</td>${hasBase ? `<td class="n">${c.base == null ? '<span class="mut small">חדש</span>' : money(c.base)}</td>` : ''}<td class="n">${money(c.planned)}</td><td class="n">${money(c.actual)}</td><td class="n">${money(c.forecast)}</td><td class="n">${money(c.profit)}</td>
+      <td class="n">${prog}</td><td class="n">${pct(c.spentPct, { d: 0 })}</td><td class="n">${c.noCosting ? '' : pct(c.overrun, { sign: true })}${a.crit ? '<span class="crit">קריטי</span>' : ''}</td>${hasBase ? `<td class="n">${c.base == null ? '' : (() => { const d = c.forecast - c.base; return Math.abs(d) < 1 ? '<span class="mut">0</span>' : `<span class="${d < 0 ? 'pos' : 'neg'}">${money(d)}</span>`; })()}</td>` : ''}</tr>`;
   };
   const subtotal = (label, rs, cls = 'tot') => {
-    const a = rs.reduce((x, r) => ({ sale: x.sale + r.c.sale, planned: x.planned + r.c.planned, actual: x.actual + r.c.actual, forecast: x.forecast + r.c.forecast }), { sale: 0, planned: 0, actual: 0, forecast: 0 });
+    const a = rs.reduce((x, r) => ({ sale: x.sale + r.c.sale, planned: x.planned + r.c.planned, actual: x.actual + r.c.actual, forecast: x.forecast + r.c.forecast, base: x.base + n(r.c.base), bf: x.bf + (r.c.base == null ? 0 : r.c.forecast) }), { sale: 0, planned: 0, actual: 0, forecast: 0, base: 0, bf: 0 });
     const ov = a.planned ? (a.forecast - a.planned) / a.planned * 100 : 0;
-    return `<tr class="${cls}"><td></td><td>${esc(label)}</td><td class="n">${money(a.sale)}</td><td class="n">${money(a.planned)}</td><td class="n">${money(a.actual)}</td><td class="n">${money(a.forecast)}</td><td class="n">${money(a.sale - a.forecast)}</td><td class="n"></td><td class="n">${pct(a.planned ? a.actual / a.planned * 100 : 0, { d: 0 })}</td><td class="n">${pct(ov, { sign: true })}</td></tr>`;
+    const bd = a.bf - a.base;
+    return `<tr class="${cls}"><td></td><td>${esc(label)}</td><td class="n">${money(a.sale)}</td>${hasBase ? `<td class="n">${money(a.base)}</td>` : ''}<td class="n">${money(a.planned)}</td><td class="n">${money(a.actual)}</td><td class="n">${money(a.forecast)}</td><td class="n">${money(a.sale - a.forecast)}</td><td class="n"></td><td class="n">${pct(a.planned ? a.actual / a.planned * 100 : 0, { d: 0 })}</td><td class="n">${pct(ov, { sign: true })}</td>${hasBase ? `<td class="n"><span class="${bd < -0.5 ? 'pos' : bd > 0.5 ? 'neg' : 'mut'}">${money(bd)}</span></td>` : ''}</tr>`;
   };
   let html = `<table>${head}<tbody>`;
-  if (!s.rows.length) html += `<tr><td colspan="10" class="empty">אין סעיפים עדיין. <a href="#/project/${P.id}/boq">לכתב הכמויות</a></td></tr>`;
-  for (const [ch, rs] of contractByChapter) { html += `<tr class="sec"><td colspan="10">${esc(ch)}${rs.every(r => r.c.overhead) ? ' <span class="chip">פנימי · עלות בלבד</span>' : ''}</td></tr>` + rs.map(row).join('') + (contractByChapter.length > 1 ? subtotal('סה"כ ' + ch, rs) : ''); }
-  if (s.contractRows.length) html += subtotal('סה"כ חוזה', s.contractRows);
-  if (voGroups.length) {
-    html += `<tr class="sec"><td colspan="10">הוראות שינוי (בנפרד מהחוזה)</td></tr>`;
+  if (!s.rows.length) html += `<tr><td colspan="${NC}" class="empty">אין סעיפים עדיין. <a href="#/project/${P.id}/boq">לכתב הכמויות</a></td></tr>`;
+  for (const [ch, rs] of contractByChapter) { html += `<tr class="sec"><td colspan="${NC}">${esc(ch)}${rs.every(r => r.c.overhead) ? ' <span class="chip">פנימי · עלות בלבד</span>' : ''}</td></tr>` + rs.map(row).join('') + (contractByChapter.length > 1 ? subtotal('סה"כ ' + ch, rs) : ''); }
+  if (s.contractRows.length) html += subtotal(tf ? `סה"כ ${tf} בחוזה` : 'סה"כ חוזה', s.contractRows.filter(pick));
+  if (voGroups.length && voGroups.some(g => g.rows.some(pick))) {
+    html += `<tr class="sec"><td colspan="${NC}">הוראות שינוי (בנפרד מהחוזה)</td></tr>`;
     for (const g of voGroups) {
+      if (!g.rows.some(pick)) continue;
       const risk = !['approved', 'partial'].includes(g.vo.status);
-      html += `<tr class="${risk ? 'dim' : ''}"><td><b>${esc(g.vo.number)}</b></td><td colspan="9">${esc(g.vo.title)} · <span class="chip ${risk ? 'red' : 'green'}">${VO_STATUS[g.vo.status]}</span>${g.vo.status === 'partial' ? ` אושר ${money(g.approvedSale)} מתוך ${money(g.requested)}` : ''}</td></tr>` + g.rows.map(row).join('');
+      html += `<tr class="${risk ? 'dim' : ''}"><td><b>${esc(g.vo.number)}</b></td><td colspan="${NC - 1}">${esc(g.vo.title)} · <span class="chip ${risk ? 'red' : 'green'}">${VO_STATUS[g.vo.status]}</span>${g.vo.status === 'partial' ? ` אושר ${money(g.approvedSale)} מתוך ${money(g.requested)}` : ''}</td></tr>` + g.rows.filter(pick).map(row).join('');
     }
-    html += subtotal('סה"כ הוראות שינוי בתצוגה', voGroups.flatMap(g => g.rows));
+    html += subtotal('סה"כ הוראות שינוי בתצוגה', voGroups.flatMap(g => g.rows.filter(pick)));
   }
-  html += `<tr class="tot"><td></td><td>סה"כ פרויקט (${esc(PROFIT_MODES[S.mode])})</td><td class="n">${money(t.sale)}</td><td class="n">${money(t.planned)}</td><td class="n">${money(t.actual)}</td><td class="n">${money(t.forecast)}</td><td class="n">${money(t.profit)}</td><td class="n">${pct(t.progress, { d: 0 })}</td><td class="n">${pct(t.spentPct, { d: 0 })}</td><td class="n">${pct(t.overrun, { sign: true })}</td></tr></tbody></table>`;
+  if (tf) html += subtotal(`סה"כ ${tf} (${PROFIT_MODES[S.mode]})`, s.rows.filter(r => pick(r) && inView(r)));
+  else html += `<tr class="tot"><td></td><td>סה"כ פרויקט (${esc(PROFIT_MODES[S.mode])})</td><td class="n">${money(t.sale)}</td>${hasBase ? `<td class="n">${money(baseTot)}</td>` : ''}<td class="n">${money(t.planned)}</td><td class="n">${money(t.actual)}</td><td class="n">${money(t.forecast)}</td><td class="n">${money(t.profit)}</td><td class="n">${pct(t.progress, { d: 0 })}</td><td class="n">${pct(t.spentPct, { d: 0 })}</td><td class="n">${pct(t.overrun, { sign: true })}</td>${hasBase ? (() => { const bd = s.rows.filter(r => r.c.base != null && inView(r)).reduce((a, r) => a + r.c.forecast - r.c.base, 0); return `<td class="n"><span class="${bd < -0.5 ? 'pos' : bd > 0.5 ? 'neg' : 'mut'}">${money(bd)}</span></td>`; })() : ''}</tr>`;
+  html += '</tbody></table>';
   if (S.mode !== 'contract' && voGroups.some(g => g.vo.status === 'partial')) html += '<div class="small mut" style="padding:8px">בהוראת שינוי שאושרה חלקית, המכירה בסיכום היא הסכום המאושר.</div>';
   $('#ctl', el).innerHTML = html;
 
@@ -149,6 +167,7 @@ function tabControl(P) {
     };
   });
   $$('[data-item]', el).forEach(tr => tr.onclick = () => itemDetail(P, tr.dataset.item));
+  $('#tf', el)?.addEventListener('change', e => { store(tkey, e.target.value || null); render(); });
   return el;
 }
 

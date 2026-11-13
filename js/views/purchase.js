@@ -1,11 +1,13 @@
 // רכש: הזמנות לספקים, אספקה (תעודות משלוח) והתאמה לחשבוניות. הזמנה פתוחה נכנסת לצפי העלות כהתקשרות.
 import { h, esc, $, $$, modal, field, select, area, toast, money, num, pct, fmtDate, nullIfEmpty, confirmBox } from '../util.js';
 import { db } from '../db.js';
-import { S, can, render, logChange } from '../app.js';
+import { S, can, render, logChange, settings } from '../app.js';
 import { n } from '../calc.js';
 import { PO_STATUS, PO_LIVE } from '../quota.js';
 import { expenseDialog } from './vo_exp.js';
 import { attachBtn, wireAttach } from '../files.js';
+import { tradeOf, projectTrades } from '../trades.js';
+import { PLAN_KINDS, hasPlan } from '../payplan.js';
 
 export function poStats(po, lines, expenses) {
   const ls = lines.filter(l => l.po_id === po.id);
@@ -35,7 +37,7 @@ export function tabPurchase(P) {
     <div class="actions" style="margin-bottom:12px">${edit ? '<button class="btn" id="add">+ הזמנת רכש</button>' : ''}</div>
     <div class="tw"><table><thead><tr><th>מס'</th><th>ספק</th><th class="hide-m">תאריך</th><th>סטטוס</th><th class="n">הוזמן</th><th class="n hide-m">סופק</th><th class="n">חויב</th><th class="n">פתוח</th><th>התאמה</th>${edit ? '<th></th>' : ''}</tr></thead><tbody>
     ${st.map(({ po, s }) => `<tr class="click ${po.status === 'cancelled' ? 'dim' : ''}" data-po="${po.id}"><td>${esc(po.number || '')}</td><td><b>${esc(po.supplier_name)}</b><div class="small mut">${s.ls.length} שורות</div></td><td class="hide-m">${fmtDate(po.order_date)}</td>
-      <td>${PO_STATUS[po.status]}</td><td class="n">${money(s.ordered)}</td><td class="n hide-m">${pct(s.deliveredPct, { d: 0 })}</td><td class="n">${money(s.invoiced)}</td><td class="n">${money(s.open)}</td>
+      <td>${PO_STATUS[po.status]}${hasPlan(po.pay_plan) ? ' <span class="chip small">לוח תשלומים</span>' : ''}${po.pay_plan?.closes ? ' <span class="chip small green">סוגרת סעיפים</span>' : ''}</td><td class="n">${money(s.ordered)}</td><td class="n hide-m">${pct(s.deliveredPct, { d: 0 })}</td><td class="n">${money(s.invoiced)}</td><td class="n">${money(s.open)}</td>
       <td class="wrap small">${s.flags.length ? s.flags.map(f => `<span class="chip red">${esc(f)}</span>`).join(' ') : '<span class="chip green">תקין</span>'}</td>
       ${edit ? `<td style="white-space:nowrap">${attachBtn(P.data.files, 'purchase_orders', po.id, { projectId: P.id, docType: 'po', label: `הזמנה ${po.number || ''} ${po.supplier_name}` })} <button class="btn small ghost" data-inv="${po.id}">+ חשבונית</button></td>` : ''}</tr>`).join('') || `<tr><td colspan="10" class="empty">אין הזמנות רכש. הזמנה פתוחה נספרת כהתקשרות ונכנסת לצפי העלות.</td></tr>`}
     </tbody></table></div></div>`);
@@ -56,10 +58,21 @@ async function poDialog(P, po) {
   const removed = [];
   const s = po ? poStats(po, P.pd.poLines, P.pd.expenses) : null;
   const matLines = itemId => P.pd.lines.filter(l => l.boq_item_id === itemId && l.kind === 'material');
+  const trades = projectTrades(items.filter(i => !i.is_overhead));
+  const pp = { ...(po?.pay_plan || {}) };
+  let ms = (pp.rows || []).map(r => ({ ...r }));
+  let ppOut = null;
   const body = `<div class="grid g3">${field('מספר הזמנה', 'number', po?.number ?? String(100 + P.pd.pos.length + 1))}${field('ספק', 'supplier_name', po?.supplier_name, { req: true })}${select('סטטוס', 'status', PO_STATUS, po?.status || 'open')}
     ${field('תאריך הזמנה', 'order_date', po?.order_date || new Date().toISOString().slice(0, 10), { type: 'date' })}${field('אספקה צפויה', 'expected_date', po?.expected_date, { type: 'date' })}${field('תעודות משלוח', 'delivery_notes', po?.delivery_notes, { attrs: 'placeholder="מספרי ת.מ."' })}</div>
     <div class="tw" style="box-shadow:none"><table><thead><tr><th>סעיף</th><th>שורת חומר בתמחיר</th><th>תיאור</th><th class="n">כמות</th><th>יח'</th><th class="n">מחיר</th><th class="n">סופק</th><th class="n">סה"כ</th>${edit ? '<th></th>' : ''}</tr></thead><tbody id="pl"></tbody></table></div>
-    ${edit ? '<button type="button" class="btn small ghost" id="addl">+ שורה</button>' : ''}<div id="ps" style="margin-top:8px"></div>
+    ${edit ? `<div class="actions" style="flex-wrap:wrap;gap:8px;align-items:center"><button type="button" class="btn small ghost" id="addl">+ שורה</button>${trades.length ? `<select id="trsel" aria-label="חבילת עבודה" style="width:auto"><option value="">כל הסעיפים של חבילה...</option>${trades.map(t => `<option value="${esc(t.name)}">${esc(t.name)} (${t.count})</option>`).join('')}</select><button type="button" class="btn small ghost" id="addtr">+ הוספת החבילה</button>` : ''}</div>` : ''}<div id="ps" style="margin-top:8px"></div>
+    <details class="pp" ${hasPlan(pp) || pp.closes || pp.terms_days ? 'open' : ''} style="margin-top:12px"><summary><b>לוח תשלומים ותנאים</b> <span class="small mut">מקדמה, אבני דרך, חודשי, עיכבון. התזרים משתמש בזה</span></summary>
+      <div class="grid g3" style="margin-top:8px">${select('אופן התשלום', 'pp_kind', PLAN_KINDS, pp.kind || 'once', { attrs: edit ? '' : 'disabled' })}${field('תנאי תשלום (ימים, שוטף +)', 'pp_terms', pp.terms_days ?? '', { type: 'number', attrs: `placeholder="ברירת מחדל ${settings().supplier_terms_days ?? 60}"` })}${field('מקדמה %', 'pp_adv', pp.advance_pct ?? '', { type: 'number' })}
+        ${field('חודש המקדמה', 'pp_advm', pp.advance_month || '', { type: 'month' })}${field('עיכבון %', 'pp_ret', pp.retention_pct ?? '', { type: 'number', hint: 'נוכה מכל תשלום ומשתחרר בסוף' })}${field('חודש שחרור העיכבון', 'pp_retm', pp.retention_month || '', { type: 'month', hint: 'ריק: חודש אחרי סוף הפרויקט' })}</div>
+      <div id="ppms"></div>
+      <div id="ppmo" class="grid g2">${field('חודשי מ-', 'pp_from', pp.from_month || '', { type: 'month' })}${field('עד', 'pp_to', pp.to_month || '', { type: 'month' })}</div>
+      <label class="chk"><input type="checkbox" name="pp_closes" ${pp.closes ? 'checked' : ''}> ההזמנה סוגרת את כל העבודה בסעיפים שלה (הצפי לסיום = בפועל + יתרת ההזמנה)</label>
+    </details>
     ${s && s.inv.length ? `<h3 style="margin:12px 0 6px">חשבוניות מקושרות</h3>${s.inv.map(e => `<div class="small">${fmtDate(e.doc_date)} · ${esc(e.doc_no || '')} · ${money(e.amount)}</div>`).join('')}` : ''}
     ${area('הערות', 'notes', po?.notes)}${po && edit ? '<p><button type="button" class="btn small danger" id="delpo">מחיקת ההזמנה</button></p>' : ''}`;
   const d = await modal({ title: po ? `הזמנה ${po.number || ''} · ${po.supplier_name}` : 'הזמנת רכש חדשה', body, wide: true, ok: edit ? 'שמירה' : null, cancel: edit ? 'ביטול' : 'סגירה',
@@ -87,6 +100,38 @@ async function poDialog(P, po) {
       const sum = () => { const o = lines.reduce((a, l) => a + n(l.qty) * n(l.unit_price), 0), dl = lines.reduce((a, l) => a + n(l.delivered_qty) * n(l.unit_price), 0);
         $('#ps', el).innerHTML = `סה"כ הזמנה <b>${money(o)}</b> · סופק <b>${money(dl)}</b>${s ? ` · חויב <b>${money(s.invoiced)}</b>` : ''}`; };
       draw();
+      // לוח תשלומים: אבני דרך לפי אחוזים
+      const msBox = $('#ppms', el), kindSel = $('[name=pp_kind]', el);
+      const drawMs = () => {
+        const k = kindSel.value;
+        $('#ppmo', el).hidden = k !== 'monthly';
+        msBox.hidden = k !== 'milestones';
+        if (k !== 'milestones') return;
+        if (!ms.length) ms = [{ name: '', pct: '', month: '' }];
+        msBox.innerHTML = `<div class="small mut" style="margin:6px 0" id="mssum"></div>
+          ${ms.map((r, i) => `<div class="grid g3" data-ms="${i}"><input data-m="name" placeholder="שם, למשל סיום שלב א׳" value="${esc(r.name || '')}"><input data-m="pct" type="number" step="any" dir="ltr" placeholder="%" value="${esc(r.pct ?? '')}"><div style="display:flex;gap:6px"><input data-m="month" type="month" value="${esc(r.month || '')}" style="flex:1">${edit ? '<button type="button" class="btn small ghost" data-mrm aria-label="מחיקת אבן דרך">✕</button>' : ''}</div></div>`).join('')}
+          ${edit ? '<button type="button" class="btn small ghost" id="msadd">+ אבן דרך</button>' : ''}`;
+        $$('[data-ms]', msBox).forEach(row => { const i = +row.dataset.ms;
+          $$('[data-m]', row).forEach(inp => inp.oninput = inp.onchange = () => { ms[i][inp.dataset.m] = inp.value; msSum(); });
+          $('[data-mrm]', row)?.addEventListener('click', () => { ms.splice(i, 1); drawMs(); }); });
+        $('#msadd', msBox)?.addEventListener('click', () => { ms.push({ name: '', pct: '', month: '' }); drawMs(); });
+        msSum();
+      };
+      const msSum = () => { const s = $('#mssum', msBox); if (!s) return;
+        const tot = Math.round((n($('[name=pp_adv]', el).value) + ms.reduce((a, r) => a + n(r.pct), 0)) * 100) / 100;
+        s.innerHTML = `אבני דרך (באחוזים מכלל ההזמנה). יחד עם המקדמה: <b class="${Math.abs(tot - 100) > 0.01 ? 'neg' : 'pos'}">${tot}%</b>${Math.abs(tot - 100) > 0.01 ? '. ההפרש ייכנס לאבן הדרך האחרונה' : ''}`; };
+      kindSel.onchange = drawMs; $('[name=pp_adv]', el).addEventListener('input', msSum);
+      drawMs();
+      // חבילת עבודה: מוסיפים את כל הסעיפים שלה (אפשר אחר כך למחוק או להוסיף שורות)
+      $('#addtr', el)?.addEventListener('click', () => {
+        const t = $('#trsel', el).value; if (!t) return toast('בחר חבילה', 'bad');
+        const have = new Set(lines.map(l => l.boq_item_id).filter(Boolean));
+        const add = items.filter(i => !i.is_overhead && tradeOf(i) === t && !have.has(i.id));
+        if (!add.length) return toast('כל הסעיפים של החבילה כבר בהזמנה');
+        lines = lines.filter(l => l.id || l.boq_item_id || String(l.description).trim() || n(l.qty));
+        lines.push(...add.map(i => ({ description: i.description, qty: i.qty ?? '', unit: i.unit || '', unit_price: '', delivered_qty: 0, boq_item_id: i.id })));
+        draw(); toast(`נוספו ${add.length} סעיפים של ${t}. נשאר למלא מחירים`);
+      });
       $('#addl', el)?.addEventListener('click', () => { lines.push({ description: '', qty: '', unit: '', unit_price: '', delivered_qty: 0, boq_item_id: lines[lines.length - 1]?.boq_item_id || '' }); draw(); });
       $('#delpo', el)?.addEventListener('click', async () => {
         if (!(await confirmBox('מחיקת הזמנה', 'למחוק את ההזמנה? חשבוניות שקושרו אליה יישארו בלי קישור.', 'מחיקה', true))) return;
@@ -94,9 +139,20 @@ async function poDialog(P, po) {
         close(null); toast('ההזמנה נמחקה'); render();
       });
     },
-    validate: x => (!x.supplier_name.trim() ? 'חסר ספק' : lines.some(l => !n(l.qty) && !String(l.description).trim()) ? 'יש שורה ריקה' : null) });
+    validate: (x, form) => {
+      if (!x.supplier_name.trim()) return 'חסר ספק';
+      if (lines.some(l => !n(l.qty) && !String(l.description).trim())) return 'יש שורה ריקה';
+      const k = x.pp_kind || 'once', rows = k === 'milestones' ? ms.filter(r => n(r.pct) > 0).map(r => ({ name: String(r.name || '').trim(), pct: n(r.pct), month: r.month || '' })) : [];
+      if (k === 'milestones' && !rows.length) return 'חסרות אבני דרך באחוזים';
+      if (n(x.pp_adv) + rows.reduce((a, r) => a + r.pct, 0) > 100.01) return 'המקדמה ואבני הדרך עוברות 100%';
+      if (k === 'monthly' && (!x.pp_from || !x.pp_to || x.pp_to < x.pp_from)) return 'בתשלום חודשי צריך חודש התחלה וסיום';
+      ppOut = { kind: k, terms_days: x.pp_terms === '' ? null : n(x.pp_terms), advance_pct: n(x.pp_adv) || 0, advance_month: x.pp_advm || null, rows,
+        from_month: k === 'monthly' ? x.pp_from : null, to_month: k === 'monthly' ? x.pp_to : null, retention_pct: n(x.pp_ret) || 0, retention_month: x.pp_retm || null, closes: !!x.pp_closes };
+      return null;
+    } });
   if (!d || !edit) return;
-  const head = { number: d.number || null, supplier_name: d.supplier_name.trim(), status: d.status, order_date: nullIfEmpty(d.order_date), expected_date: nullIfEmpty(d.expected_date), delivery_notes: d.delivery_notes || null, notes: d.notes || null };
+  const head = { number: d.number || null, supplier_name: d.supplier_name.trim(), status: d.status, order_date: nullIfEmpty(d.order_date), expected_date: nullIfEmpty(d.expected_date), delivery_notes: d.delivery_notes || null, notes: d.notes || null,
+    pay_plan: ppOut && (hasPlan(ppOut) || ppOut.closes || ppOut.terms_days != null) ? ppOut : null };
   let id = po?.id;
   if (po) await db.update('purchase_orders', po.id, head);
   else id = (await db.insert('purchase_orders', { tenant_id: S.tenantId, project_id: P.id, ...head }))[0].id;

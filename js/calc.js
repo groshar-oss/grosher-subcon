@@ -66,19 +66,21 @@ export function overrunLevel(pct, critPct = 15) {
 
 // בקרה ברמת סעיף
 // commit: התקשרויות פתוחות (הזמנות רכש שעוד לא חויבו). הצפי לא יורד מתחת לבפועל + התקשרויות.
-export function itemControl(item, lines, actual, overheadPct, commit = 0) {
+export function itemControl(item, lines, actual, overheadPct, commit = 0, closed = 0) {
   const sale = itemSale(item);
   const plan = itemPlanned(lines, overheadPct);
   let forecast = itemForecast({ planned: plan.total, actual, progressPct: item.progress_pct, manual: item.forecast_manual });
   const manual = item.forecast_manual !== null && item.forecast_manual !== undefined && item.forecast_manual !== '';
-  if (!manual && n(commit) > 0) forecast = Math.max(forecast, n(actual) + n(commit));
+  // סעיף שנסגר בהתקשרות מלאה: הצפי = מה שכבר הוצא + היתרה הפתוחה בהזמנה, גם אם זה פחות מהתמחיר (שיפור בסגירה)
+  if (!manual && n(closed) > 0) forecast = n(actual) + n(commit);
+  else if (!manual && n(commit) > 0) forecast = Math.max(forecast, n(actual) + n(commit));
   const spentPct = plan.total > 0 ? n(actual) / plan.total * 100 : 0;
   return {
     sale, planned: plan.total, direct: plan.direct, actual: n(actual), commit: n(commit), forecast,
     profit: sale - forecast, profitPct: sale ? (sale - forecast) / sale * 100 : 0,
     plannedProfit: sale - plan.total,
     progress: n(item.progress_pct), spentPct,
-    overrun: overrunPct(forecast, plan.total),
+    overrun: overrunPct(forecast, plan.total), closed: n(closed),
     noCosting: lines.length === 0,
     lossPlanned: lines.length > 0 && plan.total > sale && sale > 0,
     spendAhead: lines.length > 0 && spentPct > n(item.progress_pct) + 0.0001 && n(actual) > 0
@@ -96,10 +98,21 @@ function ohControl(it, lines, actual, commit, progress, done = false) {
 
 const sum = (arr, k) => arr.reduce((s, x) => s + n(x[k]), 0);
 
+/** תקציב מקורי (עלות) לפרויקט קבלן משנה / ביצוע: התמחיר של כל סעיף בחוזה ברגע הנעילה */
+export function costBaseline(items, lines, overheadPct = 0) {
+  const linesBy = {}; for (const l of lines) (linesBy[l.boq_item_id] ||= []).push(l);
+  const out = { kind: 'cost', items: {}, total: 0 };
+  for (const it of items.filter(i => !i.variation_id)) { const v = Math.round(itemPlanned(linesBy[it.id] || [], isOverhead(it) ? 0 : overheadPct).total * 100) / 100; out.items[it.id] = v; out.total += v; }
+  out.total = Math.round(out.total * 100) / 100;
+  return out;
+}
+
 // סיכום פרויקט לפי מצב תצוגת רווחיות
 // data: { project, items, lines, variations, actualByItem: {itemId: amount} }
 export function projectSummary(data, mode = 'approved') {
-  const { project, items, lines, variations = [], actualByItem = {}, commitByItem = {} } = data;
+  const { project, items, lines, variations = [], actualByItem = {}, commitByItem = {}, closedByItem = {} } = data;
+  // תקציב מקורי (עלות) שננעל בפרויקט קבלן משנה / ביצוע
+  const base = project?.project_type !== 'dev' && project?.baseline?.kind === 'cost' ? project.baseline.items || {} : null;
   const oh = n(project?.overhead_pct);
   const linesBy = {};
   for (const l of lines) (linesBy[l.boq_item_id] ||= []).push(l);
@@ -110,7 +123,8 @@ export function projectSummary(data, mode = 'approved') {
   const ohProgress = wSum ? work.reduce((a, it, k) => a + wPlan[k] * Math.min(100, Math.max(0, n(it.progress_pct))), 0) / wSum : 0;
   const rows = items.map(it => ({ item: it, vo: it.variation_id ? voById[it.variation_id] : null,
     c: isOverhead(it) ? ohControl(it, linesBy[it.id] || [], actualByItem[it.id] || 0, commitByItem[it.id] || 0, ohProgress, project?.status === 'closed' || ohProgress >= 100)
-      : itemControl(it, linesBy[it.id] || [], actualByItem[it.id] || 0, oh, commitByItem[it.id] || 0) }));
+      : itemControl(it, linesBy[it.id] || [], actualByItem[it.id] || 0, oh, commitByItem[it.id] || 0, closedByItem[it.id] || 0) }));
+  if (base) for (const r of rows) r.c.base = base[r.item.id] ?? null;
 
   const contractRows = rows.filter(r => !r.item.variation_id);
   const voGroups = variations.map(v => {
@@ -155,7 +169,7 @@ export function projectSummary(data, mode = 'approved') {
   const excluded = voGroups.filter(g => !inModeVO(g.vo, mode));
   const excludedActual = excluded.reduce((s, g) => s + g.actual, 0);
 
-  return { mode, rows, contractRows, voGroups, contract, approved, atRisk, total: tot, excludedActual,
+  return { mode, rows, contractRows, voGroups, contract, approved, atRisk, total: tot, excludedActual, hasBase: !!base,
     riskAmount: riskVOs.reduce((s, g) => s + g.requested, 0) };
 }
 
