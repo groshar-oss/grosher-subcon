@@ -2,7 +2,7 @@
 import { h, esc, $, $$, modal, field, select, area, toast, money, num, pct, fmtDate, nullIfEmpty, confirmBox } from '../util.js';
 import { db } from '../db.js';
 import { S, can, render, logChange, settings } from '../app.js';
-import { n } from '../calc.js';
+import { n, lineCost } from '../calc.js';
 import { PO_STATUS, PO_LIVE } from '../quota.js';
 import { expenseDialog } from './vo_exp.js';
 import { attachBtn, wireAttach } from '../files.js';
@@ -62,9 +62,26 @@ async function poDialog(P, po) {
   const pp = { ...(po?.pay_plan || {}) };
   let ms = (pp.rows || []).map(r => ({ ...r }));
   let ppOut = null;
+  // מחיר לפי התמחיר (עלות ליחידה, פנימי): שורת החומר שנבחרה, או כל שורות התמחיר של הסעיף חלקי הכמות
+  const r2 = v => Math.round(v * 100) / 100;
+  const planUnit = (itemId, clId) => {
+    if (!itemId) return null;
+    if (clId) { const cl = P.pd.lines.find(x => x.id === clId); return cl && n(cl.qty) ? r2(lineCost(cl) / n(cl.qty)) : null; }
+    const it = items.find(i => i.id === itemId), ls = P.pd.lines.filter(x => x.boq_item_id === itemId);
+    const t = ls.reduce((a, x) => a + lineCost(x), 0);
+    return it && n(it.qty) && t ? r2(t / n(it.qty)) : null;
+  };
+  // בחירת סעיף ממלאת תיאור, כמות, יחידה ומחיר מהתמחיר. שדה שהמשתמש שינה ידנית לא נדרס
+  const fill = (l, it, prev) => {
+    const was = prev ? { description: prev.description, qty: prev.qty ?? '', unit: prev.unit || '', unit_price: planUnit(prev.id, l.cost_line_id) ?? '' } : {};
+    const auto = (f, v) => { if (l[f] === '' || l[f] == null || String(l[f]) === String(was[f] ?? '')) l[f] = v; };
+    if (!it) return l;
+    auto('description', it.description); auto('qty', it.qty ?? ''); auto('unit', matLines(it.id)[0]?.unit || it.unit || ''); auto('unit_price', planUnit(it.id, '') ?? '');
+    return l;
+  };
   const body = `<div class="grid g3">${field('מספר הזמנה', 'number', po?.number ?? String(100 + P.pd.pos.length + 1))}${field('ספק', 'supplier_name', po?.supplier_name, { req: true })}${select('סטטוס', 'status', PO_STATUS, po?.status || 'open')}
     ${field('תאריך הזמנה', 'order_date', po?.order_date || new Date().toISOString().slice(0, 10), { type: 'date' })}${field('אספקה צפויה', 'expected_date', po?.expected_date, { type: 'date' })}${field('תעודות משלוח', 'delivery_notes', po?.delivery_notes, { attrs: 'placeholder="מספרי ת.מ."' })}</div>
-    <div class="tw" style="box-shadow:none"><table><thead><tr><th>סעיף</th><th>שורת חומר בתמחיר</th><th>תיאור</th><th class="n">כמות</th><th>יח'</th><th class="n">מחיר</th><th class="n">סופק</th><th class="n">סה"כ</th>${edit ? '<th></th>' : ''}</tr></thead><tbody id="pl"></tbody></table></div>
+    <div class="tw" style="box-shadow:none"><table><thead><tr><th>סעיף</th><th>שורת חומר בתמחיר</th><th>תיאור</th><th class="n">כמות</th><th>יח'</th><th class="n">מחיר סגירה</th><th class="n" title="עלות ליחידה לפי התמחיר. פנימי">תמחיר ליח'</th><th class="n">סופק</th><th class="n">סה"כ</th>${edit ? '<th></th>' : ''}</tr></thead><tbody id="pl"></tbody></table></div>
     ${edit ? `<div class="actions" style="flex-wrap:wrap;gap:8px;align-items:center"><button type="button" class="btn small ghost" id="addl">+ שורה</button>${trades.length ? `<select id="trsel" aria-label="חבילת עבודה" style="width:auto"><option value="">כל הסעיפים של חבילה...</option>${trades.map(t => `<option value="${esc(t.name)}">${esc(t.name)} (${t.count})</option>`).join('')}</select><button type="button" class="btn small ghost" id="addtr">+ הוספת החבילה</button>` : ''}</div>` : ''}<div id="ps" style="margin-top:8px"></div>
     <details class="pp" ${hasPlan(pp) || pp.closes || pp.terms_days ? 'open' : ''} style="margin-top:12px"><summary><b>לוח תשלומים ותנאים</b> <span class="small mut">מקדמה, אבני דרך, חודשי, עיכבון. התזרים משתמש בזה</span></summary>
       <div class="grid g3" style="margin-top:8px">${select('אופן התשלום', 'pp_kind', PLAN_KINDS, pp.kind || 'once', { attrs: edit ? '' : 'disabled' })}${field('תנאי תשלום (ימים, שוטף +)', 'pp_terms', pp.terms_days ?? '', { type: 'number', attrs: `placeholder="ברירת מחדל ${settings().supplier_terms_days ?? 60}"` })}${field('מקדמה %', 'pp_adv', pp.advance_pct ?? '', { type: 'number' })}
@@ -86,19 +103,24 @@ async function poDialog(P, po) {
           <td><input data-f="qty" type="number" step="any" dir="ltr" value="${esc(l.qty ?? '')}" style="width:80px" ${edit ? '' : 'readonly'}></td>
           <td><input data-f="unit" value="${esc(l.unit || '')}" style="width:56px" ${edit ? '' : 'readonly'}></td>
           <td><input data-f="unit_price" type="number" step="any" dir="ltr" value="${esc(l.unit_price ?? '')}" style="width:80px" ${edit ? '' : 'readonly'}></td>
+          <td class="n small mut" data-pl>${(() => { const u = planUnit(l.boq_item_id, l.cost_line_id); return u == null ? '—' : money(u, { unit: true }); })()}</td>
           <td><input data-f="delivered_qty" type="number" step="any" dir="ltr" value="${esc(l.delivered_qty ?? 0)}" style="width:72px" ${edit ? '' : 'readonly'}></td>
           <td class="n" data-t>${money(n(l.qty) * n(l.unit_price))}</td>${edit ? '<td><button type="button" class="btn small ghost" data-rm aria-label="מחיקת שורה">✕</button></td>' : ''}</tr>`; }).join('');
         $$('[data-k]', pl).forEach(tr => { const k = +tr.dataset.k;
           $$('[data-f]', tr).forEach(inp => inp.oninput = inp.onchange = () => {
+            const before = lines[k][inp.dataset.f];
+            if (inp.dataset.f === 'boq_item_id') { if (before === inp.value) return; const prev = items.find(i => i.id === before); lines[k].boq_item_id = inp.value; lines[k].cost_line_id = ''; fill(lines[k], items.find(i => i.id === inp.value), prev); draw(); return; }
+            if (inp.dataset.f === 'cost_line_id') { if (before === inp.value) return; const oldP = planUnit(lines[k].boq_item_id, before); lines[k].cost_line_id = inp.value; const nu = planUnit(lines[k].boq_item_id, inp.value);
+              if (nu != null && (lines[k].unit_price === '' || String(lines[k].unit_price) === String(oldP ?? ''))) lines[k].unit_price = nu; draw(); return; }
             lines[k][inp.dataset.f] = inp.value;
-            if (inp.dataset.f === 'boq_item_id') { lines[k].cost_line_id = ''; const it = items.find(i => i.id === inp.value); if (it && !lines[k].unit) lines[k].unit = matLines(it.id)[0]?.unit || it.unit || ''; draw(); return; }
             $('[data-t]', tr).innerHTML = money(n(lines[k].qty) * n(lines[k].unit_price)); sum(); });
           $('[data-rm]', tr)?.addEventListener('click', () => { const [x] = lines.splice(k, 1); if (x.id) removed.push(x.id); draw(); });
         });
         sum();
       };
       const sum = () => { const o = lines.reduce((a, l) => a + n(l.qty) * n(l.unit_price), 0), dl = lines.reduce((a, l) => a + n(l.delivered_qty) * n(l.unit_price), 0);
-        $('#ps', el).innerHTML = `סה"כ הזמנה <b>${money(o)}</b> · סופק <b>${money(dl)}</b>${s ? ` · חויב <b>${money(s.invoiced)}</b>` : ''}`; };
+        const pl = lines.filter(l => planUnit(l.boq_item_id, l.cost_line_id) != null), plT = pl.reduce((a, l) => a + n(l.qty) * planUnit(l.boq_item_id, l.cost_line_id), 0), plO = pl.reduce((a, l) => a + n(l.qty) * n(l.unit_price), 0);
+        $('#ps', el).innerHTML = `סה"כ הזמנה <b>${money(o)}</b> · סופק <b>${money(dl)}</b>${s ? ` · חויב <b>${money(s.invoiced)}</b>` : ''}${plT ? `<div class="small" style="margin-top:4px">לפי התמחיר ${money(plT)} · ${plO <= plT ? `<b class="pos">חיסכון בסגירה ${money(plT - plO)}</b>` : `<b class="neg">חריגה מהתמחיר ${money(plO - plT)}</b>`} <span class="mut">(פנימי, רק אצלך)</span></div>` : ''}`; };
       draw();
       // לוח תשלומים: אבני דרך לפי אחוזים
       const msBox = $('#ppms', el), kindSel = $('[name=pp_kind]', el);
@@ -129,10 +151,10 @@ async function poDialog(P, po) {
         const add = items.filter(i => !i.is_overhead && tradeOf(i) === t && !have.has(i.id));
         if (!add.length) return toast('כל הסעיפים של החבילה כבר בהזמנה');
         lines = lines.filter(l => l.id || l.boq_item_id || String(l.description).trim() || n(l.qty));
-        lines.push(...add.map(i => ({ description: i.description, qty: i.qty ?? '', unit: i.unit || '', unit_price: '', delivered_qty: 0, boq_item_id: i.id })));
-        draw(); toast(`נוספו ${add.length} סעיפים של ${t}. נשאר למלא מחירים`);
+        lines.push(...add.map(i => fill({ description: '', qty: '', unit: '', unit_price: '', delivered_qty: 0, boq_item_id: i.id, cost_line_id: '' }, i)));
+        draw(); toast(`נוספו ${add.length} סעיפים של ${t}, עם כמויות ומחירי התמחיר. מעדכנים למחיר הסגירה`);
       });
-      $('#addl', el)?.addEventListener('click', () => { lines.push({ description: '', qty: '', unit: '', unit_price: '', delivered_qty: 0, boq_item_id: lines[lines.length - 1]?.boq_item_id || '' }); draw(); });
+      $('#addl', el)?.addEventListener('click', () => { lines.push({ description: '', qty: '', unit: '', unit_price: '', delivered_qty: 0, boq_item_id: '', cost_line_id: '' }); draw(); });
       $('#delpo', el)?.addEventListener('click', async () => {
         if (!(await confirmBox('מחיקת הזמנה', 'למחוק את ההזמנה? חשבוניות שקושרו אליה יישארו בלי קישור.', 'מחיקה', true))) return;
         await db.remove('purchase_orders', po.id); await logChange({ project_id: P.id, entity: 'po', entity_id: po.id, label: `הזמנה ${po.number || ''} ${po.supplier_name}`, field: 'מחיקה', old_value: Math.round(s.ordered) });

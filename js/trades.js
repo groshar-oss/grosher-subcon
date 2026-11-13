@@ -3,9 +3,9 @@
 export const TRADES = [
   ['הריסה ופירוק', /הריס|פירוק|פינוי פסולת/],
   ['גבס ותקרות', /גבס|תקר(ה|ות) (אקוסטי|מינרלי|תותב)|תקרה אקוסטית|תקרת|מחיצ|סינר|בידוד אקוסטי|צמר סלעים/],
-  ['ריצוף וחיפוי', /ריצו|אריח|פרקט|LVT|שטיח|פורצלן|קרמיק|חיפוי|פנלים|שיפולים|טרצו|אפוקסי|רצפ/i],
+  ['ריצוף וחיפוי', /ריצו|אריח|פרקט|LVT|PVC|שטיח|פורצלן|קרמיק|חיפוי|פנלים|שיפולי|טרצו|אפוקסי/i],
   ['צבע', /צבע|שפכטל|טיח/],
-  ['נגרות', /נגר|ארון|מטבחון|דלפק|משטח|פורמייקה|MDF/i],
+  ['נגרות', /נגר|ארון|מטבחון|דלפק|משטח עבודה|פורמייקה|MDF/i],
   ['דלתות', /דלת|דלתות|משקוף/],
   ['אלומיניום וזכוכית', /זכוכית|אלומיני|חלון|ויטרינ|מחיצת זכוכית|מראה/],
   ['חשמל ותקשורת', /חשמל|תאור|גוף תאורה|נקודת|לוח|כבל|תקשורת|מתג|שקע|גילוי אש|כריזה/],
@@ -16,16 +16,18 @@ export const TRADES = [
   ['שילוט וכללי', /שילוט|ניקיון|מסירה|שונות/]
 ].map(([name, re]) => ({ name, re }));
 
-/** ניחוש חבילה לפי שם הפרק (קודם) והתיאור */
+// שם הפרק בלי הקוד והאזור: "א.3 חדרים חדשים · ריצוף" → "ריצוף"; "בנייה – גבס, דלתות" → "גבס, דלתות"
+const chapterName = ch => { let s = String(ch || '').replace(/^\S*\d\S*\s+/, ''); s = s.split('·').pop(); const dash = s.split(/[–—]| - /); return (dash.length > 1 ? dash.slice(1).join(' ') : s).trim(); };
+const tradesIn = txt => TRADES.map(t => { const m = t.re.exec(txt); return m ? { name: t.name, at: m.index } : null; }).filter(Boolean).sort((a, b) => a.at - b.at);
+
+/** ניחוש חבילה: פרק שהשם שלו הוא חבילה אחת (למשל "ריצוף") קובע לכל הסעיפים שלו, כולל פירוק השטיח והכנת המשטח.
+ *  פרק מעורב ("בנייה – גבס, דלתות, זכוכית") או בלי חבילה: לפי התיאור של הסעיף, ואם לא זוהה, החבילה הראשונה בשם הפרק */
 export function guessTrade(it) {
-  const ch = `${it?.chapter || ''}`, d = `${it?.description || ''}`;
-  // קודם התיאור של הסעיף. אם לא זוהה: שם הפרק, ובשם כמו "א.1 חדרים חדשים · בנייה – גבס, דלתות" מה שאחרי המקף
-  for (const tail of [d, ch.split(/[–—]| - /).slice(1).join(' ') || ch]) {
-    let best = null, at = Infinity;
-    for (const t of TRADES) { const m = t.re.exec(tail); if (m && m.index < at) { best = t.name; at = m.index; } }
-    if (best) return best;
-  }
-  return '';
+  const inCh = tradesIn(chapterName(it?.chapter));
+  if (new Set(inCh.map(x => x.name)).size === 1 && inCh[0].name !== 'הריסה ופירוק') return inCh[0].name; // "פירוקים ובינוי" הוא פרק מעורב
+  const inD = tradesIn(String(it?.description || ''));
+  if (inD.length) return inD[0].name;
+  return inCh[0]?.name || '';
 }
 /** החבילה של סעיף: מה שהוזן, אחרת ניחוש. סעיף תקורה: "תקורות" */
 export const tradeOf = it => it?.is_overhead ? 'תקורות' : (String(it?.trade || '').trim() || guessTrade(it) || 'אחר');
