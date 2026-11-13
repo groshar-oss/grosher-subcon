@@ -161,10 +161,12 @@ export async function expenseDialog(P, e, preset = {}) {
     ${pos.length ? `<label class="fld"><span>הזמנת רכש (התאמה)</span><select name="po_id"><option value="">בלי הזמנה</option>${pos.map(p => `<option value="${p.id}" ${p.id === v0.po_id ? 'selected' : ''}>${esc(`${p.number || ''} · ${p.supplier_name}`)}</option>`).join('')}</select></label>` : ''}
     ${(P.pd.contracts || []).length ? `<label class="fld"><span>התקשרות</span><select name="contract_id" id="ctr"><option value="">בלי התקשרות</option>${P.pd.contracts.filter(c => c.status !== 'cancelled' || c.id === v0.contract_id).map(c => `<option value="${c.id}" ${c.id === v0.contract_id ? 'selected' : ''}>${esc(`${c.number ? c.number + ' · ' : ''}${c.vendor_name || ''} · ${c.title}`.slice(0, 80))}</option>`).join('')}</select></label>` : ''}
     <label class="fld"><span>שיוך לסעיף</span><select name="link" id="lnk">${opts}</select></label>
+    <div id="poal" class="note small" hidden></div>
     <div class="grid g3" id="matq"><label class="fld"><span>שורת חומר בתמחיר</span><select name="cost_line_id" id="cl"></select></label>${field('כמות (למכסת חומר)', 'qty', v0.qty ?? '', { type: 'number' })}${field('יחידה', 'unit', v0.unit || '')}</div>
     ${field('תיאור', 'description', v0.description)}
     <div class="grid g3">${field('סכום לפני מע"מ ₪', 'amount', v0.amount, { type: 'number', req: true })}${field('מע"מ %', 'vat_pct', v0.vat_pct ?? vat, { type: 'number' })}${select('סטטוס', 'status', EXPENSE_STATUS, v0.status || 'invoice')}</div>
     ${field('תאריך תשלום', 'pay_date', v0.pay_date, { type: 'date' })}${area('הערות', 'notes', v0.notes)}<div id="vdoc" class="note neg" hidden></div>`;
+  let allocOut = {};
   const d = await modal({ title: e ? 'עריכת הוצאה' : 'הוצאה חדשה', body, onMount: el => {
     // אזהרת מסמכים לפי כרטיס הספק
     const vchk = () => { const v = findVendor(P.data.vendors || [], $('[name=supplier_name]', el).value); const box = $('#vdoc', el);
@@ -179,12 +181,27 @@ export async function expenseDialog(P, e, preset = {}) {
       $('#cl', el).innerHTML = `<option value="">${ml.length === 1 ? 'אוטומטי (שורה יחידה)' : ml.length ? 'בחירה' : 'אין שורת חומר'}</option>` + ml.map(m => `<option value="${m.id}" ${m.id === v0.cost_line_id ? 'selected' : ''}>${esc((m.description || 'חומר').slice(0, 40))}</option>`).join('');
       if (ml.length && !$('[name=unit]', el).value) $('[name=unit]', el).value = ml[0].unit || '';
     };
-    $('#lnk', el).onchange = sync; $('[name=kind]', el).onchange = sync; sync();
+    $('#lnk', el).onchange = () => { sync(); drawAl(); }; $('[name=kind]', el).onchange = sync; sync();
+    // חשבונית על הזמנת רכש בלי סעיף: מתחלקת בין סעיפי ההזמנה. אפשר לרשום סכום לסעיף (חלוקה ידנית)
+    const drawAl = () => {
+      const box = $('#poal', el), poId = $('[name=po_id]', el)?.value, g = $('#lnk', el).value === 'g';
+      const ls = poId && g ? (P.pd.poLines || []).filter(l => l.po_id === poId && l.boq_item_id) : [];
+      const by = {}; for (const l of ls) by[l.boq_item_id] = (by[l.boq_item_id] || 0) + n(l.qty) * n(l.unit_price);
+      const ids = Object.keys(by);
+      box.hidden = !ids.length; if (!ids.length) { box.innerHTML = ''; return; }
+      const cur = v0.po_id === poId ? (v0.alloc || {}) : {};
+      box.innerHTML = `<b>החשבונית מתחלקת בין ${ids.length} סעיפי ההזמנה לפי הסכום שלהם בהזמנה.</b> אם היא רק על חלק מהסעיפים, רושמים סכום לכל סעיף. מה שלא חולק ממשיך לפי ההזמנה.
+        <details ${Object.keys(cur).length ? 'open' : ''} style="margin-top:6px"><summary>חלוקה ידנית</summary><div class="tw" style="box-shadow:none;max-height:260px;overflow:auto"><table><tbody>${ids.map(id => { const it = P.pd.items.find(i => i.id === id);
+          return `<tr><td class="wrap small">${esc(`${it?.code || ''} ${it?.description || ''}`.slice(0, 60))}</td><td class="n small mut">${money(by[id])}</td><td><input data-al="${id}" type="number" step="any" dir="ltr" value="${esc(cur[id] ?? '')}" style="width:100px" placeholder="אוטומטי"></td></tr>`; }).join('')}</tbody></table></div></details>`;
+    };
+    $('[name=po_id]', el)?.addEventListener('change', drawAl); drawAl();
     $('#ctr', el)?.addEventListener('change', () => { const c = P.pd.contracts.find(x => x.id === $('#ctr', el).value); const sn = $('[name=supplier_name]', el);
       if (c && !sn.value.trim()) { sn.value = c.vendor_name || ''; vchk(); }
       const ls = c ? (P.pd.cLines || []).filter(l => l.contract_id === c.id && l.boq_item_id) : [];
       if (ls.length && $('#lnk', el).value === 'g') { $('#lnk', el).value = 'i:' + ls[0].boq_item_id; sync(); } });
-  }, validate: x => (!n(x.amount) ? 'חסר סכום' : !x.doc_date ? 'חסר תאריך' : e && !e.corr_month && isClosedDate(x.doc_date, closedThrough(P.data.closes)) ? `${monthLabel(x.doc_date.slice(0, 7))} סגור. אי אפשר להעביר הוצאה לחודש סגור` : null) });
+  }, validate: (x, form) => { const al = {}; $$('[data-al]', form).forEach(i => { if (n(i.value)) al[i.dataset.al] = n(i.value); }); allocOut = al;
+    if (Object.values(al).reduce((a, v) => a + v, 0) > n(x.amount) + 0.5) return 'החלוקה הידנית גבוהה מסכום החשבונית';
+    return (!n(x.amount) ? 'חסר סכום' : !x.doc_date ? 'חסר תאריך' : e && !e.corr_month && isClosedDate(x.doc_date, closedThrough(P.data.closes)) ? `${monthLabel(x.doc_date.slice(0, 7))} סגור. אי אפשר להעביר הוצאה לחודש סגור` : null); } });
   if (!d) return;
   const [t, lid] = d.link.split(':');
   const isMat = d.kind === 'material' && t === 'i';
@@ -192,6 +209,8 @@ export async function expenseDialog(P, e, preset = {}) {
     boq_item_id: t === 'i' ? lid : null, variation_id: t === 'v' ? lid : (t === 'i' ? P.pd.items.find(i => i.id === lid)?.variation_id || null : null),
     po_id: d.po_id || null, contract_id: d.contract_id || null, cost_line_id: isMat ? (d.cost_line_id || null) : null, qty: isMat ? numOrNull(d.qty) : null, unit: isMat ? (d.unit || null) : null };
   if (row.kind === 'general') { row.boq_item_id = null; }
+  // חלוקה ידנית בין סעיפי ההזמנה (רק כשיש הזמנה ובלי סעיף). נשמר רק אם הוזן, כדי לא לדרוש את העמודה כשלא משתמשים בה
+  if (row.po_id && !row.boq_item_id && Object.keys(allocOut).length) row.alloc = allocOut; else if (e?.alloc) row.alloc = null;
   // מסמך מחודש סגור (למשל חשבונית שהגיעה באיחור): נרשם היום כשורת תיקון לאותו חודש
   const thr = closedThrough(P.data.closes);
   if (!e && isClosedDate(row.doc_date, thr)) { row.corr_month = row.doc_date.slice(0, 7); row.notes = `מסמך מתאריך ${fmtDate(row.doc_date)}${row.notes ? '. ' + row.notes : ''}`; row.doc_date = correctionDate(); }

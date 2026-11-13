@@ -201,8 +201,9 @@ export const EXPENSE_KINDS = {
 export const EXPENSE_STATUS = { expected: 'צפוי', invoice: 'התקבלה חשבונית', approved: 'אושר', paid: 'שולם' };
 
 // חלוקת הוצאות לסעיפים: הוצאה עם סעיף נרשמת לסעיף; הוצאה של הוראת שינוי בלי סעיף מתחלקת בין סעיפי ההוראה;
+// הוצאה על הזמנת רכש בלי סעיף מתחלקת בין סעיפי ההזמנה לפי הסכום שלהם בהזמנה (או לפי חלוקה ידנית ב-alloc).
 // הוצאה כללית לפרויקט מתחלקת בין סעיפי החוזה לפי משקל העלות המתוכננת.
-export function actualsByItem(items, lines, expenses, overheadPct = 0) {
+export function actualsByItem(items, lines, expenses, overheadPct = 0, poLines = []) {
   const out = {};
   const linesBy = {};
   for (const l of lines) (linesBy[l.boq_item_id] ||= []).push(l);
@@ -218,10 +219,17 @@ export function actualsByItem(items, lines, expenses, overheadPct = 0) {
   };
   const ids = new Set(items.map(i => i.id));
   let unallocated = 0;
+  const poBy = {}; for (const l of poLines) if (l.boq_item_id && ids.has(l.boq_item_id)) (poBy[l.po_id] ||= []).push(l);
   for (const e of expenses) {
-    const amt = n(e.amount);
-    if (e.boq_item_id && ids.has(e.boq_item_id)) out[e.boq_item_id] = (out[e.boq_item_id] || 0) + amt;
-    else if (e.variation_id) { if (!spread(items.filter(i => i.variation_id === e.variation_id), amt)) unallocated += amt; }
+    let amt = n(e.amount);
+    if (e.boq_item_id && ids.has(e.boq_item_id)) { out[e.boq_item_id] = (out[e.boq_item_id] || 0) + amt; continue; }
+    // חלוקה ידנית: { itemId: amount }. מה שלא חולק ממשיך לפי ההזמנה
+    if (e.alloc && typeof e.alloc === 'object') for (const [id, v] of Object.entries(e.alloc)) if (ids.has(id) && n(v)) { out[id] = (out[id] || 0) + n(v); amt -= n(v); }
+    if (Math.abs(amt) < 0.005) continue;
+    const pls = e.po_id ? poBy[e.po_id] || [] : [];
+    const pt = pls.reduce((a, l) => a + n(l.qty) * n(l.unit_price), 0);
+    if (pt > 0) { for (const l of pls) out[l.boq_item_id] = (out[l.boq_item_id] || 0) + amt * n(l.qty) * n(l.unit_price) / pt; continue; }
+    if (e.variation_id) { if (!spread(items.filter(i => i.variation_id === e.variation_id), amt)) unallocated += amt; }
     else if (!spread(items.filter(i => !i.variation_id), amt)) unallocated += amt;
   }
   return { byItem: out, unallocated };
