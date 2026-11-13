@@ -23,7 +23,7 @@ export function summarize(pd, mode = S.mode) {
   const st = settings();
   const costs = entryCosts({ entries: pd.entries || [], allEntries: pd.allEntries || [], workers: pd.workers || [], lines: pd.lines, settings: st });
   const all = pd.expenses.concat(entriesAsCosts(pd.entries || [], costs));
-  const act = actualsByItem(pd.items, pd.lines, all, pd.project?.overhead_pct);
+  const act = actualsByItem(pd.items, pd.lines, all, pd.project?.overhead_pct, pd.poLines || []);
   const com = openCommitments(pd.pos || [], pd.poLines || [], pd.expenses);
   // עלויות חודשיות קבועות: מה שנשאר מהחודש הנוכחי נחשב התקשרות פתוחה של הסעיף
   if (has(pd.project, 'fixed')) { const cur = new Date().toISOString().slice(0, 7);
