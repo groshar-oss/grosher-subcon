@@ -8,7 +8,7 @@ import { collection, dueDate } from '../bills.js';
 import { GUAR_KINDS, guaranteeState } from '../docs.js';
 import { cashflow, monthLabel, mkey, addMonths } from '../cashflow.js';
 import { party } from '../dev.js';
-import { tenantOH, ohInMonth } from '../tenantoh.js';
+import { tenantOH, ohInMonth, ohLines } from '../tenantoh.js';
 import { projData, summarize, STATUS } from './common.js';
 import { loadXLSX } from '../import.js';
 import { viewDevReports, reportNav } from './devreports.js';
