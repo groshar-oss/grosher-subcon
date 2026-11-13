@@ -242,7 +242,7 @@ async function importFlow(P, file) {
   if (dropLines.length) await db.removeWhere('cost_lines', { eq: { project_id: P.id }, in: { boq_item_id: dropLines } });
   if (newLines.length) await db.insert('cost_lines', newLines);
   // תקורות מהקובץ: סעיפי תקורה פנימיים (אתר, משרד, בלת"מ). סעיף קיים באותו שם מתעדכן, כך שהוצאות שכבר שויכו נשמרות
-  let ohN = 0;
+  let ohN = 0, ohDropped = 0;
   if (fo && P.project.project_type !== 'dev' && v.fo_oh) {
     const list = ohFromFile(fo), oldOH = P.pd.items.filter(i => i.is_overhead);
     const byName = Object.fromEntries(oldOH.map(i => [i.description, i]));
@@ -256,6 +256,14 @@ async function importFlow(P, file) {
     if (lines.length) await db.insert('cost_lines', lines);
     if (n(P.project.overhead_pct)) await db.update('projects', P.id, { overhead_pct: 0 });
     ohN = list.length;
+    // סעיפי תקורה שלא בקובץ ואין להם תמחיר (למשל ברירת המחדל של פרויקט חדש: שמירה, מכולה...): נמחקים, אם לא שויכו אליהם הוצאות או הזמנות
+    const linked = id => P.pd.lines.some(l => l.boq_item_id === id) || P.pd.expenses.some(e => e.boq_item_id === id) || (P.pd.poLines || []).some(l => l.boq_item_id === id) || (P.pd.fixedCosts || []).some(f => f.boq_item_id === id) || (P.pd.entries || []).some(e => e.boq_item_id === id);
+    const emptyOH = Object.values(byName).filter(i => !linked(i.id));
+    if (emptyOH.length) {
+      await db.removeWhere('boq_items', { eq: { project_id: P.id }, in: { id: emptyOH.map(i => i.id) } });
+      for (const i of emptyOH) await logChange({ project_id: P.id, entity: 'boq_item', entity_id: i.id, label: label(i), field: 'מחיקת סעיף', old_value: null, new_value: null, reason: `סעיף תקורה בלי תמחיר שלא נמצא בקובץ ${file.name}` });
+      ohDropped = emptyOH.length;
+    }
     await logChange({ project_id: P.id, entity: 'boq', label: OH_CHAPTER, field: 'תקורות מתוכנת התמחיר', old_value: n(P.project.overhead_pct) ? `${n(P.project.overhead_pct)}%` : null, new_value: `${list.length} סעיפים${fo.reserve ? `, מתוכם בלת"מ ${Math.round(fo.reserve).toLocaleString('en-US')} ₪` : ''}` });
   }
   // סעיפים שהיו בפרויקט ולא נמצאים בקובץ החדש: מציעים למחוק (רק סעיפים בלי ביצוע, הוצאות, הזמנות או חשבונות)
@@ -282,7 +290,7 @@ async function importFlow(P, file) {
     await lockBaseline(P, costBaseline(its2, ls2, n(pr2.overhead_pct)), 'נעילה אוטומטית בקליטה'); locked = true;
   }
   await logChange({ project_id: P.id, entity: 'boq', label: `קליטת כתב כמויות מ-${file.name}`, field: { replace: 'החלפה', update: 'עדכון לפי קוד', append: 'הוספה' }[how], new_value: `${p.items.length} סעיפים, ${Math.round(p.calcTotal).toLocaleString('en-US')} ₪` });
-  toast((how === 'update' ? `עודכנו ${upd.length} סעיפים, נוספו ${fresh.length}${removedN ? `. נמחקו ${removedN} סעיפים שלא בקובץ` : ''}${kept ? `. ${kept} סעיפים שלא בקובץ נשארו בפרויקט` : ''}${ohN ? `. תקורות: ${ohN} סעיפים` : ''}` : `נקלטו ${fresh.length} סעיפים${ohN ? ` ועוד ${ohN} סעיפי תקורה` : ''}`) + (locked ? '. התקציב המקורי ננעל' : '')); render();
+  toast((how === 'update' ? `עודכנו ${upd.length} סעיפים, נוספו ${fresh.length}${removedN ? `. נמחקו ${removedN} סעיפים שלא בקובץ` : ''}${kept ? `. ${kept} סעיפים שלא בקובץ נשארו בפרויקט` : ''}${ohN ? `. תקורות: ${ohN} סעיפים` : ''}` : `נקלטו ${fresh.length} סעיפים${ohN ? ` ועוד ${ohN} סעיפי תקורה` : ''}`) + (ohDropped ? `. הוסרו ${ohDropped} סעיפי תקורה ריקים שלא בקובץ` : '') + (locked ? '. התקציב המקורי ננעל' : '')); render();
   return true;
 }
 
