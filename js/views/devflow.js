@@ -428,7 +428,7 @@ export function cbillSheet(P, billId) {
     <div class="top no-print"><div><h1>בדיקת חשבון והמלצה לתשלום</h1><div class="sub">הדפסה ← שמירה כ-PDF</div></div>
       <div class="actions"><button class="btn small" id="print">הדפסה / PDF</button><button class="btn ghost small" id="gdrive">שמירה לדרייב</button><a class="btn ghost small" href="#/project/${P.id}/cbill/${billId}">חזרה לחשבון</a></div></div>
     <div class="rpage">
-      <div class="rephead"><img src="icons/icon-192.png" alt=""><div><b>בדיקת חשבון והמלצה לתשלום</b><span>${esc(tenant()?.name || '')} · ${esc(P.project.name)} · הופק ${fmtDate(todayStr())}</span></div></div>
+      <div class="rephead"><img src="icons/report-logo.png" alt=""><div><b>בדיקת חשבון והמלצה לתשלום</b><span>${esc(tenant()?.name || '')} · ${esc(P.project.name)} · הופק ${fmtDate(todayStr())}</span></div></div>
       <table class="sumt"><tr><td>קבלן / ספק</td><td><b>${esc(C.vendor_name || '')}</b></td><td>התקשרות</td><td>${esc(C.number || '')} ${esc(C.title)}</td></tr>
         <tr><td>חשבון מס'</td><td><b>${b.number}</b>${b.period_to ? ` · עד ${fmtDate(b.period_to)}` : ''}</td><td>התקבל</td><td>${fmtDate(b.received_date)}</td></tr>
         <tr><td>חשבונית</td><td>${esc(b.invoice_no || '—')}${b.invoice_date ? ` · ${fmtDate(b.invoice_date)}` : ''} · ${b.invoice_legal ? 'חשבונית כחוק התקבלה' : '<b class="neg">חשבונית כחוק לא התקבלה</b>'}</td><td>סטטוס</td><td>${CBILL_STATUS[b.status]}</td></tr></table>
