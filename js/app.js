@@ -314,7 +314,7 @@ document.addEventListener('click', e => { if (e.target.closest('[data-print]')) 
 window.addEventListener('beforeprint', () => {
   const main = document.getElementById('main'); if (!main || main.querySelector('.rephead') || document.getElementById('printhead')) return;
   const d = document.createElement('div'); d.id = 'printhead'; d.className = 'rephead print-only';
-  d.innerHTML = `<img src="icons/icon-192.png" alt=""><div><b>${esc(tenant()?.name || '')}</b><span>הופק ${new Date().toLocaleDateString('he-IL')}</span></div>`;
+  d.innerHTML = `<img src="icons/report-logo.png" alt=""><div><b>${esc(tenant()?.name || '')}</b><span>הופק ${new Date().toLocaleDateString('he-IL')}</span></div>`;
   main.prepend(d);
 });
 window.addEventListener('afterprint', () => document.getElementById('printhead')?.remove());

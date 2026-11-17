@@ -81,7 +81,7 @@ export async function viewDevReports(kind) {
   $('#per', el)?.addEventListener('change', e => { setOpt({ per: e.target.value }); rerender(); });
   const fn = { 'd-budget': repBudget, 'd-cash': repCash, 'd-cos': repCos, 'd-cbills': repCbills, 'd-vendors': repVendors, 'd-docs': repDocs, 'd-group': repGroup, 'd-alerts': repAlerts }[kind];
   const body = projects.length ? fn({ data, sums, o, multi: projects.length > 1 }) : h('<div class="card empty">אין פרויקטי יזם פעילים</div>');
-  $('#rep', el).append(h(`<div class="rephead"><img src="icons/icon-192.png" alt=""><div><b>${esc(title)}</b><span>${esc(tenant()?.name || '')} · ${esc(scope || '')} · הופק ${fmtDate(todayStr())}</span></div></div>`), h(`<p class="small mut repnote">${NOTE[kind]}</p>`), body);
+  $('#rep', el).append(h(`<div class="rephead"><img src="icons/report-logo.png" alt=""><div><b>${esc(title)}</b><span>${esc(tenant()?.name || '')} · ${esc(scope || '')} · הופק ${fmtDate(todayStr())}</span></div></div>`), h(`<p class="small mut repnote">${NOTE[kind]}</p>`), body);
   $('#print', el).onclick = () => window.print();
   $('#xl', el).onclick = () => exportTables($('#rep', el), `${title} - ${scope}`);
   $('#gdrive', el).onclick = () => pdfToDrive($('#rep', el), title, o.pid ? devs.find(p => p.id === o.pid) : null);

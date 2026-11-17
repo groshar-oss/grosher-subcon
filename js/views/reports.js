@@ -85,7 +85,7 @@ export async function viewReports(kind = 'profit') {
   const title = list.find(r => r[0] === kind)[1];
   const scope = o.pid ? projects[0]?.name : 'כל הפרויקטים הפעילים';
   const body = fn({ data, sums, o, rerender });
-  $('#rep', el).append(h(`<div class="rephead"><img src="icons/icon-192.png" alt=""><div><b>${esc(title)}</b><span>${esc(tenant()?.name || '')} · ${esc(scope || '')}${usesPeriod ? ' · ' + periodText(o) : ''}${['profit', 'client', 'ohprofit'].includes(kind) ? ' · ' + esc(PROFIT_MODES[S.mode]) : ''} · הופק ${fmtDate(todayStr())}</span></div></div>`), body);
+  $('#rep', el).append(h(`<div class="rephead"><img src="icons/report-logo.png" alt=""><div><b>${esc(title)}</b><span>${esc(tenant()?.name || '')} · ${esc(scope || '')}${usesPeriod ? ' · ' + periodText(o) : ''}${['profit', 'client', 'ohprofit'].includes(kind) ? ' · ' + esc(PROFIT_MODES[S.mode]) : ''} · הופק ${fmtDate(todayStr())}</span></div></div>`), body);
   $('#print', el).onclick = () => window.print();
   $('#xl', el).onclick = () => exportTables($('#rep', el), `${title} - ${scope}`);
   $('#gdrive', el).onclick = () => pdfToDrive($('#rep', el), title, o.pid ? data.projects.find(p => p.id === o.pid) : null);
